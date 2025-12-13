@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brabant Royale CW Stats</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        min-height: 100vh;
+      }
+      header {
+        padding: 24px 16px 8px;
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: 0.02em;
+      }
+      .meta {
+        margin-top: 8px;
+        color: #cbd5e1;
+        font-size: 14px;
+      }
+      .meta button {
+        margin-left: 8px;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 6px;
+        background: #38bdf8;
+        color: #0b1221;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .meta button:hover {
+        background: #22d3ee;
+      }
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .card-title {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.01em;
+      }
+      .copy-btn {
+        padding: 6px 10px;
+        border: 1px solid #38bdf8;
+        border-radius: 6px;
+        background: #0ea5e9;
+        color: #0b1221;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .copy-btn:hover {
+        background: #22d3ee;
+      }
+      .text-block {
+        font-family: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+        background: #0b1221;
+        border: 1px dashed #1f2937;
+        border-radius: 8px;
+        padding: 12px;
+        min-height: 140px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        cursor: pointer;
+      }
+      .status {
+        min-height: 18px;
+        font-size: 12px;
+        color: #a5f3fc;
+      }
+      .error {
+        color: #fecdd3;
+        text-align: center;
+        margin: 10px auto;
+      }
+      @media (max-width: 600px) {
+        h1 {
+          font-size: 22px;
+        }
+        .text-block {
+          min-height: 120px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Brabant Royale CW Stats</h1>
+      <div class="meta">
+        <span id="last-updated">Last updated: —</span>
+        <button id="refresh-btn" type="button">Refresh</button>
+      </div>
+      <div class="error" id="error"></div>
+    </header>
+
+    <main>
+      <section class="card" data-section="race">
+        <div class="card-header">
+          <h2 class="card-title">Race</h2>
+          <button class="copy-btn" data-copy="race">Copy</button>
+        </div>
+        <div class="text-block" id="race-text" tabindex="0"></div>
+        <div class="status" id="race-status"></div>
+      </section>
+
+      <section class="card" data-section="clan">
+        <div class="card-header">
+          <h2 class="card-title">Clan Stats</h2>
+          <button class="copy-btn" data-copy="clan">Copy</button>
+        </div>
+        <div class="text-block" id="clan-text" tabindex="0"></div>
+        <div class="status" id="clan-status"></div>
+      </section>
+
+      <section class="card" data-section="battles">
+        <div class="card-header">
+          <h2 class="card-title">Battles left (today)</h2>
+          <button class="copy-btn" data-copy="battles">Copy</button>
+        </div>
+        <div class="text-block" id="battles-text" tabindex="0"></div>
+        <div class="status" id="battles-status"></div>
+      </section>
+    </main>
+
+    <script>
+      const apiUrl = "/api/cwstats";
+      const lastUpdatedEl = document.getElementById("last-updated");
+      const errorEl = document.getElementById("error");
+
+      const fields = {
+        race: {
+          textEl: document.getElementById("race-text"),
+          statusEl: document.getElementById("race-status"),
+        },
+        clan: {
+          textEl: document.getElementById("clan-text"),
+          statusEl: document.getElementById("clan-status"),
+        },
+        battles: {
+          textEl: document.getElementById("battles-text"),
+          statusEl: document.getElementById("battles-status"),
+        },
+      };
+
+      function setStatus(key, msg) {
+        const statusEl = fields[key]?.statusEl;
+        if (statusEl) {
+          statusEl.textContent = msg || "";
+        }
+      }
+
+      async function copyText(key) {
+        const textEl = fields[key]?.textEl;
+        const statusEl = fields[key]?.statusEl;
+        if (!textEl) return;
+        const text = textEl.textContent || "";
+        if (!text.trim()) return;
+
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(key, "Copied!");
+          setTimeout(() => setStatus(key, ""), 1200);
+        } catch (err) {
+          setStatus(key, "Copy failed");
+          console.error(err);
+        }
+      }
+
+      async function fetchStats() {
+        errorEl.textContent = "";
+        lastUpdatedEl.textContent = "Last updated: laden...";
+        Object.keys(fields).forEach((k) => setStatus(k, ""));
+
+        try {
+          const resp = await fetch(`${apiUrl}?t=${Date.now()}`, {
+            cache: "no-store",
+          });
+          if (!resp.ok) {
+            throw new Error(`API error ${resp.status}`);
+          }
+          const data = await resp.json();
+          if (!data.ok) {
+            throw new Error(data.error || "Onbekende fout van API");
+          }
+
+          fields.race.textEl.textContent = data.race_text || "(geen data)";
+          fields.clan.textEl.textContent = data.clan_stats_text || "(geen data)";
+          fields.battles.textEl.textContent =
+            data.battles_left_text || "(geen data)";
+
+          const updated = new Date();
+          lastUpdatedEl.textContent = `Last updated: ${updated.toLocaleString()}`;
+        } catch (err) {
+          errorEl.textContent = err.message || String(err);
+          lastUpdatedEl.textContent = "Last updated: —";
+          console.error(err);
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        document
+          .getElementById("refresh-btn")
+          .addEventListener("click", fetchStats);
+
+        document.querySelectorAll(".copy-btn").forEach((btn) => {
+          btn.addEventListener("click", () => copyText(btn.dataset.copy));
+        });
+
+        Object.entries(fields).forEach(([key, { textEl }]) => {
+          textEl.addEventListener("click", () => copyText(key));
+          textEl.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter" || ev.key === " ") {
+              ev.preventDefault();
+              copyText(key);
+            }
+          });
+        });
+
+        fetchStats();
+      });
+    </script>
+  </body>
+</html>
