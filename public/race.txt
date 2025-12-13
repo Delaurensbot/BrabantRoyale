@@ -1,14 +1,14 @@
 Race standings (top 5):
-1. 🏆 Brabant Royale — Fame: 176 | Trophy: 4535
-2. 🏆 TRACINABEACH — Fame: 159 | Trophy: 4557
-3. 🏆 #RoFriends Ac — Fame: 150 | Trophy: 4571
-4. 🏆 Rebellion’ — Fame: 176 | Trophy: 4619
-5. 🏆 Jesus Christ — Fame: 185 | Trophy: 4750
-Avg fame (top 5): 169.29
+1. 🏆 Brabant Royale — Fame: 174 | Trophy: 4535
+2. 🏆 TRACINABEACH — Fame: 162 | Trophy: 4557
+3. 🏆 #RoFriends Ac — Fame: 149 | Trophy: 4571
+4. 🏆 Jesus Christ — Fame: 184 | Trophy: 4750
+5. 🏆 Rebellion’ — Fame: 176 | Trophy: 4619
+Avg fame (top 5): 168.85
 
 Clan Stats:
-📊 avg ?    ⚔️ Battles left: 135    🤝 Duels left: 33    🎯 Projected Finish 35,100 (2nd)
-🏁 Best Possible Finish 41,750 (1st)    💀 Worst Possible Finish 24,950 (5th)
+📊 avg ?    ⚔️ Battles left: 130    🤝 Duels left: 32    🎯 Projected Finish 34,650 (3rd)
+🏁 Best Possible Finish 41,350 (1st)    💀 Worst Possible Finish 25,150 (5th)
 
 Battles left (today):
 
@@ -43,7 +43,6 @@ Battles left (today):
 - <c2>Erik
 - Blommmmie
 - lau
-- Mattia
 - Ronskimon
 - Atack1
 - Delaurens2
@@ -51,4 +50,3 @@ Battles left (today):
 🟩 1 attack left:
 - siebe
 - koko.D-B
-- Kevinn
