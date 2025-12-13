@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clan War Stats</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f172a;
+        --card: #1f2937;
+        --text: #e5e7eb;
+        --accent: #22c55e;
+        --muted: #94a3b8;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: linear-gradient(145deg, var(--bg), #0b1020);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      .page {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      h1 {
+        font-size: 32px;
+        margin: 0 0 8px;
+        letter-spacing: -0.5px;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        color: var(--muted);
+      }
+
+      button {
+        cursor: pointer;
+        border: 1px solid #334155;
+        background: #111827;
+        color: var(--text);
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-weight: 600;
+        transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+      }
+
+      button:hover {
+        background: #0b162b;
+        border-color: #475569;
+        transform: translateY(-1px);
+      }
+
+      button:active {
+        transform: translateY(0);
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        margin-top: 20px;
+      }
+
+      .card {
+        background: linear-gradient(135deg, rgba(31, 41, 55, 0.9), rgba(30, 41, 59, 0.9));
+        border: 1px solid #1f2937;
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 240px;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .card-title {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .copyable {
+        font-family: "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+        background: #0b1020;
+        border: 1px solid #1f2937;
+        border-radius: 10px;
+        padding: 14px;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        flex: 1 1 auto;
+        overflow: auto;
+        cursor: pointer;
+        transition: border-color 120ms ease;
+      }
+
+      .copyable:hover {
+        border-color: #334155;
+      }
+
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+        min-height: 18px;
+      }
+
+      .error {
+        margin-top: 12px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #3f1d2b;
+        color: #fecdd3;
+        border: 1px solid #fb7185;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <h1>Clan War Stats</h1>
+        <div class="meta">
+          <span id="last-updated">Last updated: —</span>
+          <button id="refresh-btn" type="button">Refresh</button>
+        </div>
+        <div id="error" class="error" style="display: none"></div>
+      </header>
+
+      <div class="grid">
+        <section class="card" data-block="race">
+          <div class="card-header">
+            <h2 class="card-title">Race</h2>
+            <button class="copy-btn" data-target="race">Copy</button>
+          </div>
+          <pre id="race-text" class="copyable" tabindex="0"></pre>
+          <div id="race-status" class="status"></div>
+        </section>
+
+        <section class="card" data-block="clan">
+          <div class="card-header">
+            <h2 class="card-title">Clan Stats</h2>
+            <button class="copy-btn" data-target="clan">Copy</button>
+          </div>
+          <pre id="clan-text" class="copyable" tabindex="0"></pre>
+          <div id="clan-status" class="status"></div>
+        </section>
+
+        <section class="card" data-block="battles">
+          <div class="card-header">
+            <h2 class="card-title">Battles left (today)</h2>
+            <button class="copy-btn" data-target="battles">Copy</button>
+          </div>
+          <pre id="battles-text" class="copyable" tabindex="0"></pre>
+          <div id="battles-status" class="status"></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const lastUpdatedEl = document.getElementById("last-updated");
+      const errorEl = document.getElementById("error");
+
+      const fields = {
+        race: {
+          text: document.getElementById("race-text"),
+          status: document.getElementById("race-status"),
+        },
+        clan: {
+          text: document.getElementById("clan-text"),
+          status: document.getElementById("clan-status"),
+        },
+        battles: {
+          text: document.getElementById("battles-text"),
+          status: document.getElementById("battles-status"),
+        },
+      };
+
+      function setText(target, text) {
+        fields[target].text.textContent = text || "(geen data)";
+      }
+
+      function setStatus(target, message) {
+        fields[target].status.textContent = message || "";
+      }
+
+      function showError(message) {
+        if (message) {
+          errorEl.style.display = "block";
+          errorEl.textContent = message;
+        } else {
+          errorEl.style.display = "none";
+          errorEl.textContent = "";
+        }
+      }
+
+      async function copyToClipboard(target) {
+        const text = fields[target].text.textContent.trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(target, "Copied!");
+          setTimeout(() => setStatus(target, ""), 1200);
+        } catch (err) {
+          setStatus(target, "Kopiëren mislukt");
+        }
+      }
+
+      async function fetchData() {
+        showError("");
+        Object.keys(fields).forEach((key) => setStatus(key, ""));
+
+        const url = `/api/cwstats?t=${Date.now()}`;
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) {
+            throw new Error(`API error (${res.status})`);
+          }
+          const data = await res.json();
+          if (!data.ok) {
+            throw new Error(data.error || "Onbekende fout");
+          }
+
+          setText("race", data.race_text);
+          setText("clan", data.clan_stats_text);
+          setText("battles", data.battles_left_text);
+
+          const now = new Date();
+          lastUpdatedEl.textContent = `Last updated: ${now.toLocaleString()}`;
+        } catch (err) {
+          showError(err.message || "Ophalen mislukt");
+        }
+      }
+
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", () => copyToClipboard(btn.dataset.target));
+      });
+
+      document.querySelectorAll(".copyable").forEach((el) => {
+        el.addEventListener("click", () => {
+          const block = el.id.replace("-text", "");
+          copyToClipboard(block);
+        });
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", fetchData);
+
+      fetchData();
+    </script>
+  </body>
+</html>
