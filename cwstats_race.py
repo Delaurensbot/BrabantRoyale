@@ -1,40 +1,12 @@
-#!/usr/bin/env python3
-"""
-Generate CW race stats output and JSON for the Next.js dashboard.
-Scraping logic is based on the original cwstats_race script: we parse race rows,
-clan stats, and battles-left data from cwstats.com.
-"""
-from __future__ import annotations
-
-import argparse
-import json
+# cwstats_race.py
 import re
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Dict, List, Optional
-
+import argparse
 import requests
 from bs4 import BeautifulSoup
 
-ROW_RE = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
-RANK_RE = re.compile(r"(\d+)(st|nd|rd|th)?", re.IGNORECASE)
-
-DEFAULT_URL = "https://cwstats.com/clan/9YP8UY/race"
-
-
-@dataclass
-class ClanStats:
-    avg: Optional[float]
-    battles_left: Optional[int]
-    duels_left: Optional[int]
-    projected_finish_value: Optional[int]
-    projected_finish_rank: Optional[str]
-    best_possible_finish: Optional[int]
-    best_possible_rank: Optional[str]
-    worst_possible_finish: Optional[int]
-    worst_possible_rank: Optional[str]
-
+ROW_RE = re.compile(
+    r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$"
+)
 
 def fetch_soup(url: str) -> BeautifulSoup:
     r = requests.get(
@@ -46,11 +18,11 @@ def fetch_soup(url: str) -> BeautifulSoup:
 
     soup = BeautifulSoup(r.text, "html.parser")
 
+    # Verwijder tags die soms ruis geven in text parsing
     for t in soup(["script", "style", "noscript"]):
         t.decompose()
 
     return soup
-
 
 def parse_race_rows(soup: BeautifulSoup):
     rows = []
@@ -58,6 +30,8 @@ def parse_race_rows(soup: BeautifulSoup):
 
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
+
+        # Race links lijken op: /clan/9YP8UY/race
         if not re.fullmatch(r"/clan/[A-Z0-9]+/race", href):
             continue
 
@@ -71,6 +45,8 @@ def parse_race_rows(soup: BeautifulSoup):
 
         rank = int(m.group(1))
         name = m.group(2).strip()
+
+        # Alleen trophy en fame gebruiken voor output
         trophy = int(m.group(3))
         fame = float(m.group(6).replace(",", "."))
 
@@ -91,7 +67,6 @@ def parse_race_rows(soup: BeautifulSoup):
     rows.sort(key=lambda x: x["rank"])
     return rows
 
-
 def _find_clan_stats_container(soup: BeautifulSoup):
     node = soup.find(string=re.compile(r"\bClan\s+Stats\b", re.IGNORECASE))
     if not node:
@@ -108,20 +83,7 @@ def _find_clan_stats_container(soup: BeautifulSoup):
 
     return None
 
-
-def _parse_int(token: Optional[str]) -> Optional[int]:
-    if not token:
-        return None
-    token = token.replace(",", "")
-    if token.isdigit():
-        return int(token)
-    m = re.search(r"\d+", token)
-    if m:
-        return int(m.group(0))
-    return None
-
-
-def parse_clan_stats(soup: BeautifulSoup) -> Optional[ClanStats]:
+def parse_clan_stats(soup: BeautifulSoup):
     container = _find_clan_stats_container(soup)
     if not container:
         return None
@@ -129,13 +91,13 @@ def parse_clan_stats(soup: BeautifulSoup) -> Optional[ClanStats]:
     tokens = [t.strip() for t in container.stripped_strings if t and t.strip()]
     lower = [t.lower() for t in tokens]
 
-    def value_after(label: str) -> Optional[str]:
-        ll = label.lower()
+    def next_int_after(label: str):
+        label_l = label.lower()
         for i, tok in enumerate(lower):
-            if tok == ll:
+            if tok == label_l:
                 for j in range(i + 1, min(i + 6, len(tokens))):
-                    if re.fullmatch(r"[\d,\.]+", tokens[j]):
-                        return tokens[j]
+                    if re.fullmatch(r"\d+", tokens[j]):
+                        return int(tokens[j])
         return None
 
     def pick_rank_and_value(finish_label: str):
@@ -144,8 +106,12 @@ def parse_clan_stats(soup: BeautifulSoup) -> Optional[ClanStats]:
             if tok == fl:
                 rank = None
                 value = None
+
+                # rank staat vaak direct ervoor (bijv. "3rd")
                 if i - 1 >= 0 and re.fullmatch(r"\d+(st|nd|rd|th)", lower[i - 1]):
                     rank = tokens[i - 1]
+
+                # value staat vaak direct erna (bijv. "34,650")
                 if i + 1 < len(tokens) and re.fullmatch(r"[\d,]+", tokens[i + 1]):
                     value = tokens[i + 1]
                 else:
@@ -153,49 +119,95 @@ def parse_clan_stats(soup: BeautifulSoup) -> Optional[ClanStats]:
                         if re.fullmatch(r"[\d,]+", tokens[j]):
                             value = tokens[j]
                             break
+
                 return rank, value
         return None, None
 
-    avg_raw = value_after("Avg") or value_after("Average")
-    battles_raw = value_after("Battles") or value_after("Battles left")
-    duels_raw = value_after("Duels") or value_after("Duels left")
+    battles_left = next_int_after("BATTLES LEFT")
+    duels_left = next_int_after("DUELS LEFT")
 
-    projected_rank, projected_value = pick_rank_and_value("Projected Finish")
-    best_rank, best_value = pick_rank_and_value("Best Possible Finish")
-    worst_rank, worst_value = pick_rank_and_value("Worst Possible Finish")
+    projected_rank, projected_finish = pick_rank_and_value("Projected Finish")
+    best_rank, best_finish = pick_rank_and_value("Best Possible Finish")
+    worst_rank, worst_finish = pick_rank_and_value("Worst Possible Finish")
 
-    return ClanStats(
-        avg=_parse_float(avg_raw),
-        battles_left=_parse_int(battles_raw),
-        duels_left=_parse_int(duels_raw),
-        projected_finish_value=_parse_int(projected_value),
-        projected_finish_rank=projected_rank,
-        best_possible_finish=_parse_int(best_value),
-        best_possible_rank=best_rank,
-        worst_possible_finish=_parse_int(worst_value),
-        worst_possible_rank=worst_rank,
+    # Losse avg-waarde (bijv. 172.34) ergens in de container
+    avg_value = None
+    for t in tokens:
+        if re.fullmatch(r"\d+\.\d{2}", t):
+            avg_value = t
+            break
+
+    return {
+        "avg_value": avg_value,
+        "battles_left": battles_left,
+        "duels_left": duels_left,
+        "projected_rank": projected_rank,
+        "projected_finish": projected_finish,
+        "best_rank": best_rank,
+        "best_finish": best_finish,
+        "worst_rank": worst_rank,
+        "worst_finish": worst_finish,
+    }
+
+def _rank_en(rank_str: str | None):
+    if not rank_str:
+        return ""
+    m = re.fullmatch(r"(\d+)(st|nd|rd|th)", rank_str.strip().lower())
+    if not m:
+        return rank_str
+    return f"{m.group(1)}e"
+
+def _avg_to_comma(avg_str: str | None):
+    if not avg_str:
+        return ""
+    try:
+        val = float(avg_str.replace(",", "."))
+        return f"{val:.2f}".replace(".", ",")
+    except ValueError:
+        return avg_str.replace(".", ",")
+
+def format_race_rows(rows):
+    out = []
+    for r in rows:
+        out.append(
+            f"{r['rank']}. {r['name']}\n"
+            f"   🏆 {r['trophy']}\n"
+            f"   avg {r['fame']:.2f}\n"
+        )
+    return "\n".join(out).rstrip()
+
+def format_clan_stats(stats):
+    if not stats:
+        return ""
+
+    avg = _avg_to_comma(stats.get("avg_value"))
+    battles = "" if stats.get("battles_left") is None else str(stats["battles_left"])
+    duels = "" if stats.get("duels_left") is None else str(stats["duels_left"])
+
+    proj_finish = stats.get("projected_finish") or ""
+    best_finish = stats.get("best_finish") or ""
+    worst_finish = stats.get("worst_finish") or ""
+
+    proj_rank = _rank_en(stats.get("projected_rank"))
+    best_rank = _rank_en(stats.get("best_rank"))
+    worst_rank = _rank_en(stats.get("worst_rank"))
+
+    line1 = (
+        "Clan Stats:\n"
+        f"📊 avg {avg}    ⚔️ Battles left: {battles}    🤝 Duels left: {duels}    "
+        f"🎯 Projected Finish {proj_finish} ({proj_rank})"
+    )
+    line2 = (
+        f"🏁 Best Possible Finish {best_finish} ({best_rank})    "
+        f"💀 Worst Possible Finish {worst_finish} ({worst_rank})"
     )
 
-
-def _parse_float(token: Optional[str]) -> Optional[float]:
-    if not token:
-        return None
-    token = token.replace(" ", "").replace(",", ".")
-    try:
-        return float(token)
-    except ValueError:
-        m = re.search(r"\d+[\.,]\d+", token)
-        if m:
-            try:
-                return float(m.group(0).replace(",", "."))
-            except ValueError:
-                return None
-    return None
-
+    return line1.rstrip() + "\n" + line2.rstrip()
 
 def _find_battles_left_table(soup: BeautifulSoup):
     want = {"player", "decks used today"}
     for table in soup.find_all("table"):
+        # headers kunnen in <th> staan, of in de eerste <tr> als <td>
         header_cells = table.find_all("th")
         if header_cells:
             headers = [c.get_text(" ", strip=True).lower() for c in header_cells]
@@ -208,14 +220,21 @@ def _find_battles_left_table(soup: BeautifulSoup):
         header_set = set(h.strip() for h in headers if h.strip())
         if want.issubset(header_set):
             return table
+
     return None
 
-
 def parse_battles_left_today(soup: BeautifulSoup):
+    """
+    We gebruiken 'Decks Used Today':
+    - 4 betekent klaar (0 attacks left)
+    - remaining = 4 - decks_used_today
+    We tonen alleen remaining 4,3,2,1.
+    """
     table = _find_battles_left_table(soup)
     if not table:
         return None
 
+    # bepaal kolom-indexen
     header_row = table.find("tr")
     if not header_row:
         return None
@@ -235,8 +254,9 @@ def parse_battles_left_today(soup: BeautifulSoup):
     if idx_player is None or idx_today is None:
         return None
 
-    buckets: Dict[int, List[str]] = {4: [], 3: [], 2: [], 1: []}
+    buckets = {4: [], 3: [], 2: [], 1: []}
 
+    # rows
     for tr in table.find_all("tr")[1:]:
         tds = tr.find_all(["td", "th"])
         if not tds or len(tds) <= max(idx_player, idx_today):
@@ -255,52 +275,9 @@ def parse_battles_left_today(soup: BeautifulSoup):
 
     return buckets
 
-
-def format_race_rows(rows):
-    top5 = rows[:5]
-    parts = ["Race standings (top 5):"]
-    for idx, row in enumerate(top5, 1):
-        parts.append(
-            f"{idx}. 🏆 {row['name']} — Fame: {row['fame']:.0f} | Trophy: {row['trophy']}"
-        )
-    if top5:
-        avg = sum(r["fame"] for r in top5) / len(top5)
-        parts.append(f"Avg fame (top 5): {avg:,.2f}")
-    return "\n".join(parts).rstrip()
-
-
-def format_clan_stats(stats: Optional[ClanStats]):
-    if not stats:
-        return "Clan Stats:\nGeen data gevonden."
-
-    def fmt_num(val: Optional[float | int]):
-        if val is None:
-            return "?"
-        if isinstance(val, float):
-            # European-style decimal formatting (172,34)
-            formatted = f"{val:,.2f}"
-            return formatted.replace(",", "¤").replace(".", ",").replace("¤", ".")
-        return f"{val:,}"
-
-    projected_val = fmt_num(stats.projected_finish_value)
-    best_val = fmt_num(stats.best_possible_finish)
-    worst_val = fmt_num(stats.worst_possible_finish)
-
-    projected_rank = stats.projected_finish_rank or "?"
-    best_rank = stats.best_possible_rank or "?"
-    worst_rank = stats.worst_possible_rank or "?"
-
-    lines = [
-        "Clan Stats:",
-        f"📊 avg {fmt_num(stats.avg)}    ⚔️ Battles left: {fmt_num(stats.battles_left)}    🤝 Duels left: {fmt_num(stats.duels_left)}    🎯 Projected Finish {projected_val} ({projected_rank})",
-        f"🏁 Best Possible Finish {best_val} ({best_rank})    💀 Worst Possible Finish {worst_val} ({worst_rank})",
-    ]
-    return "\n".join(lines)
-
-
 def format_battles_left_today(buckets):
     if not buckets:
-        return "Battles left (today):\nGeen tabel gevonden voor 'Decks Used Today'."
+        return ""
 
     def block(label, players):
         if not players:
@@ -311,76 +288,48 @@ def format_battles_left_today(buckets):
         return "\n".join(lines)
 
     parts = ["Battles left (today):"]
+
+    # 4 attacks left = 0 decks used today
     parts.append(block("🟥 4 attacks left:", buckets.get(4, [])))
     parts.append(block("🟧 3 attacks left:", buckets.get(3, [])))
     parts.append(block("🟨 2 attacks left:", buckets.get(2, [])))
     parts.append(block("🟩 1 attack left:", buckets.get(1, [])))
 
+    # verwijder lege blocks en dubbele lege regels
     cleaned = []
     for part in parts:
         if part and part.strip():
             cleaned.append(part.strip())
     return "\n\n".join(cleaned).rstrip()
 
-
-def build_copy_all_text(race_text: str, clan_text: str, battles_text: str) -> str:
-    parts = [race_text.strip(), clan_text.strip(), battles_text.strip()]
-    return "\n\n".join([p for p in parts if p]).strip()
-
-
-def write_files(data: dict, race_text: str, public_dir: Path) -> None:
-    public_dir.mkdir(parents=True, exist_ok=True)
-    data_path = public_dir / "data.json"
-    race_path = public_dir / "race.txt"
-
-    data_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    race_path.write_text(race_text, encoding="utf-8")
-    print(f"geschreven: {data_path}")
-    print(f"geschreven: {race_path}")
-
-
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=DEFAULT_URL)
-    ap.add_argument("--public-dir", default="public")
+    ap.add_argument("--url", default="https://cwstats.com/clan/9YP8UY/race")
     args = ap.parse_args()
 
     soup = fetch_soup(args.url)
 
     rows = parse_race_rows(soup)
     if not rows:
-        raise SystemExit("Geen race-rows gevonden. Mogelijk is de pagina-structuur veranderd.")
+        print("Geen race-rows gevonden. Mogelijk is de pagina-structuur veranderd.")
+        return
 
     stats = parse_clan_stats(soup)
     buckets = parse_battles_left_today(soup)
 
-    race_text = format_race_rows(rows)
+    output_parts = [format_race_rows(rows)]
+
     stats_text = format_clan_stats(stats)
+    if stats_text:
+        output_parts.append(stats_text)
+
     battles_left_text = format_battles_left_today(buckets)
+    if battles_left_text:
+        output_parts.append(battles_left_text)
+    else:
+        output_parts.append("Battles left (today):\nGeen tabel gevonden voor 'Decks Used Today'. Mogelijk is de pagina-structuur veranderd.")
 
-    copy_all_text = build_copy_all_text(race_text, stats_text, battles_left_text)
-
-    now = datetime.now(timezone.utc)
-    generated_at_iso = now.isoformat().replace("+00:00", "Z")
-    generated_at_epoch_ms = int(now.timestamp() * 1000)
-    update_interval_seconds = 300
-
-    data = {
-        "generated_at_iso": generated_at_iso,
-        "generated_at_epoch_ms": generated_at_epoch_ms,
-        "update_interval_seconds": update_interval_seconds,
-        "sections": {
-            "race": {"title": "Race", "text": race_text},
-            "clan_stats": {"title": "Clan Stats", "text": stats_text},
-            "battles_left": {"title": "Battles left (today)", "text": battles_left_text},
-        },
-        "copy_all_text": copy_all_text,
-    }
-
-    write_files(data, copy_all_text, Path(args.public_dir))
-
-    print("Klaar: data.json en race.txt bijgewerkt.")
-
+    print("\n\n".join(output_parts).rstrip())
 
 if __name__ == "__main__":
     main()
