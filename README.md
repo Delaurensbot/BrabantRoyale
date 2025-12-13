@@ -31,6 +31,12 @@ The workflow `.github/workflows/update-cwstats.yml`:
 - Executes `python cwstats_race.py --url "https://cwstats.com/clan/9YP8UY/race"`.
 - Commits and pushes only when generated files change.
 
+### How to verify the workflow
+- **Trigger a manual run:** In GitHub, go to **Actions → Update CW Stats → Run workflow** and pick the default branch. A successful run shows a green checkmark; click the job to see detailed logs for each step.
+- **Confirm files were updated:** After a green run, check the repo history for commits titled `chore: update CW stats data` or browse `public/data.json` / `public/race.txt` in the default branch to confirm fresh timestamps/content.
+- **Inspect scheduled runs:** On the Actions page, the runs list should show entries every ~5 minutes. If a run is missing or red, open it to view the failing step and error message.
+- **Test locally with the same command:** From your machine or a Codespace, run `python cwstats_race.py --url "https://cwstats.com/clan/9YP8UY/race" --public-dir public` to make sure the scraper still succeeds outside of CI.
+
 ## Deploying on Vercel
 
 1. In Vercel, choose **Import Project** and select this GitHub repository.
