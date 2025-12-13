@@ -1,0 +1,25 @@
+Race standings (top 5):
+1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000
+2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900
+3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850
+4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800
+5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750
+Avg fame (top 5): 11,010.00
+
+Clan Stats:
+📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)
+🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)
+
+Battles left (today):
+🟥 4 attacks left:
+- Alice
+- Bob
+
+🟧 3 attacks left:
+- Carol
+
+🟨 2 attacks left:
+- Dave
+
+🟩 1 attack left:
+- Eve
