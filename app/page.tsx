@@ -70,7 +70,7 @@ export default function Page() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/data.json?ts=${Date.now()}`);
+      const res = await fetch(`/data.json?ts=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`Failed to fetch data (${res.status})`);
       const payload = (await res.json()) as DashboardData;
       setData(payload);
@@ -85,6 +85,21 @@ export default function Page() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    const intervalMs = Math.max(
+      (data.update_interval_seconds || DEFAULT_INTERVAL_SECONDS) * 1000,
+      5000
+    );
+
+    const id = setInterval(() => {
+      if (!isLoading) {
+        fetchData();
+      }
+    }, intervalMs);
+
+    return () => clearInterval(id);
+  }, [data.update_interval_seconds, fetchData, isLoading]);
 
   const copyText = useCallback(async (text: string) => {
     try {
@@ -141,19 +156,23 @@ export default function Page() {
 
       <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {cards.map(({ key, section }) => (
-          <button
-            key={key}
-            onClick={() => copyText(section.text)}
-            className="card w-full text-left p-5 focus:outline-none"
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">{section.title}</h2>
-              <span className="text-xs text-gray-400">Click to copy</span>
+          <article key={key} className="card w-full p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">{section.title}</h2>
+                <p className="text-xs text-gray-400">Updated live from the latest data feed.</p>
+              </div>
+              <button
+                onClick={() => copyText(section.text)}
+                className="rounded-md border border-gray-600 px-3 py-1 text-xs font-semibold text-gray-100 transition hover:border-emerald-500 hover:text-emerald-200"
+              >
+                Copy
+              </button>
             </div>
             <div className="mt-3 rounded-lg bg-black/20 p-3 text-sm font-mono text-gray-100 border border-white/5">
               <pre>{section.text || "No data"}</pre>
             </div>
-          </button>
+          </article>
         ))}
       </section>
 
