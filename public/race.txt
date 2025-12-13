@@ -1,25 +1,54 @@
 Race standings (top 5):
-1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000
-2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900
-3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850
-4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800
-5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750
-Avg fame (top 5): 11,010.00
+1. 🏆 Brabant Royale — Fame: 176 | Trophy: 4535
+2. 🏆 TRACINABEACH — Fame: 159 | Trophy: 4557
+3. 🏆 #RoFriends Ac — Fame: 150 | Trophy: 4571
+4. 🏆 Rebellion’ — Fame: 176 | Trophy: 4619
+5. 🏆 Jesus Christ — Fame: 185 | Trophy: 4750
+Avg fame (top 5): 169.29
 
 Clan Stats:
-📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)
-🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)
+📊 avg ?    ⚔️ Battles left: 135    🤝 Duels left: 33    🎯 Projected Finish 35,100 (2nd)
+🏁 Best Possible Finish 41,750 (1st)    💀 Worst Possible Finish 24,950 (5th)
 
 Battles left (today):
+
 🟥 4 attacks left:
-- Alice
-- Bob
-
-🟧 3 attacks left:
-- Carol
-
-🟨 2 attacks left:
-- Dave
+- Insane Jerk
+- Sevenfold
+- js
+- ItsNub
+- PAPENSLAYER530
+- Presmyla
+- Tijn
+- JarnodV05
+- Davey
+- Angelique
+- Danielnierop
+- superflo
+- <6>jotjot
+- Timmermanskes
+- Hatsjiu
+- AlonVDV
+- Daddy Derp
+- Timbaaahhh
+- SjefS
+- Mark
+- Rafer
+- Sir Duc
+- yo
+- ruurd
+- JD
+- Sjoerd
+- angel
+- <c2>Erik
+- Blommmmie
+- lau
+- Mattia
+- Ronskimon
+- Atack1
+- Delaurens2
 
 🟩 1 attack left:
-- Eve
+- siebe
+- koko.D-B
+- Kevinn

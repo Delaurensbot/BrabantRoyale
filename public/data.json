@@ -1,20 +1,20 @@
 {
-  "generated_at_iso": "2025-01-01T00:00:00Z",
-  "generated_at_epoch_ms": 1735689600000,
+  "generated_at_iso": "2025-12-13T13:17:58.234873Z",
+  "generated_at_epoch_ms": 1765631878234,
   "update_interval_seconds": 300,
   "sections": {
     "race": {
       "title": "Race",
-      "text": "Race standings (top 5):\n1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000\n2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900\n3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850\n4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800\n5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750\nAvg fame (top 5): 11,010.00"
+      "text": "Race standings (top 5):\n1. 🏆 Brabant Royale — Fame: 176 | Trophy: 4535\n2. 🏆 TRACINABEACH — Fame: 159 | Trophy: 4557\n3. 🏆 #RoFriends Ac — Fame: 150 | Trophy: 4571\n4. 🏆 Rebellion’ — Fame: 176 | Trophy: 4619\n5. 🏆 Jesus Christ — Fame: 185 | Trophy: 4750\nAvg fame (top 5): 169.29"
     },
     "clan_stats": {
       "title": "Clan Stats",
-      "text": "Clan Stats:\n📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)\n🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)"
+      "text": "Clan Stats:\n📊 avg ?    ⚔️ Battles left: 135    🤝 Duels left: 33    🎯 Projected Finish 35,100 (2nd)\n🏁 Best Possible Finish 41,750 (1st)    💀 Worst Possible Finish 24,950 (5th)"
     },
     "battles_left": {
       "title": "Battles left (today)",
-      "text": "Battles left (today):\n🟥 4 attacks left:\n- Alice\n- Bob\n\n🟧 3 attacks left:\n- Carol\n\n🟨 2 attacks left:\n- Dave\n\n🟩 1 attack left:\n- Eve"
+      "text": "Battles left (today):\n\n🟥 4 attacks left:\n- Insane Jerk\n- Sevenfold\n- js\n- ItsNub\n- PAPENSLAYER530\n- Presmyla\n- Tijn\n- JarnodV05\n- Davey\n- Angelique\n- Danielnierop\n- superflo\n- <6>jotjot\n- Timmermanskes\n- Hatsjiu\n- AlonVDV\n- Daddy Derp\n- Timbaaahhh\n- SjefS\n- Mark\n- Rafer\n- Sir Duc\n- yo\n- ruurd\n- JD\n- Sjoerd\n- angel\n- <c2>Erik\n- Blommmmie\n- lau\n- Mattia\n- Ronskimon\n- Atack1\n- Delaurens2\n\n🟩 1 attack left:\n- siebe\n- koko.D-B\n- Kevinn"
     }
   },
-  "copy_all_text": "Race standings (top 5):\n1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000\n2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900\n3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850\n4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800\n5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750\nAvg fame (top 5): 11,010.00\n\nClan Stats:\n📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)\n🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)\n\nBattles left (today):\n🟥 4 attacks left:\n- Alice\n- Bob\n\n🟧 3 attacks left:\n- Carol\n\n🟨 2 attacks left:\n- Dave\n\n🟩 1 attack left:\n- Eve"
+  "copy_all_text": "Race standings (top 5):\n1. 🏆 Brabant Royale — Fame: 176 | Trophy: 4535\n2. 🏆 TRACINABEACH — Fame: 159 | Trophy: 4557\n3. 🏆 #RoFriends Ac — Fame: 150 | Trophy: 4571\n4. 🏆 Rebellion’ — Fame: 176 | Trophy: 4619\n5. 🏆 Jesus Christ — Fame: 185 | Trophy: 4750\nAvg fame (top 5): 169.29\n\nClan Stats:\n📊 avg ?    ⚔️ Battles left: 135    🤝 Duels left: 33    🎯 Projected Finish 35,100 (2nd)\n🏁 Best Possible Finish 41,750 (1st)    💀 Worst Possible Finish 24,950 (5th)\n\nBattles left (today):\n\n🟥 4 attacks left:\n- Insane Jerk\n- Sevenfold\n- js\n- ItsNub\n- PAPENSLAYER530\n- Presmyla\n- Tijn\n- JarnodV05\n- Davey\n- Angelique\n- Danielnierop\n- superflo\n- <6>jotjot\n- Timmermanskes\n- Hatsjiu\n- AlonVDV\n- Daddy Derp\n- Timbaaahhh\n- SjefS\n- Mark\n- Rafer\n- Sir Duc\n- yo\n- ruurd\n- JD\n- Sjoerd\n- angel\n- <c2>Erik\n- Blommmmie\n- lau\n- Mattia\n- Ronskimon\n- Atack1\n- Delaurens2\n\n🟩 1 attack left:\n- siebe\n- koko.D-B\n- Kevinn"
 }
