@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 
 ROW_RE = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
 RANK_RE = re.compile(r"(\d+)(st|nd|rd|th)?", re.IGNORECASE)
+DEFAULT_URL = "https://cwstats.com/clan/9YP8UY/race"
 
 
 @dataclass
@@ -42,7 +43,7 @@ def fetch_soup(url: str) -> BeautifulSoup:
     )
     r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "lxml")
+    soup = BeautifulSoup(r.text, "html.parser")
 
     for t in soup(["script", "style", "noscript"]):
         t.decompose()
@@ -339,7 +340,7 @@ def write_files(data: dict, race_text: str, public_dir: Path) -> None:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default="https://cwstats.com/clan/9YP8UY/race")
+    ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--public-dir", default="public")
     args = ap.parse_args()
 
