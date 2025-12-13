@@ -1,9 +1,9 @@
 {
-  "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "outputDirectory": ".next",
+  "builds": [
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "api/*.py", "use": "@vercel/python" }
+  ],
   "routes": [
-    { "src": "/(.*)", "dest": "/" }
+    { "src": "/", "dest": "/index.html" }
   ]
 }
