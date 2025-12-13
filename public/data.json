@@ -1,0 +1,20 @@
+{
+  "generated_at_iso": "2025-01-01T00:00:00Z",
+  "generated_at_epoch_ms": 1735689600000,
+  "update_interval_seconds": 300,
+  "sections": {
+    "race": {
+      "title": "Race",
+      "text": "Race standings (top 5):\n1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000\n2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900\n3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850\n4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800\n5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750\nAvg fame (top 5): 11,010.00"
+    },
+    "clan_stats": {
+      "title": "Clan Stats",
+      "text": "Clan Stats:\n📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)\n🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)"
+    },
+    "battles_left": {
+      "title": "Battles left (today)",
+      "text": "Battles left (today):\n🟥 4 attacks left:\n- Alice\n- Bob\n\n🟧 3 attacks left:\n- Carol\n\n🟨 2 attacks left:\n- Dave\n\n🟩 1 attack left:\n- Eve"
+    }
+  },
+  "copy_all_text": "Race standings (top 5):\n1. 🏆 PlayerOne — Fame: 12000 | Trophy: 6000\n2. 🏆 PlayerTwo — Fame: 11500 | Trophy: 5900\n3. 🏆 PlayerThree — Fame: 11000 | Trophy: 5850\n4. 🏆 PlayerFour — Fame: 10900 | Trophy: 5800\n5. 🏆 PlayerFive — Fame: 10650 | Trophy: 5750\nAvg fame (top 5): 11,010.00\n\nClan Stats:\n📊 avg 172,34    ⚔️ Battles left: 153    🤝 Duels left: 38    🎯 Projected Finish 34,400 (3e)\n🏁 Best Possible Finish 42,500 (1e)    💀 Worst Possible Finish 23,400 (5e)\n\nBattles left (today):\n🟥 4 attacks left:\n- Alice\n- Bob\n\n🟧 3 attacks left:\n- Carol\n\n🟨 2 attacks left:\n- Dave\n\n🟩 1 attack left:\n- Eve"
+}
