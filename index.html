@@ -1,263 +1,121 @@
 <!doctype html>
 <html lang="nl">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Clan War Stats</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        --bg: #0f172a;
-        --card: #1f2937;
-        --text: #e5e7eb;
-        --accent: #22c55e;
-        --muted: #94a3b8;
-      }
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clan War Stats</title>
+  <style>
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; }
+    h1 { margin: 0 0 10px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .muted { opacity: 0.75; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: inherit; cursor: pointer; }
+    .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card { border-radius: 16px; padding: 14px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.10); }
+    .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
+    .title { font-size: 18px; font-weight: 700; }
+    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
+    .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 8px; }
+    @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
+  </style>
+</head>
+<body>
+  <h1>Clan War Stats</h1>
+  <div class="top">
+    <div class="muted">Last updated: <span id="updated">-</span></div>
+    <button id="refresh">Refresh</button>
+    <div class="muted" id="status"></div>
+  </div>
 
-      body {
-        margin: 0;
-        font-family: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
-        background: linear-gradient(145deg, var(--bg), #0b1020);
-        color: var(--text);
-        min-height: 100vh;
-      }
+  <div class="error" id="errorBox"></div>
 
-      .page {
-        max-width: 960px;
-        margin: 0 auto;
-        padding: 32px 20px 48px;
-      }
-
-      h1 {
-        font-size: 32px;
-        margin: 0 0 8px;
-        letter-spacing: -0.5px;
-      }
-
-      .meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        align-items: center;
-        color: var(--muted);
-      }
-
-      button {
-        cursor: pointer;
-        border: 1px solid #334155;
-        background: #111827;
-        color: var(--text);
-        border-radius: 8px;
-        padding: 8px 14px;
-        font-weight: 600;
-        transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
-      }
-
-      button:hover {
-        background: #0b162b;
-        border-color: #475569;
-        transform: translateY(-1px);
-      }
-
-      button:active {
-        transform: translateY(0);
-      }
-
-      .grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        margin-top: 20px;
-      }
-
-      .card {
-        background: linear-gradient(135deg, rgba(31, 41, 55, 0.9), rgba(30, 41, 59, 0.9));
-        border: 1px solid #1f2937;
-        border-radius: 14px;
-        padding: 16px;
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        min-height: 240px;
-      }
-
-      .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .card-title {
-        margin: 0;
-        font-size: 18px;
-      }
-
-      .copyable {
-        font-family: "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
-        background: #0b1020;
-        border: 1px solid #1f2937;
-        border-radius: 10px;
-        padding: 14px;
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        flex: 1 1 auto;
-        overflow: auto;
-        cursor: pointer;
-        transition: border-color 120ms ease;
-      }
-
-      .copyable:hover {
-        border-color: #334155;
-      }
-
-      .status {
-        font-size: 13px;
-        color: var(--muted);
-        min-height: 18px;
-      }
-
-      .error {
-        margin-top: 12px;
-        padding: 12px 14px;
-        border-radius: 10px;
-        background: #3f1d2b;
-        color: #fecdd3;
-        border: 1px solid #fb7185;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="page">
-      <header>
-        <h1>Clan War Stats</h1>
-        <div class="meta">
-          <span id="last-updated">Last updated: —</span>
-          <button id="refresh-btn" type="button">Refresh</button>
-        </div>
-        <div id="error" class="error" style="display: none"></div>
-      </header>
-
-      <div class="grid">
-        <section class="card" data-block="race">
-          <div class="card-header">
-            <h2 class="card-title">Race</h2>
-            <button class="copy-btn" data-target="race">Copy</button>
-          </div>
-          <pre id="race-text" class="copyable" tabindex="0"></pre>
-          <div id="race-status" class="status"></div>
-        </section>
-
-        <section class="card" data-block="clan">
-          <div class="card-header">
-            <h2 class="card-title">Clan Stats</h2>
-            <button class="copy-btn" data-target="clan">Copy</button>
-          </div>
-          <pre id="clan-text" class="copyable" tabindex="0"></pre>
-          <div id="clan-status" class="status"></div>
-        </section>
-
-        <section class="card" data-block="battles">
-          <div class="card-header">
-            <h2 class="card-title">Battles left (today)</h2>
-            <button class="copy-btn" data-target="battles">Copy</button>
-          </div>
-          <pre id="battles-text" class="copyable" tabindex="0"></pre>
-          <div id="battles-status" class="status"></div>
-        </section>
+  <div class="grid">
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Race</div>
+        <button data-copy="race">Copy</button>
       </div>
+      <pre id="race" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="raceToast"></div>
     </div>
 
-    <script>
-      const lastUpdatedEl = document.getElementById("last-updated");
-      const errorEl = document.getElementById("error");
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Clan Stats</div>
+        <button data-copy="clan">Copy</button>
+      </div>
+      <pre id="clan" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="clanToast"></div>
+    </div>
 
-      const fields = {
-        race: {
-          text: document.getElementById("race-text"),
-          status: document.getElementById("race-status"),
-        },
-        clan: {
-          text: document.getElementById("clan-text"),
-          status: document.getElementById("clan-status"),
-        },
-        battles: {
-          text: document.getElementById("battles-text"),
-          status: document.getElementById("battles-status"),
-        },
-      };
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Battles left (today)</div>
+        <button data-copy="battles">Copy</button>
+      </div>
+      <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="battlesToast"></div>
+    </div>
+  </div>
 
-      function setText(target, text) {
-        fields[target].text.textContent = text || "(geen data)";
-      }
+<script>
+  const el = (id) => document.getElementById(id);
 
-      function setStatus(target, message) {
-        fields[target].status.textContent = message || "";
-      }
+  async function copyText(targetId) {
+    const map = { race: "race", clan: "clan", battles: "battles" };
+    const preId = map[targetId];
+    const text = el(preId).textContent || "";
+    await navigator.clipboard.writeText(text);
 
-      function showError(message) {
-        if (message) {
-          errorEl.style.display = "block";
-          errorEl.textContent = message;
-        } else {
-          errorEl.style.display = "none";
-          errorEl.textContent = "";
-        }
-      }
+    const toastId = targetId + "Toast";
+    el(toastId).textContent = "Copied!";
+    setTimeout(() => { el(toastId).textContent = ""; }, 900);
+  }
 
-      async function copyToClipboard(target) {
-        const text = fields[target].text.textContent.trim();
-        try {
-          await navigator.clipboard.writeText(text);
-          setStatus(target, "Copied!");
-          setTimeout(() => setStatus(target, ""), 1200);
-        } catch (err) {
-          setStatus(target, "Kopiëren mislukt");
-        }
-      }
+  async function fetchData() {
+    el("errorBox").style.display = "none";
+    el("status").textContent = "Loading...";
 
-      async function fetchData() {
-        showError("");
-        Object.keys(fields).forEach((key) => setStatus(key, ""));
+    const url = "/api/cwstats?t=" + Date.now();
+    const res = await fetch(url, { cache: "no-store" });
 
-        const url = `/api/cwstats?t=${Date.now()}`;
-        try {
-          const res = await fetch(url, { cache: "no-store" });
-          if (!res.ok) {
-            throw new Error(`API error (${res.status})`);
-          }
-          const data = await res.json();
-          if (!data.ok) {
-            throw new Error(data.error || "Onbekende fout");
-          }
+    if (!res.ok) {
+      el("status").textContent = "";
+      el("errorBox").style.display = "block";
+      el("errorBox").textContent = "API error (" + res.status + ")";
+      throw new Error("API error " + res.status);
+    }
 
-          setText("race", data.race_text);
-          setText("clan", data.clan_stats_text);
-          setText("battles", data.battles_left_text);
+    const data = await res.json();
+    if (!data.ok) {
+      el("status").textContent = "";
+      el("errorBox").style.display = "block";
+      el("errorBox").textContent = "API error: " + (data.error || "unknown");
+      throw new Error(data.error || "unknown");
+    }
 
-          const now = new Date();
-          lastUpdatedEl.textContent = `Last updated: ${now.toLocaleString()}`;
-        } catch (err) {
-          showError(err.message || "Ophalen mislukt");
-        }
-      }
+    el("race").textContent = data.race_text || "(geen data)";
+    el("clan").textContent = data.clan_stats_text || "(geen data)";
+    el("battles").textContent = data.battles_left_text || "(geen data)";
 
-      document.querySelectorAll(".copy-btn").forEach((btn) => {
-        btn.addEventListener("click", () => copyToClipboard(btn.dataset.target));
-      });
+    el("updated").textContent = new Date().toLocaleString();
+    el("status").textContent = "";
+  }
 
-      document.querySelectorAll(".copyable").forEach((el) => {
-        el.addEventListener("click", () => {
-          const block = el.id.replace("-text", "");
-          copyToClipboard(block);
-        });
-      });
+  // Buttons
+  el("refresh").addEventListener("click", () => fetchData());
 
-      document.getElementById("refresh-btn").addEventListener("click", fetchData);
+  document.querySelectorAll("button[data-copy]").forEach(btn => {
+    btn.addEventListener("click", () => copyText(btn.dataset.copy));
+  });
 
-      fetchData();
-    </script>
-  </body>
+  el("race").addEventListener("click", () => copyText("race"));
+  el("clan").addEventListener("click", () => copyText("clan"));
+  el("battles").addEventListener("click", () => copyText("battles"));
+
+  // Run on load too
+  fetchData().catch(() => {});
+</script>
+</body>
 </html>
