@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Recent clan joins</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
+    h1 { margin: 0 0 10px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .muted { opacity: 0.8; }
+    a { color: #67c7ff; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
+    .card { border-radius: 16px; padding: 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); margin-bottom: 18px; }
+    .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; gap: 10px; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    .filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .filters input { padding: 9px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: inherit; min-width: 180px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; margin-left: 6px; }
+    .status { margin-left: 4px; }
+    .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1 style="margin-right: 10px;">Recente clan joins</h1>
+    <a class="muted" href="/index.html">← Terug naar dashboard</a>
+  </div>
+  <div class="muted">Laatste refresh: <span id="updated">-</span></div>
+  <div class="top" style="margin-top: 10px;">
+    <button id="refresh">Refresh</button>
+    <div class="muted status" id="status"></div>
+  </div>
+  <div class="error" id="errorBox"></div>
+
+  <div class="card">
+    <div class="cardHead">
+      <div class="title">Laatste joins</div>
+      <div class="muted" id="countLabel"></div>
+    </div>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Filter op naam, tag of level..." />
+      <input id="minLevel" type="number" min="1" max="100" placeholder="Min. level" />
+    </div>
+    <div class="tableWrap">
+      <table id="joinTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Speler</th>
+            <th>Player ID</th>
+            <th>Gejoind</th>
+            <th>Account level</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody id="joinRows">
+          <tr><td colspan="6" style="text-align:center; padding: 16px;">(laden...)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    let joinData = [];
+
+    function renderTable() {
+      const tbody = el("joinRows");
+      const search = (el("search").value || "").toLowerCase();
+      const minLevelRaw = el("minLevel").value;
+      const minLevel = minLevelRaw ? parseInt(minLevelRaw, 10) : null;
+
+      const filtered = joinData.filter((row) => {
+        const haystack = `${row.name} ${row.pid} ${row.acc_lvl || ''}`.toLowerCase();
+        const passSearch = !search || haystack.includes(search);
+        const lvl = parseInt(row.acc_lvl || "0", 10);
+        const passLevel = minLevel ? lvl >= minLevel : true;
+        return passSearch && passLevel;
+      });
+
+      tbody.innerHTML = "";
+
+      if (!filtered.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.style.textAlign = "center";
+        td.style.padding = "16px";
+        td.textContent = "Geen resultaten";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        el("countLabel").textContent = "0 resultaten";
+        return;
+      }
+
+      filtered.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${row.name}</td>
+          <td><span class="pill">${row.pid}</span></td>
+          <td>${row.ago}</td>
+          <td>${row.acc_lvl || "-"}</td>
+          <td><a href="${row.url}" target="_blank" rel="noreferrer noopener">Open</a></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      el("countLabel").textContent = `${filtered.length} resultaten`;
+    }
+
+    async function fetchData() {
+      el("errorBox").style.display = "none";
+      el("status").textContent = "Bezig met laden...";
+
+      const res = await fetch(`/api/join_data?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) {
+        el("status").textContent = "";
+        el("errorBox").style.display = "block";
+        el("errorBox").textContent = `API fout (${res.status})`;
+        return;
+      }
+
+      const data = await res.json();
+      if (!data.ok) {
+        el("status").textContent = "";
+        el("errorBox").style.display = "block";
+        el("errorBox").textContent = data.error || "Onbekende fout";
+        return;
+      }
+
+      joinData = data.joins || [];
+      el("updated").textContent = new Date().toLocaleString();
+      el("countLabel").textContent = `${joinData.length} resultaten`;
+      el("status").textContent = "";
+      renderTable();
+    }
+
+    el("refresh").addEventListener("click", fetchData);
+    el("search").addEventListener("input", renderTable);
+    el("minLevel").addEventListener("input", renderTable);
+
+    fetchData().catch(() => {});
+  </script>
+</body>
+</html>
