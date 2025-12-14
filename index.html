@@ -72,15 +72,17 @@
       </div>
       <pre id="clan" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="clanToast"></div>
+      <div class="muted" id="clanLen"></div>
     </div>
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Risk left attacks</div>
+        <div class="title">Spelers met nog losse aanvallen</div>
         <button data-copy="risk">Copy</button>
       </div>
       <pre id="risk" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="riskToast"></div>
+      <div class="muted" id="riskLen"></div>
     </div>
 
     <div class="card">
@@ -100,6 +102,7 @@
       </div>
       <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="battlesToast"></div>
+      <div class="muted" id="battlesLen"></div>
     </div>
 
     <div class="card">
@@ -109,6 +112,17 @@
       </div>
       <pre id="insights" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="insightsToast"></div>
+      <div class="muted" id="insightsLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Spelers boven 3000 (met wat emojis)</div>
+        <button data-copy="highFame">Copy</button>
+      </div>
+      <pre id="highFame" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="highFameToast"></div>
+      <div class="muted" id="highFameLen"></div>
     </div>
 
     <div class="card fullRow">
@@ -121,6 +135,17 @@
 
 <script>
   const el = (id) => document.getElementById(id);
+
+  function updateLength(id, text, limit) {
+    const target = el(id + "Len");
+    if (!target) return;
+    const len = (text || "").length;
+    if (limit) {
+      target.textContent = len ? `Length: ${len} / ${limit}` : "";
+    } else {
+      target.textContent = len ? `Length: ${len}` : "";
+    }
+  }
 
   let overviewData = { headCells: [], rows: [] };
 
@@ -301,6 +326,7 @@
       battles: "battles",
       risk: "risk",
       story: "story",
+      highFame: "highFame",
     };
     const preId = map[targetId];
     const text = el(preId).textContent || "";
@@ -339,13 +365,14 @@
     renderPlayersTable(data.players_text || "");
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
+    el("highFame").textContent = data.high_fame_text || "(geen data)";
     el("story").textContent = data.short_story_text || "(geen data)";
-    const storyLen = (data.short_story_text || "").length;
-    if (data.short_story_limit) {
-      el("storyLen").textContent = `Length: ${storyLen} / ${data.short_story_limit}`;
-    } else {
-      el("storyLen").textContent = storyLen ? `Length: ${storyLen}` : "";
-    }
+    updateLength("insights", data.insights_text);
+    updateLength("clan", data.clan_stats_text);
+    updateLength("battles", data.battles_left_text);
+    updateLength("risk", data.risk_left_text);
+    updateLength("highFame", data.high_fame_text);
+    updateLength("story", data.short_story_text, data.short_story_limit);
 
     el("updated").textContent = new Date().toLocaleString();
     el("status").textContent = "";
@@ -358,7 +385,7 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["insights","clan","battles","risk","story"].forEach(id => {
+  ["insights","clan","battles","risk","story","highFame"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });

@@ -357,7 +357,7 @@ def render_battles_left_today(rows: List[Dict]) -> str:
 def render_risk_left_attacks(rows: List[Dict]) -> str:
     buckets = bucket_open_players(rows)
     out: List[str] = []
-    out.append("Risk left attacks:")
+    out.append("Spelers met nog losse aanvallen:")
 
     any_added = False
     for k in [3, 2, 1]:
@@ -373,6 +373,40 @@ def render_risk_left_attacks(rows: List[Dict]) -> str:
     if not any_added:
         out.append("")
         out.append("Geen risico spelers gevonden (niemand met 1-3 open).")
+    return "\n".join(out)
+
+
+def render_high_fame_players(rows: List[Dict], threshold: int = 3000) -> str:
+    high_famers = []
+    for r in rows:
+        fame = r.get("fame")
+        name = (r.get("name") or "").strip()
+        if fame is None or not name:
+            continue
+        try:
+            fame_val = int(fame)
+        except (TypeError, ValueError):
+            continue
+        if fame_val >= threshold:
+            high_famers.append((name, fame_val))
+
+    high_famers.sort(key=lambda item: item[1], reverse=True)
+
+    out: List[str] = []
+    out.append("Spelers 3000+ 🌟 (met wat emojis):")
+
+    if not high_famers:
+        out.append("- Geen spelers boven de 3000 fame 😴")
+        return "\n".join(out)
+
+    out.append(f"- Aantal: {len(high_famers)} 🧮✨")
+    out.append("")
+
+    emojis = ["🔥", "⚡", "💎", "🚀", "🌟", "💥"]
+    for idx, (name, fame_val) in enumerate(high_famers):
+        emoji = emojis[idx % len(emojis)]
+        out.append(f"- {name}: {fame_val} 🎖️ {emoji}")
+
     return "\n".join(out)
 
 
@@ -743,7 +777,7 @@ def render_clan_stats_block(
         out.append(f"- Avg medals/deck: {our.avg_medals_per_deck:.2f}")
 
     out.append(f"- Battles left: {battles_left}")
-    out.append(f"- Duels left: {duels_left} (spelers met 3+ open)")
+    out.append(f"- Duels left: {duels_left}")
 
     if our and our.projected_medals is not None and ranking:
         pos = 1
