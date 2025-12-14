@@ -393,19 +393,17 @@ def render_high_fame_players(rows: List[Dict], threshold: int = 3000) -> str:
     high_famers.sort(key=lambda item: item[1], reverse=True)
 
     out: List[str] = []
-    out.append("Spelers 3000+ 🌟 (met wat emojis):")
+    out.append("Spelers 3000+ 🌟:")
 
     if not high_famers:
-        out.append("- Geen spelers boven de 3000 fame 😴")
+        out.append("- Geen spelers boven de 3000 fame.")
         return "\n".join(out)
 
-    out.append(f"- Aantal: {len(high_famers)} 🧮✨")
+    out.append(f"- Aantal: {len(high_famers)}")
     out.append("")
 
-    emojis = ["🔥", "⚡", "💎", "🚀", "🌟", "💥"]
-    for idx, (name, fame_val) in enumerate(high_famers):
-        emoji = emojis[idx % len(emojis)]
-        out.append(f"- {name}: {fame_val} 🎖️ {emoji}")
+    for name, fame_val in high_famers:
+        out.append(f"- {name}: {fame_val}")
 
     return "\n".join(out)
 
