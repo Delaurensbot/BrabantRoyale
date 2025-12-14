@@ -140,25 +140,19 @@ def print_table(rows: List[Dict[str, str]]) -> None:
         )
 
 
-def main() -> int:
-    limit = 10
-    if len(sys.argv) >= 2:
-        try:
-            limit = max(1, min(50, int(sys.argv[1])))
-        except ValueError:
-            pass
+def collect_join_data(limit: int = 10) -> Dict[str, object]:
+    """Collect join/leave data with account levels and links."""
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    limit = max(1, min(50, int(limit)))
+    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     with requests.Session() as session:
         status, html = fetch_html(session, JOIN_LEAVE_URL)
         if status != 200:
-            print("Failed to fetch join-leave page:", status)
-            return 1
+            raise RuntimeError(f"Failed to fetch join-leave page: HTTP {status}")
 
         if looks_blocked(html):
-            print("Blocked by anti-bot (Cloudflare/JS challenge).")
-            return 1
+            raise RuntimeError("Blocked by anti-bot (Cloudflare/JS challenge).")
 
         joins = parse_last_joins(html, limit=limit)
 
@@ -166,12 +160,33 @@ def main() -> int:
         for r in joins:
             r["acc_lvl"] = get_player_acc_level(session, r["pid"], acc_cache)
 
+    return {
+        "fetched_at": fetched_at,
+        "source_url": JOIN_LEAVE_URL,
+        "joins": joins,
+    }
+
+
+def main() -> int:
+    limit = 10
+    if len(sys.argv) >= 2:
+        try:
+            limit = int(sys.argv[1])
+        except ValueError:
+            pass
+
+    try:
+        data = collect_join_data(limit=limit)
+    except Exception as exc:  # pragma: no cover - CLI convenience
+        print(str(exc))
+        return 1
+
     print("#")
-    print("Fetched:", now)
-    print("URL:", JOIN_LEAVE_URL)
+    print("Fetched:", data["fetched_at"])
+    print("URL:", data["source_url"])
     print()
     print("Last joins (with account level + link):")
-    print_table(joins)
+    print_table(data["joins"])
     return 0
 
 
