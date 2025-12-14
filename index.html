@@ -27,6 +27,8 @@
     .overviewTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     .overviewTable .clanName { font-weight: 700; font-size: 15px; }
     .overviewTable .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 6px; }
+    .overviewTable .sortButton { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; }
+    .overviewTable .sortButton:hover { text-decoration: underline; }
     .subtle { color: rgba(232,235,240,0.75); font-size: 13px; }
     .empty { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); text-align: center; }
     .playersTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
@@ -120,45 +122,39 @@
 <script>
   const el = (id) => document.getElementById(id);
 
-  function renderOverviewTable(text) {
+  let overviewData = { headCells: [], rows: [] };
+
+  function buildOverviewTable(headCells, rows) {
     const container = el("overview");
     container.innerHTML = "";
-
-    if (!text || !text.trim()) {
-      container.className = "empty";
-      container.textContent = "(geen data)";
-      return;
-    }
-
-    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
-    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
-
-    if (!dataLines.length) {
-      container.className = "empty";
-      container.textContent = text;
-      return;
-    }
-
     container.className = "tableWrap";
 
     const table = document.createElement("table");
     table.className = "overviewTable";
 
-    const [header, ...rows] = dataLines;
-    const headCells = header.split("|").map(c => c.trim());
+    const avgIdx = headCells.findIndex((cell) => cell.toLowerCase().includes("avg"));
+
     const thead = document.createElement("thead");
     const headTr = document.createElement("tr");
     headCells.forEach((cell, idx) => {
       const th = document.createElement("th");
-      th.textContent = cell || (idx === 0 ? "Clan" : "");
+      if (idx === avgIdx) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sortButton";
+        btn.textContent = cell || (idx === 0 ? "Clan" : "");
+        btn.addEventListener("click", () => sortOverviewByAvg());
+        th.appendChild(btn);
+      } else {
+        th.textContent = cell || (idx === 0 ? "Clan" : "");
+      }
       headTr.appendChild(th);
     });
     thead.appendChild(headTr);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
-    rows.forEach(line => {
-      const parts = line.split("|").map(p => p.trim());
+    rows.forEach((parts) => {
       const tr = document.createElement("tr");
 
       parts.forEach((p, idx) => {
@@ -185,6 +181,49 @@
 
     table.appendChild(tbody);
     container.appendChild(table);
+  }
+
+  function sortOverviewByAvg() {
+    const avgIdx = overviewData.headCells.findIndex((cell) => cell.toLowerCase().includes("avg"));
+    if (avgIdx === -1) return;
+
+    const sortedRows = [...overviewData.rows].sort((a, b) => {
+      const aVal = parseFloat(a[avgIdx]);
+      const bVal = parseFloat(b[avgIdx]);
+      if (Number.isNaN(aVal) && Number.isNaN(bVal)) return 0;
+      if (Number.isNaN(aVal)) return 1;
+      if (Number.isNaN(bVal)) return -1;
+      return bVal - aVal;
+    });
+
+    buildOverviewTable(overviewData.headCells, sortedRows);
+  }
+
+  function renderOverviewTable(text) {
+    const container = el("overview");
+    container.innerHTML = "";
+
+    if (!text || !text.trim()) {
+      container.className = "empty";
+      container.textContent = "(geen data)";
+      return;
+    }
+
+    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
+
+    if (!dataLines.length) {
+      container.className = "empty";
+      container.textContent = text;
+      return;
+    }
+
+    const [header, ...rows] = dataLines;
+    const headCells = header.split("|").map(c => c.trim());
+    const parsedRows = rows.map(line => line.split("|").map(p => p.trim()));
+    overviewData = { headCells, rows: parsedRows };
+
+    buildOverviewTable(headCells, parsedRows);
   }
 
   function renderPlayersTable(text) {
