@@ -17,6 +17,7 @@ from Royale_api import (
     render_clan_overview_table,
     render_clan_insights,
     render_clan_stats_block,
+    render_clan_avg_projection,
     render_battles_left_today,
     render_risk_left_attacks,
     render_high_fame_players,
@@ -49,6 +50,7 @@ class handler(BaseHTTPRequestHandler):
             clan_stats_text = render_clan_stats_block(
                 race_soup, clans, OUR_CLAN_NAME_DEFAULT, filtered_players
             )
+            clan_avg_projection_text = render_clan_avg_projection(clans)
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
@@ -66,6 +68,7 @@ class handler(BaseHTTPRequestHandler):
                 ("Race overview", race_overview_text),
                 ("Insights", insights_text),
                 ("Clan stats", clan_stats_text),
+                ("Clan averages", clan_avg_projection_text),
                 ("Players", players_text),
                 ("Battles left", battles_left_text),
                 ("Risk left", risk_left_text),
@@ -86,6 +89,7 @@ class handler(BaseHTTPRequestHandler):
                 "race_overview_text": race_overview_text,
                 "insights_text": insights_text,
                 "clan_stats_text": clan_stats_text,
+                "clan_avg_projection_text": clan_avg_projection_text,
                 "players_text": players_text,
                 "battles_left_text": battles_left_text,
                 "risk_left_text": risk_left_text,
