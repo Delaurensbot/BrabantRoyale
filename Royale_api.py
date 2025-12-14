@@ -459,6 +459,12 @@ def parse_day_label(soup: BeautifulSoup) -> Optional[str]:
     return None
 
 
+def translate_day_label(label: Optional[str]) -> Optional[str]:
+    if not label:
+        return None
+    return label.replace("Day", "Dag", 1)
+
+
 def calculate_avg_medals_per_deck(
     current_medals: Optional[int], decks_used_today: Optional[int], fallback: Optional[float]
 ) -> Optional[float]:
@@ -670,6 +676,30 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
     return "\n".join(lines)
 
 
+def render_clan_avg_projection(clans: List[ClanOverview]) -> str:
+    if not clans:
+        return "Clan avg/projection: (niet gevonden op deze pagina)"
+
+    name_w = max([len(c.name) for c in clans] + [len("Clan name")])
+    avg_w = max([
+        len(f"{c.avg_medals_per_deck:.2f}") if c.avg_medals_per_deck is not None else 0
+        for c in clans
+    ] + [len("Avg")])
+    proj_w = max([len(str(c.projected_medals or "")) for c in clans] + [len("Projected")])
+
+    lines = ["Clan name avg projected:"]
+    header = f"{'Clan name':<{name_w}} | {'Avg':>{avg_w}} | {'Projected':>{proj_w}}"
+    lines.append(header)
+    lines.append("-" * len(header))
+
+    for c in clans:
+        avg_txt = "" if c.avg_medals_per_deck is None else f"{c.avg_medals_per_deck:.2f}"
+        proj_txt = "" if c.projected_medals is None else str(c.projected_medals)
+        lines.append(f"{c.name:<{name_w}} | {avg_txt:>{avg_w}} | {proj_txt:>{proj_w}}")
+
+    return "\n".join(lines)
+
+
 def get_projected_ranking(clans: List[ClanOverview]) -> List[ClanOverview]:
     sortable = [c for c in clans if c.projected_medals is not None]
     sortable.sort(key=lambda x: int(x.projected_medals), reverse=True)
@@ -800,14 +830,11 @@ def build_short_story(
     members_rows: List[Dict],
     max_chars: int,
 ) -> str:
-    day = parse_day_label(soup) or "War update"
+    day_label = translate_day_label(parse_day_label(soup))
     our = find_our_clan(clans, our_clan_name)
     ranking = get_projected_ranking(clans)
 
-    battles_left = compute_battles_left(members_rows)
-    duels_left = compute_duels_left(members_rows)
-    buckets = bucket_open_players(members_rows)
-
+    # Determine position based on projected medals
     pos = None
     if our and our.projected_medals is not None and ranking:
         for i, c in enumerate(ranking, start=1):
@@ -815,98 +842,45 @@ def build_short_story(
                 pos = i
                 break
 
-    # Core facts
-    decks_line = ""
-    proj_line = ""
-    left_line = ""
-    open_line = ""
+    # Determine lead/deficit based on average medals per deck
+    avg_sorted = [c for c in clans if c.avg_medals_per_deck is not None]
+    avg_sorted.sort(key=lambda c: c.avg_medals_per_deck or 0, reverse=True)
+    gap_line = ""
+    if our and our.avg_medals_per_deck is not None and avg_sorted:
+        our_idx = next(
+            (i for i, c in enumerate(avg_sorted) if c.name.strip().lower() == our.name.strip().lower()),
+            None,
+        )
+        if our_idx is not None:
+            if our_idx == 0 and len(avg_sorted) > 1:
+                lead = our.avg_medals_per_deck - (avg_sorted[1].avg_medals_per_deck or 0)
+                gap_line = f"voorsprong op 2e plaats: {lead:.2f}"
+            elif our_idx > 0:
+                deficit = (avg_sorted[0].avg_medals_per_deck or 0) - our.avg_medals_per_deck
+                gap_line = f"achterstand op 1e plaats: {deficit:.2f}"
+
+    # Build compact, NL-focused story
+    title = f"{day_label} update" if day_label else "Dag update"
+    lines = [f"{title}:"]
 
     if our and our.decks_used_today is not None and our.decks_total_today is not None:
-        remaining = max(0, int(our.decks_total_today) - int(our.decks_used_today))
-        decks_line = f"{our.name}: {our.decks_used_today}/{our.decks_total_today} decks 🎴 (open {remaining})"
+        lines.append(f"{our.decks_used_today}/{our.decks_total_today} aanvallen")
 
-    if our and our.current_medals is not None and our.projected_medals is not None and our.avg_medals_per_deck is not None:
-        rank_txt = f" #{pos}" if pos is not None else ""
-        proj_line = (
-            f"Avg {our.avg_medals_per_deck:.2f} 🎖 "
-            f"{our.current_medals:,}".replace(",", ".")
-            + f" → {our.projected_medals:,}".replace(",", ".")
-            + f"{rank_txt} 🏆"
-        )
+    if pos is not None:
+        lines.append(f"voorspelde uitkomst: {pos}e plek")
 
-    left_line = f"Left: {battles_left} battles ⚔ | {duels_left} duels 🤺"
+    if our and our.avg_medals_per_deck is not None:
+        lines.append(f"Avg {our.avg_medals_per_deck:.2f} 🎖")
 
-    # Open players (try names, then compress)
-    open4 = buckets.get(4, [])
-    risk = buckets.get(3, []) + buckets.get(2, []) + buckets.get(1, [])
-    if open4 or risk:
-        parts = []
-        if open4:
-            parts.append("4x open: " + ", ".join(open4))
-        if risk:
-            # keep it short: only show 1x open names if any, else count
-            one_left = buckets.get(1, [])
-            if one_left:
-                parts.append("Risk: " + ", ".join(one_left))
-            else:
-                parts.append(f"Risk: {len(risk)} speler(s)")
-        open_line = " | ".join(parts)
-
-    # Draft story
-    lines = [f"{day} 🏁"]
-    if decks_line:
-        lines.append(decks_line)
-    if proj_line:
-        lines.append(proj_line)
-    lines.append(left_line)
-    if open_line:
-        lines.append(open_line)
+    if gap_line:
+        lines.append(gap_line)
 
     story = "\n".join(lines).strip()
 
-    # Compress if needed
     if len(story) <= max_chars:
         return story
 
-    # First compression: remove names, keep counts
-    open4_n = len(open4)
-    risk_n = len(risk)
-    open_line2 = ""
-    if open4_n or risk_n:
-        chunks = []
-        if open4_n:
-            chunks.append(f"4x open: {open4_n}")
-        if risk_n:
-            chunks.append(f"Risk (1-3x): {risk_n}")
-        open_line2 = " | ".join(chunks)
-
-    lines2 = [f"{day} 🏁"]
-    if decks_line:
-        lines2.append(decks_line)
-    if proj_line:
-        lines2.append(proj_line)
-    lines2.append(left_line)
-    if open_line2:
-        lines2.append(open_line2)
-
-    story2 = "\n".join(lines2).strip()
-    if len(story2) <= max_chars:
-        return story2
-
-    # Second compression: drop decks line (keep only projected + left)
-    lines3 = [f"{day} 🏁"]
-    if proj_line:
-        lines3.append(proj_line)
-    lines3.append(left_line)
-    if open_line2:
-        lines3.append(open_line2)
-
-    story3 = "\n".join(lines3).strip()
-    if len(story3) <= max_chars:
-        return story3
-
-    # Final: hard trim
-    return story3[: max(0, max_chars - 1)] + "…"
+    return story[: max(0, max_chars - 1)] + "…"
 
 
 # -----------------------------

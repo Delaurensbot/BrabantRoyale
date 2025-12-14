@@ -77,6 +77,16 @@
 
     <div class="card">
       <div class="cardHead">
+        <div class="title">Clan avg/projection</div>
+        <button data-copy="clanAvg">Copy</button>
+      </div>
+      <pre id="clanAvg" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="clanAvgToast"></div>
+      <div class="muted" id="clanAvgLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
         <div class="title">Spelers met nog losse aanvallen</div>
         <button data-copy="risk">Copy</button>
       </div>
@@ -323,6 +333,7 @@
     const map = {
       insights: "insights",
       clan: "clan",
+      clanAvg: "clanAvg",
       battles: "battles",
       risk: "risk",
       story: "story",
@@ -362,6 +373,7 @@
     renderOverviewTable(data.race_overview_text || "");
     el("insights").textContent = data.insights_text || "(geen data)";
     el("clan").textContent = data.clan_stats_text || "(geen data)";
+    el("clanAvg").textContent = data.clan_avg_projection_text || "(geen data)";
     renderPlayersTable(data.players_text || "");
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
@@ -369,6 +381,7 @@
     el("story").textContent = data.short_story_text || "(geen data)";
     updateLength("insights", data.insights_text);
     updateLength("clan", data.clan_stats_text);
+    updateLength("clanAvg", data.clan_avg_projection_text);
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
     updateLength("highFame", data.high_fame_text);
@@ -385,7 +398,7 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["insights","clan","battles","risk","story","highFame"].forEach(id => {
+  ["insights","clan","clanAvg","battles","risk","story","highFame"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });
