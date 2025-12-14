@@ -5,18 +5,34 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clan War Stats</title>
   <style>
-    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
     h1 { margin: 0 0 10px; }
     .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
     .muted { opacity: 0.75; }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: inherit; cursor: pointer; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-    .card { border-radius: 16px; padding: 14px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.10); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .fullRow { grid-column: 1 / -1; }
+    .card { border-radius: 16px; padding: 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
-    .title { font-size: 18px; font-weight: 700; }
-    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
     .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 8px; }
+    .overviewTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .overviewTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .overviewTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .overviewTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .overviewTable .clanName { font-weight: 700; font-size: 15px; }
+    .overviewTable .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 6px; }
+    .subtle { color: rgba(232,235,240,0.75); font-size: 13px; }
+    .empty { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); text-align: center; }
+    .playersTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .playersTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(255, 140, 0, 0.16), rgba(255, 255, 255, 0.05)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .playersTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .playersTable tbody tr:nth-child(odd) { background: rgba(255,255,255,0.02); }
+    .playersTable .role { font-weight: 700; letter-spacing: 0.2px; }
+    .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: rgba(0, 170, 255, 0.15); font-size: 12px; margin-left: 6px; }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
   </style>
 </head>
@@ -31,13 +47,11 @@
   <div class="error" id="errorBox"></div>
 
   <div class="grid">
-    <div class="card">
+    <div class="card fullRow">
       <div class="cardHead">
         <div class="title">Race Overview</div>
-        <button data-copy="overview">Copy</button>
       </div>
-      <pre id="overview" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="overviewToast"></div>
+      <div id="overview" class="empty">(loading...)</div>
     </div>
 
     <div class="card">
@@ -56,15 +70,6 @@
       </div>
       <pre id="clan" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="clanToast"></div>
-    </div>
-
-    <div class="card">
-      <div class="cardHead">
-        <div class="title">Players</div>
-        <button data-copy="players">Copy</button>
-      </div>
-      <pre id="players" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="playersToast"></div>
     </div>
 
     <div class="card">
@@ -95,29 +100,159 @@
       <div class="muted" id="storyLen"></div>
     </div>
 
-    <div class="card">
+    <div class="card fullRow">
       <div class="cardHead">
-        <div class="title">Copy All</div>
-        <button data-copy="all">Copy</button>
+        <div class="title">Players</div>
       </div>
-      <pre id="copyAll" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="copyAllToast"></div>
+      <div id="players" class="empty">(loading...)</div>
     </div>
   </div>
 
 <script>
   const el = (id) => document.getElementById(id);
 
+  function renderOverviewTable(text) {
+    const container = el("overview");
+    container.innerHTML = "";
+
+    if (!text || !text.trim()) {
+      container.className = "empty";
+      container.textContent = "(geen data)";
+      return;
+    }
+
+    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
+
+    if (!dataLines.length) {
+      container.className = "empty";
+      container.textContent = text;
+      return;
+    }
+
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "overviewTable";
+
+    const [header, ...rows] = dataLines;
+    const headCells = header.split("|").map(c => c.trim());
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    headCells.forEach((cell, idx) => {
+      const th = document.createElement("th");
+      th.textContent = cell || (idx === 0 ? "Clan" : "");
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach(line => {
+      const parts = line.split("|").map(p => p.trim());
+      const tr = document.createElement("tr");
+
+      parts.forEach((p, idx) => {
+        const td = document.createElement("td");
+        if (idx === 0) {
+          td.className = "clanName";
+          td.textContent = p;
+        } else if (idx === 1) {
+          td.innerHTML = `<span class="pill">${p || "-"}</span>`;
+        } else {
+          td.textContent = p || "-";
+        }
+        tr.appendChild(td);
+      });
+
+      while (tr.children.length < headCells.length) {
+        const td = document.createElement("td");
+        td.textContent = "-";
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function renderPlayersTable(text) {
+    const container = el("players");
+    container.innerHTML = "";
+
+    if (!text || !text.trim()) {
+      container.className = "empty";
+      container.textContent = "(geen data)";
+      return;
+    }
+
+    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
+
+    if (!dataLines.length) {
+      container.className = "empty";
+      container.textContent = text;
+      return;
+    }
+
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "playersTable";
+
+    const [header, ...rows] = dataLines;
+    const headCells = header.split("|").map(c => c.trim());
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    headCells.forEach(cell => {
+      const th = document.createElement("th");
+      th.textContent = cell;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach(line => {
+      const parts = line.split("|").map(p => p.trim());
+      const tr = document.createElement("tr");
+
+      parts.forEach((p, idx) => {
+        const td = document.createElement("td");
+        if (idx === 0) {
+          td.className = "role";
+          td.textContent = p;
+        } else if (idx === 1) {
+          const [name, badge] = p.split(/\s+-\s+/);
+          td.innerHTML = badge ? `${name} <span class="badge">${badge}</span>` : p;
+        } else {
+          td.textContent = p || "-";
+        }
+        tr.appendChild(td);
+      });
+
+      while (tr.children.length < headCells.length) {
+        const td = document.createElement("td");
+        td.textContent = "-";
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
   async function copyText(targetId) {
     const map = {
-      overview: "overview",
       insights: "insights",
       clan: "clan",
-      players: "players",
       battles: "battles",
       risk: "risk",
       story: "story",
-      all: "copyAll",
     };
     const preId = map[targetId];
     const text = el(preId).textContent || "";
@@ -150,14 +285,13 @@
       throw new Error(data.error || "unknown");
     }
 
-    el("overview").textContent = data.race_overview_text || "(geen data)";
+    renderOverviewTable(data.race_overview_text || "");
     el("insights").textContent = data.insights_text || "(geen data)";
     el("clan").textContent = data.clan_stats_text || "(geen data)";
-    el("players").textContent = data.players_text || "(geen data)";
+    renderPlayersTable(data.players_text || "");
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
     el("story").textContent = data.short_story_text || "(geen data)";
-    el("copyAll").textContent = data.copy_all_text || "(geen data)";
     const storyLen = (data.short_story_text || "").length;
     if (data.short_story_limit) {
       el("storyLen").textContent = `Length: ${storyLen} / ${data.short_story_limit}`;
@@ -176,12 +310,9 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["overview","insights","clan","players","battles","risk","story","copyAll"].forEach(id => {
+  ["insights","clan","battles","risk","story"].forEach(id => {
     el(id).addEventListener("click", () => {
-      const map = {
-        overview:"overview", insights:"insights", clan:"clan", players:"players", battles:"battles", risk:"risk", story:"story", copyAll:"all"
-      };
-      copyText(map[id]);
+      copyText(id);
     });
   });
 
