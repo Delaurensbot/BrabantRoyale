@@ -11,7 +11,7 @@
     .muted { opacity: 0.75; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.25); color: inherit; cursor: pointer; }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
     .card { border-radius: 16px; padding: 14px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.10); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
     .title { font-size: 18px; font-weight: 700; }
@@ -33,11 +33,20 @@
   <div class="grid">
     <div class="card">
       <div class="cardHead">
-        <div class="title">Race</div>
-        <button data-copy="race">Copy</button>
+        <div class="title">Race Overview</div>
+        <button data-copy="overview">Copy</button>
       </div>
-      <pre id="race" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="raceToast"></div>
+      <pre id="overview" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="overviewToast"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Insights</div>
+        <button data-copy="insights">Copy</button>
+      </div>
+      <pre id="insights" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="insightsToast"></div>
     </div>
 
     <div class="card">
@@ -51,11 +60,48 @@
 
     <div class="card">
       <div class="cardHead">
+        <div class="title">Players</div>
+        <button data-copy="players">Copy</button>
+      </div>
+      <pre id="players" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="playersToast"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
         <div class="title">Battles left (today)</div>
         <button data-copy="battles">Copy</button>
       </div>
       <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="battlesToast"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Risk left attacks</div>
+        <button data-copy="risk">Copy</button>
+      </div>
+      <pre id="risk" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="riskToast"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Short story</div>
+        <button data-copy="story">Copy</button>
+      </div>
+      <pre id="story" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="storyToast"></div>
+      <div class="muted" id="storyLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Copy All</div>
+        <button data-copy="all">Copy</button>
+      </div>
+      <pre id="copyAll" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="copyAllToast"></div>
     </div>
   </div>
 
@@ -63,7 +109,16 @@
   const el = (id) => document.getElementById(id);
 
   async function copyText(targetId) {
-    const map = { race: "race", clan: "clan", battles: "battles" };
+    const map = {
+      overview: "overview",
+      insights: "insights",
+      clan: "clan",
+      players: "players",
+      battles: "battles",
+      risk: "risk",
+      story: "story",
+      all: "copyAll",
+    };
     const preId = map[targetId];
     const text = el(preId).textContent || "";
     await navigator.clipboard.writeText(text);
@@ -95,9 +150,20 @@
       throw new Error(data.error || "unknown");
     }
 
-    el("race").textContent = data.race_text || "(geen data)";
+    el("overview").textContent = data.race_overview_text || "(geen data)";
+    el("insights").textContent = data.insights_text || "(geen data)";
     el("clan").textContent = data.clan_stats_text || "(geen data)";
+    el("players").textContent = data.players_text || "(geen data)";
     el("battles").textContent = data.battles_left_text || "(geen data)";
+    el("risk").textContent = data.risk_left_text || "(geen data)";
+    el("story").textContent = data.short_story_text || "(geen data)";
+    el("copyAll").textContent = data.copy_all_text || "(geen data)";
+    const storyLen = (data.short_story_text || "").length;
+    if (data.short_story_limit) {
+      el("storyLen").textContent = `Length: ${storyLen} / ${data.short_story_limit}`;
+    } else {
+      el("storyLen").textContent = storyLen ? `Length: ${storyLen}` : "";
+    }
 
     el("updated").textContent = new Date().toLocaleString();
     el("status").textContent = "";
@@ -110,9 +176,14 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  el("race").addEventListener("click", () => copyText("race"));
-  el("clan").addEventListener("click", () => copyText("clan"));
-  el("battles").addEventListener("click", () => copyText("battles"));
+  ["overview","insights","clan","players","battles","risk","story","copyAll"].forEach(id => {
+    el(id).addEventListener("click", () => {
+      const map = {
+        overview:"overview", insights:"insights", clan:"clan", players:"players", battles:"battles", risk:"risk", story:"story", copyAll:"all"
+      };
+      copyText(map[id]);
+    });
+  });
 
   // Run on load too
   fetchData().catch(() => {});
