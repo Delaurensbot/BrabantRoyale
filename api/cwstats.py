@@ -13,10 +13,13 @@ from Royale_api import (
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
     dedupe_rows,
+    render_player_table,
     render_clan_overview_table,
     render_clan_insights,
     render_clan_stats_block,
     render_battles_left_today,
+    render_risk_left_attacks,
+    build_short_story,
 )
 
 class handler(BaseHTTPRequestHandler):
@@ -40,29 +43,52 @@ class handler(BaseHTTPRequestHandler):
             filtered_players = sorted(filtered_players, key=lambda r: int(r.get("rank", 0) or 0))
             filtered_players = dedupe_rows(filtered_players)
 
-            race_text_parts = []
-            overview = render_clan_overview_table(clans)
-            if overview:
-                race_text_parts.append(overview)
-
-            insights = render_clan_insights(clans, OUR_CLAN_NAME_DEFAULT)
-            if insights:
-                race_text_parts.append(insights)
-
-            race_text = "\n\n".join(part for part in race_text_parts if part)
-
+            race_overview_text = render_clan_overview_table(clans)
+            insights_text = render_clan_insights(clans, OUR_CLAN_NAME_DEFAULT)
             clan_stats_text = render_clan_stats_block(
                 race_soup, clans, OUR_CLAN_NAME_DEFAULT, filtered_players
             )
-
+            players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
+            risk_left_text = render_risk_left_attacks(filtered_players)
+            short_story_limit = 220
+            short_story_text = build_short_story(
+                race_soup,
+                clans,
+                OUR_CLAN_NAME_DEFAULT,
+                filtered_players,
+                max_chars=short_story_limit,
+            )
+
+            sections = [
+                ("Race overview", race_overview_text),
+                ("Insights", insights_text),
+                ("Clan stats", clan_stats_text),
+                ("Players", players_text),
+                ("Battles left", battles_left_text),
+                ("Risk left", risk_left_text),
+                ("Short story", short_story_text),
+            ]
+            copy_all_parts = []
+            for title, text in sections:
+                if not text:
+                    continue
+                copy_all_parts.append(title)
+                copy_all_parts.append(text)
+            copy_all_text = "\n\n".join(copy_all_parts)
 
             payload = {
                 "ok": True,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-                "race_text": race_text,
+                "race_overview_text": race_overview_text,
+                "insights_text": insights_text,
                 "clan_stats_text": clan_stats_text,
+                "players_text": players_text,
                 "battles_left_text": battles_left_text,
+                "risk_left_text": risk_left_text,
+                "short_story_text": short_story_text,
+                "short_story_limit": short_story_limit,
+                "copy_all_text": copy_all_text,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
