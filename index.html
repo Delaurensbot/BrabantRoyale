@@ -7,7 +7,7 @@
   <style>
     body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
     h1 { margin: 0 0 10px; }
-    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
     .muted { opacity: 0.75; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
     button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
@@ -36,6 +36,12 @@
     .playersTable .role { font-weight: 700; letter-spacing: 0.2px; }
     .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: rgba(0, 170, 255, 0.15); font-size: 12px; margin-left: 6px; }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
+    @media (max-width: 640px) {
+      body { padding: 0 12px; }
+      .top { flex-direction: column; align-items: stretch; gap: 10px; }
+      .top button, .ctaLink { width: 100%; justify-content: center; text-align: center; }
+      h1 { font-size: 26px; }
+    }
   </style>
 </head>
 <body>
@@ -59,29 +65,11 @@
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Insights</div>
-        <button data-copy="insights">Copy</button>
-      </div>
-      <pre id="insights" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="insightsToast"></div>
-    </div>
-
-    <div class="card">
-      <div class="cardHead">
         <div class="title">Clan Stats</div>
         <button data-copy="clan">Copy</button>
       </div>
       <pre id="clan" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="clanToast"></div>
-    </div>
-
-    <div class="card">
-      <div class="cardHead">
-        <div class="title">Battles left (today)</div>
-        <button data-copy="battles">Copy</button>
-      </div>
-      <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="battlesToast"></div>
     </div>
 
     <div class="card">
@@ -101,6 +89,24 @@
       <pre id="story" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="storyToast"></div>
       <div class="muted" id="storyLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Battles left (today)</div>
+        <button data-copy="battles">Copy</button>
+      </div>
+      <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="battlesToast"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Insights</div>
+        <button data-copy="insights">Copy</button>
+      </div>
+      <pre id="insights" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="insightsToast"></div>
     </div>
 
     <div class="card fullRow">
