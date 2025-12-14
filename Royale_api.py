@@ -1,6 +1,6 @@
 # royaleapi_war_dashboard.py
 # Terminal dashboard for RoyaleAPI war race:
-# 1) Clan overview (decks used today, avg medals/deck, projected medals, boat, medals, trophies)
+# 1) Clan overview (decks used today, avg medals/deck, projected medals, boat, medals)
 # 2) Insights (projected ranking + our situation)
 # 3) Player list (only CURRENT clan members) + battles left today + risk left attacks + duels left
 # 4) Short story (Discord-friendly) with character limit
@@ -388,7 +388,6 @@ class ClanOverview:
     projected_medals: Optional[int]
     boat_points: Optional[int]
     current_medals: Optional[int]
-    trophies: Optional[int]
 
 
 def extract_decks_used_total(text: str) -> Tuple[Optional[int], Optional[int]]:
@@ -396,13 +395,6 @@ def extract_decks_used_total(text: str) -> Tuple[Optional[int], Optional[int]]:
     if not m:
         return None, None
     return int(m.group(1)), int(m.group(2))
-
-
-def extract_projected_medals(text: str) -> Optional[int]:
-    m = re.search(r"(?:→|->)\s*([0-9]+)", text)
-    if m:
-        return int(m.group(1))
-    return None
 
 
 def first_int(text: str) -> Optional[int]:
@@ -425,6 +417,22 @@ def parse_day_label(soup: BeautifulSoup) -> Optional[str]:
     if m:
         return f"Day {m.group(1)}"
     return None
+
+
+def calculate_avg_medals_per_deck(
+    current_medals: Optional[int], decks_used_today: Optional[int], fallback: Optional[float]
+) -> Optional[float]:
+    """Return medals per deck if data is available, otherwise return the fallback."""
+
+    if current_medals is not None and decks_used_today:
+        return current_medals / decks_used_today
+    return fallback
+
+
+def calculate_projected_medals(avg_medals_per_deck: Optional[float]) -> Optional[int]:
+    if avg_medals_per_deck is None:
+        return None
+    return int(avg_medals_per_deck * 200)
 
 
 def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOverview]:
@@ -472,11 +480,9 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
             if avg_el:
                 avg = first_float(clean_text(avg_el.get_text(" ", strip=True)))
 
-            projected = extract_projected_medals(clean_text(outline.get_text(" ", strip=True)))
         else:
             row_text = clean_text(a.get_text(" ", strip=True))
             used, total = extract_decks_used_total(row_text)
-            projected = extract_projected_medals(row_text)
 
         digits: List[int] = []
         for div in a.find_all("div"):
@@ -490,9 +496,12 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
                 continue
             digits.append(int(txt))
 
-        boat_points = current_medals = trophies = None
-        if len(digits) >= 3:
-            boat_points, current_medals, trophies = digits[0], digits[1], digits[2]
+        boat_points = current_medals = None
+        if len(digits) >= 2:
+            boat_points, current_medals = digits[0], digits[1]
+
+        avg = calculate_avg_medals_per_deck(current_medals, used, avg)
+        projected = calculate_projected_medals(avg)
 
         if not name:
             continue
@@ -508,7 +517,6 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
                 projected_medals=projected,
                 boat_points=boat_points,
                 current_medals=current_medals,
-                trophies=trophies,
             )
         )
 
@@ -534,8 +542,6 @@ def parse_clan_overview_from_race_soup_table(soup: BeautifulSoup) -> List[ClanOv
 
         row_text = clean_text(tr.get_text(" ", strip=True))
         used, total = extract_decks_used_total(row_text)
-        proj = extract_projected_medals(row_text)
-
         if used is None or total is None:
             continue
 
@@ -548,7 +554,8 @@ def parse_clan_overview_from_race_soup_table(soup: BeautifulSoup) -> List[ClanOv
 
         boat_points = first_int(clean_text(tds[1].get_text(" ", strip=True)))
         current_medals = first_int(clean_text(tds[2].get_text(" ", strip=True)))
-        trophies = first_int(clean_text(tds[3].get_text(" ", strip=True)))
+        avg = calculate_avg_medals_per_deck(current_medals, used, avg)
+        proj = calculate_projected_medals(avg)
 
         clans.append(
             ClanOverview(
@@ -559,7 +566,6 @@ def parse_clan_overview_from_race_soup_table(soup: BeautifulSoup) -> List[ClanOv
                 projected_medals=proj,
                 boat_points=boat_points,
                 current_medals=current_medals,
-                trophies=trophies,
             )
         )
 
@@ -598,11 +604,9 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
     proj_w = max([len(s(c.projected_medals)) for c in clans] + [len("Projected")])
     boat_w = max([len(s(c.boat_points)) for c in clans] + [len("Boat")])
     medal_w = max([len(s(c.current_medals)) for c in clans] + [len("Medals")])
-    troph_w = max([len(s(c.trophies)) for c in clans] + [len("Trophies")])
-
     head = (
         f'{"Clan":<{name_w}} | {"Decks":>{decks_w}} | {"Avg/deck":>{avg_w}} | {"Projected":>{proj_w}} | '
-        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}} | {"Trophies":>{troph_w}}'
+        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}}'
     )
     sep = "-" * len(head)
 
@@ -611,8 +615,7 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
         decks = f"{s(c.decks_used_today)}/{s(c.decks_total_today)}"
         lines.append(
             f"{c.name:<{name_w}} | {decks:>{decks_w}} | {sf(c.avg_medals_per_deck):>{avg_w}} | "
-            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}} | "
-            f"{s(c.trophies):>{troph_w}}"
+            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}}"
         )
     return "\n".join(lines)
 
