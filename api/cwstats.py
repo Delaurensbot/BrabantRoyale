@@ -19,6 +19,7 @@ from Royale_api import (
     render_clan_stats_block,
     render_battles_left_today,
     render_risk_left_attacks,
+    render_high_fame_players,
     build_short_story,
 )
 
@@ -51,6 +52,7 @@ class handler(BaseHTTPRequestHandler):
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
+            high_fame_text = render_high_fame_players(filtered_players)
             short_story_limit = 220
             short_story_text = build_short_story(
                 race_soup,
@@ -67,6 +69,7 @@ class handler(BaseHTTPRequestHandler):
                 ("Players", players_text),
                 ("Battles left", battles_left_text),
                 ("Risk left", risk_left_text),
+                ("High fame", high_fame_text),
                 ("Short story", short_story_text),
             ]
             copy_all_parts = []
@@ -86,6 +89,7 @@ class handler(BaseHTTPRequestHandler):
                 "players_text": players_text,
                 "battles_left_text": battles_left_text,
                 "risk_left_text": risk_left_text,
+                "high_fame_text": high_fame_text,
                 "short_story_text": short_story_text,
                 "short_story_limit": short_story_limit,
                 "copy_all_text": copy_all_text,
