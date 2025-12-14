@@ -427,6 +427,16 @@ def parse_day_label(soup: BeautifulSoup) -> Optional[str]:
     return None
 
 
+def calculate_avg_medals_per_deck(
+    current_medals: Optional[int], decks_used_today: Optional[int], fallback: Optional[float]
+) -> Optional[float]:
+    """Return medals per deck if data is available, otherwise return the fallback."""
+
+    if current_medals is not None and decks_used_today:
+        return current_medals / decks_used_today
+    return fallback
+
+
 def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOverview]:
     standings_divs = soup.find_all("div", class_=lambda c: c and "standings" in c.split())
     if not standings_divs:
@@ -494,6 +504,8 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
         if len(digits) >= 3:
             boat_points, current_medals, trophies = digits[0], digits[1], digits[2]
 
+        avg = calculate_avg_medals_per_deck(current_medals, used, avg)
+
         if not name:
             continue
         if used is None or total is None:
@@ -548,6 +560,7 @@ def parse_clan_overview_from_race_soup_table(soup: BeautifulSoup) -> List[ClanOv
 
         boat_points = first_int(clean_text(tds[1].get_text(" ", strip=True)))
         current_medals = first_int(clean_text(tds[2].get_text(" ", strip=True)))
+        avg = calculate_avg_medals_per_deck(current_medals, used, avg)
         trophies = first_int(clean_text(tds[3].get_text(" ", strip=True)))
 
         clans.append(
