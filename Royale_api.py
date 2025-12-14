@@ -408,6 +408,47 @@ def render_high_fame_players(rows: List[Dict], threshold: int = 3000) -> str:
     return "\n".join(out)
 
 
+def render_day4_last_chance_players(
+    soup: BeautifulSoup, rows: List[Dict], min_fame: int = 2100
+) -> str:
+    day_num = parse_day_number(soup)
+
+    out: List[str] = []
+    out.append("Dag 4: 0/4 en 2100+ 🌟")
+
+    if day_num != 4:
+        out.append("- Niet Dag 4, blokje toont alleen dan data.")
+        return "\n".join(out)
+
+    candidates: List[Tuple[str, int]] = []
+    for r in rows:
+        name = (r.get("name") or "").strip()
+        fame = r.get("fame")
+        left = attacks_left_today(r)
+
+        if not name or fame is None or left != 4:
+            continue
+
+        try:
+            fame_val = int(fame)
+        except (TypeError, ValueError):
+            continue
+
+        if fame_val >= min_fame:
+            candidates.append((name, fame_val))
+
+    if not candidates:
+        out.append("- Niemand gevonden met 0/4 en 2100+ punten.")
+        return "\n".join(out)
+
+    candidates.sort(key=lambda item: item[1], reverse=True)
+
+    for name, fame_val in candidates:
+        out.append(f"- {name}: {fame_val}")
+
+    return "\n".join(out)
+
+
 # -----------------------------
 # Clan overview parsing (DIV layout)
 # -----------------------------
@@ -463,6 +504,16 @@ def translate_day_label(label: Optional[str]) -> Optional[str]:
     if not label:
         return None
     return label.replace("Day", "Dag", 1)
+
+
+def parse_day_number(soup: BeautifulSoup) -> Optional[int]:
+    label = parse_day_label(soup)
+    if not label:
+        return None
+    m = re.search(r"(\d+)", label)
+    if not m:
+        return None
+    return int(m.group(1))
 
 
 def calculate_avg_medals_per_deck(
@@ -945,6 +996,8 @@ def main() -> None:
     print(render_battles_left_today(filtered))
     print()
     print(render_risk_left_attacks(filtered))
+    print()
+    print(render_day4_last_chance_players(race_soup, filtered))
     print()
 
     story = build_short_story(race_soup, clans, args.our_clan, filtered, max_chars=args.story_max)
