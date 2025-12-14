@@ -135,6 +135,16 @@
       <div class="muted" id="highFameLen"></div>
     </div>
 
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Dag 4: 0/4 en 2100+</div>
+        <button data-copy="day4">Copy</button>
+      </div>
+      <pre id="day4" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="day4Toast"></div>
+      <div class="muted" id="day4Len"></div>
+    </div>
+
     <div class="card fullRow">
       <div class="cardHead">
         <div class="title">Players</div>
@@ -338,6 +348,7 @@
       risk: "risk",
       story: "story",
       highFame: "highFame",
+      day4: "day4",
     };
     const preId = map[targetId];
     const text = el(preId).textContent || "";
@@ -378,6 +389,7 @@
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
     el("highFame").textContent = data.high_fame_text || "(geen data)";
+    el("day4").textContent = data.day4_last_chance_text || "(geen data)";
     el("story").textContent = data.short_story_text || "(geen data)";
     updateLength("insights", data.insights_text);
     updateLength("clan", data.clan_stats_text);
@@ -385,6 +397,7 @@
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
     updateLength("highFame", data.high_fame_text);
+    updateLength("day4", data.day4_last_chance_text);
     updateLength("story", data.short_story_text, data.short_story_limit);
 
     el("updated").textContent = new Date().toLocaleString();
@@ -398,7 +411,7 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["insights","clan","clanAvg","battles","risk","story","highFame"].forEach(id => {
+  ["insights","clan","clanAvg","battles","risk","story","highFame","day4"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });
