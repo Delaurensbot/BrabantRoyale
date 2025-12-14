@@ -599,6 +599,16 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
     if not clans:
         return "Clan overview: (niet gevonden op deze pagina)"
 
+    def projected_from_avg(avg: Optional[float]) -> Optional[int]:
+        if avg is None:
+            return None
+        return int(avg * 200)
+
+    for clan in clans:
+        proj = projected_from_avg(clan.avg_medals_per_deck)
+        if proj is not None:
+            clan.projected_medals = proj
+
     def s(x) -> str:
         return "" if x is None else str(x)
 
@@ -611,11 +621,10 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
     proj_w = max([len(s(c.projected_medals)) for c in clans] + [len("Projected")])
     boat_w = max([len(s(c.boat_points)) for c in clans] + [len("Boat")])
     medal_w = max([len(s(c.current_medals)) for c in clans] + [len("Medals")])
-    troph_w = max([len(s(c.trophies)) for c in clans] + [len("Trophies")])
 
     head = (
         f'{"Clan":<{name_w}} | {"Decks":>{decks_w}} | {"Avg/deck":>{avg_w}} | {"Projected":>{proj_w}} | '
-        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}} | {"Trophies":>{troph_w}}'
+        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}}'
     )
     sep = "-" * len(head)
 
@@ -624,8 +633,7 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
         decks = f"{s(c.decks_used_today)}/{s(c.decks_total_today)}"
         lines.append(
             f"{c.name:<{name_w}} | {decks:>{decks_w}} | {sf(c.avg_medals_per_deck):>{avg_w}} | "
-            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}} | "
-            f"{s(c.trophies):>{troph_w}}"
+            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}}"
         )
     return "\n".join(lines)
 
