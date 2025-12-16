@@ -81,6 +81,17 @@
       <div id="mvpPrevious">(laden...)</div>
     </div>
 
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Promotie naar Elder</div>
+        <div class="actions">
+          <button class="iconBtn" id="copyPromotions">⧉ Kopieer lijst</button>
+        </div>
+      </div>
+      <div class="toast" id="toastPromotions"></div>
+      <div id="promotionList">(laden...)</div>
+    </div>
+
     <div class="card fullRow">
       <div class="cardHead toggleWrap">
         <div class="title">Reliability / Ratio Score</div>
@@ -157,6 +168,42 @@
       li.title = 'Klik om te kopiëren';
       li.innerHTML = `<span>${idx + 1}. ${row.player}</span><span class="copyIcon">${row.score} ⧉</span>`;
       li.addEventListener('click', () => copyText(`${row.player} ${row.score}`, toastEl));
+      container.appendChild(li);
+    });
+
+    const target = el(targetId);
+    target.innerHTML = '';
+    target.appendChild(container);
+  }
+
+  function PromotionList(targetId, items, toastEl) {
+    const container = document.createElement('ul');
+    container.className = 'mvpList';
+
+    if (!items || !items.length) {
+      container.innerHTML = '<li class="muted">Geen promotiekandidaten gevonden</li>';
+      el(targetId).innerHTML = '';
+      el(targetId).appendChild(container);
+      return;
+    }
+
+    items.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'mvpItem';
+      li.title = 'Klik om te kopiëren';
+      li.innerHTML = `
+        <div>
+          <div><strong>${row.player}</strong></div>
+          <div class="muted">${row.reason}</div>
+        </div>
+        <span class="pill">Gem. C: ${row.average_contribution}</span>
+      `;
+      li.addEventListener('click', () =>
+        copyText(
+          `${row.player} — ${row.reason} Gem. C: ${row.average_contribution}`,
+          toastEl
+        )
+      );
       container.appendChild(li);
     });
 
@@ -295,6 +342,7 @@
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
   let mvpCurrent = [];
   let mvpPrevious = [];
+  let promotionCandidates = [];
   let ratioExpanded = false;
 
   const infoContent = {
@@ -354,8 +402,10 @@
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
+    promotionCandidates = data.promotion_candidates || [];
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
+    PromotionList('promotionList', promotionCandidates, el('toastPromotions'));
 
     ratioData = (data.ratio_scores || []).map((row) => [
       row.player,
@@ -413,6 +463,16 @@
   el('copyPrevious').addEventListener('click', () => {
     const rows = (mvpPrevious || []).map((row, idx) => [`${idx + 1}`, row.player, row.score]);
     copyTable(['#', 'Player', 'Score'], rows, el('toastPrevious'));
+  });
+
+  el('copyPromotions').addEventListener('click', () => {
+    if (!promotionCandidates || !promotionCandidates.length) return;
+    const rows = promotionCandidates.map((row) => [
+      row.player,
+      `${row.streak_weeks} weken perfect`,
+      `Gem. C: ${row.average_contribution}`,
+    ]);
+    copyTable(['Player', 'Streak', 'Gemiddelde score'], rows, el('toastPromotions'));
   });
 
   el('copyRatio').addEventListener('click', () => {
