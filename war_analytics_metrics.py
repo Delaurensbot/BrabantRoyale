@@ -218,6 +218,46 @@ def parse_table_with_tag_or_name(table: BeautifulSoup) -> Tuple[List[str], List[
     return headers, rows, tags_per_row, names_per_row
 
 
+def compute_mvp_list(
+    season_weeks: List[str],
+    contrib_map: Dict[str, Dict[str, int]],
+    decks_map: Dict[str, Dict[str, int]],
+    player_print_map: Dict[str, str],
+    top_n: int,
+    require_all_weekends: bool,
+) -> List[Dict[str, str]]:
+    results: List[Dict[str, str]] = []
+
+    for key, per_week_c in contrib_map.items():
+        total_score = 0
+        eligible = True
+
+        for wh in season_weeks:
+            c_val = per_week_c.get(wh, 0)
+
+            # Alleen meegerekend als Contribution > 0
+            if c_val <= 0:
+                if require_all_weekends:
+                    eligible = False
+                continue
+
+            d_val = decks_map.get(key, {}).get(wh, 0)
+            if d_val != 16:
+                eligible = False
+                break
+
+            total_score += c_val
+
+        if eligible and total_score > 0:
+            results.append({
+                "player": player_print_map.get(key, key),
+                "score": str(total_score),
+            })
+
+    results.sort(key=lambda r: int(r.get("score", 0)), reverse=True)
+    return results[:top_n]
+
+
 def filter_rows_keep_alignment(rows, tags, names, current_tags, name_to_tag):
     f_rows, f_tags, f_names = [], [], []
     for row, tag, nm in zip(rows, tags, names):
@@ -311,6 +351,53 @@ def build_maps(contrib_headers2, contrib_rows2, decks_headers2, decks_rows2):
         decks_map[key] = per_week
 
     return contrib_week_headers, decks_week_headers, contrib_map, decks_map, role_map, player_print_map
+
+
+def compute_reliability_scores(
+    contrib_map: Dict[str, Dict[str, int]],
+    decks_map: Dict[str, Dict[str, int]],
+    role_map: Dict[str, str],
+    player_print_map: Dict[str, str],
+) -> List[Dict[str, object]]:
+    results: List[Dict[str, object]] = []
+
+    for key, per_week_c in contrib_map.items():
+        weeks_played = 0
+        missed_attacks = 0
+        penalty_points = 0
+        attacks_done = 0
+
+        for wh, c_val in per_week_c.items():
+            if c_val <= 0:
+                continue
+
+            weeks_played += 1
+            d_val = decks_map.get(key, {}).get(wh, 0)
+            done = max(0, min(16, d_val))
+            attacks_done += done
+            missing = max(0, 16 - done)
+            missed_attacks += missing
+            penalty_points += UNREPLACEABLE_PENALTY.get(missing, missing * 4)
+
+        total_possible = weeks_played * 16
+        reliability_score = 0.0
+        if total_possible > 0:
+            reliability_score = round((attacks_done / total_possible) * 100, 2)
+
+        results.append(
+            {
+                "player": player_print_map.get(key, key),
+                "role": role_map.get(key, ""),
+                "weeks_played": weeks_played,
+                "attacks_done": attacks_done,
+                "missed_attacks": missed_attacks,
+                "penalty_points": penalty_points,
+                "reliability_score": reliability_score,
+            }
+        )
+
+    results.sort(key=lambda r: (r.get("reliability_score", 0), r.get("missed_attacks", 0)))
+    return results
 
 
 def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optional[int], Optional[int]]:
@@ -421,6 +508,72 @@ def print_mvp_explanations_simple(prev_season: Optional[int], current_season: Op
         lines.append("- Ranking: hoogste totale Contribution-score tot nu toe binnen seizoen.")
         lines.append("- Hall of Fame pas na seizoen, maar dit is de live top 10 met jouw perfecte-regel.")
     print("\n".join(lines))
+
+
+def collect_analytics_data(
+    analytics_url: str = ANALYTICS_URL_DEFAULT,
+    members_url: str = CLAN_MEMBERS_URL_DEFAULT,
+    top_n: int = 10,
+) -> Dict[str, object]:
+    tag_to_name_clean, name_clean_to_tag, tag_to_role = get_current_members_with_roles(members_url)
+    current_tags = set(tag_to_name_clean.keys())
+    if not current_tags:
+        raise RuntimeError("Could not extract current members from the clan page.")
+
+    html = fetch(analytics_url)
+    soup = BeautifulSoup(html, "html.parser")
+
+    contribution_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "C"})
+    decks_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "D"})
+
+    if not contribution_table or not decks_table:
+        raise RuntimeError("Required tables not found on analytics page.")
+
+    headers_c, rows_c, tags_c, names_c = parse_table_with_tag_or_name(contribution_table)
+    f_rows_c, f_tags_c, f_names_c = filter_rows_keep_alignment(
+        rows_c, tags_c, names_c, current_tags, name_clean_to_tag
+    )
+    contrib_headers, contrib_rows = add_role_column(
+        headers_c, f_rows_c, f_tags_c, f_names_c, name_clean_to_tag, tag_to_role
+    )
+
+    headers_d, rows_d, tags_d, names_d = parse_table_with_tag_or_name(decks_table)
+    f_rows_d, f_tags_d, f_names_d = filter_rows_keep_alignment(
+        rows_d, tags_d, names_d, current_tags, name_clean_to_tag
+    )
+    decks_headers, decks_rows = add_role_column(
+        headers_d, f_rows_d, f_tags_d, f_names_d, name_clean_to_tag, tag_to_role
+    )
+
+    contrib_week_headers, _, contrib_map, decks_map, role_map, player_print_map = build_maps(
+        contrib_headers, contrib_rows, decks_headers, decks_rows
+    )
+
+    current_season, prev_season = detect_current_and_previous_season(contrib_week_headers)
+
+    mvp_current: List[Dict[str, str]] = []
+    if current_season is not None:
+        weeks_current = [wh for wh in contrib_week_headers if season_of_week_header(wh) == current_season]
+        mvp_current = compute_mvp_list(
+            weeks_current, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=False
+        )
+
+    mvp_previous: List[Dict[str, str]] = []
+    if prev_season is not None:
+        weeks_prev = [wh for wh in contrib_week_headers if season_of_week_header(wh) == prev_season]
+        mvp_previous = compute_mvp_list(
+            weeks_prev, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=True
+        )
+
+    ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
+
+    return {
+        "mvp_current": mvp_current,
+        "mvp_previous": mvp_previous,
+        "ratio_scores": ratio_scores,
+        "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
+        "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+    }
 
 
 def main() -> int:
