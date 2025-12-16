@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clan War Analytics</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
+    h1 { margin: 0 0 10px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .muted { opacity: 0.8; }
+    a { color: #67c7ff; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
+    .fullRow { grid-column: 1 / -1; }
+    .card { border-radius: 16px; padding: 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; gap: 10px; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 6px; }
+    .mvpList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    .mvpItem { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+    .mvpItem:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.05); }
+    .copyIcon { opacity: 0.7; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .filtersRow input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: inherit; font: inherit; box-sizing: border-box; }
+    .sortHeader { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .sortHeader .arrow { font-size: 12px; opacity: 0.7; }
+    .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .status { margin-left: 4px; }
+    .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+    .tableWrap { overflow-x: auto; }
+    .toggleWrap { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1 style="margin-right: 10px;">Clan War Analytics</h1>
+    <a class="muted" href="/index.html">← Terug naar dashboard</a>
+    <button id="refresh">Refresh</button>
+    <div class="muted status" id="status"></div>
+    <div class="muted" id="updated" style="margin-left:auto;"></div>
+  </div>
+  <div class="error" id="errorBox"></div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="cardHead"><div class="title">Huidig seizoen MVP (Top 10)</div><div class="toast" id="toastCurrent"></div></div>
+      <div id="mvpCurrent">(laden...)</div>
+    </div>
+    <div class="card">
+      <div class="cardHead"><div class="title">Vorig seizoen MVP (Top 10)</div><div class="toast" id="toastPrevious"></div></div>
+      <div id="mvpPrevious">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead toggleWrap">
+        <div class="title">Reliability / Ratio Score</div>
+        <button id="toggleRatio">Toon alles</button>
+      </div>
+      <div class="tableWrap" id="ratioTableWrap"></div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead"><div class="title">Contribution table</div></div>
+      <div class="tableWrap" id="contributionWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead"><div class="title">Decks Used table</div></div>
+      <div class="tableWrap" id="decksWrap">(laden...)</div>
+    </div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+
+  function showError(msg) {
+    const box = el('errorBox');
+    box.textContent = msg;
+    box.style.display = msg ? 'block' : 'none';
+  }
+
+  function copyText(text, toastEl) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      if (toastEl) {
+        toastEl.textContent = 'Copied!';
+        setTimeout(() => (toastEl.textContent = ''), 1200);
+      }
+    });
+  }
+
+  function MVPCard(targetId, items, toastEl) {
+    const container = document.createElement('ul');
+    container.className = 'mvpList';
+
+    if (!items || !items.length) {
+      container.innerHTML = '<li class="muted">Geen data</li>';
+      el(targetId).innerHTML = '';
+      el(targetId).appendChild(container);
+      return;
+    }
+
+    items.forEach((row, idx) => {
+      const li = document.createElement('li');
+      li.className = 'mvpItem';
+      li.title = 'Klik om te kopiëren';
+      li.innerHTML = `<span>${idx + 1}. ${row.player}</span><span class="copyIcon">${row.score} ⧉</span>`;
+      li.addEventListener('click', () => copyText(`${row.player} ${row.score}`, toastEl));
+      container.appendChild(li);
+    });
+
+    const target = el(targetId);
+    target.innerHTML = '';
+    target.appendChild(container);
+  }
+
+  function createTableComponent(headers, rows) {
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const filtersRow = document.createElement('tr');
+    filtersRow.className = 'filtersRow';
+
+    let sortIdx = null;
+    let sortDir = 1;
+    const filters = headers.map(() => '');
+
+    function apply() {
+      let filtered = rows.slice();
+      filtered = filtered.filter((row) =>
+        row.every((cell, idx) => {
+          const needle = (filters[idx] || '').toLowerCase();
+          if (!needle) return true;
+          return String(cell || '').toLowerCase().includes(needle);
+        })
+      );
+
+      if (sortIdx !== null) {
+        filtered.sort((a, b) => {
+          const av = a[sortIdx] ?? '';
+          const bv = b[sortIdx] ?? '';
+          const aNum = parseFloat(av);
+          const bNum = parseFloat(bv);
+          const bothNum = !Number.isNaN(aNum) && !Number.isNaN(bNum);
+          if (bothNum) return (aNum - bNum) * sortDir;
+          return String(av).localeCompare(String(bv)) * sortDir;
+        });
+      }
+
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+      if (!filtered.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = headers.length;
+        td.style.textAlign = 'center';
+        td.style.padding = '14px';
+        td.textContent = 'Geen resultaten';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      filtered.forEach((row) => {
+        const tr = document.createElement('tr');
+        row.forEach((cell) => {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    headers.forEach((h, idx) => {
+      const th = document.createElement('th');
+      const btn = document.createElement('span');
+      btn.className = 'sortHeader';
+      const arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = '↕';
+      btn.textContent = h || '';
+      btn.appendChild(arrow);
+      btn.addEventListener('click', () => {
+        if (sortIdx === idx) {
+          sortDir = -sortDir;
+        } else {
+          sortIdx = idx;
+          sortDir = 1;
+        }
+        apply();
+      });
+      th.appendChild(btn);
+      headerRow.appendChild(th);
+
+      const filterTh = document.createElement('th');
+      const input = document.createElement('input');
+      input.placeholder = 'Filter...';
+      input.addEventListener('input', (e) => {
+        filters[idx] = e.target.value;
+        apply();
+      });
+      filterTh.appendChild(input);
+      filtersRow.appendChild(filterTh);
+    });
+
+    thead.appendChild(headerRow);
+    thead.appendChild(filtersRow);
+    table.appendChild(thead);
+    table.appendChild(document.createElement('tbody'));
+
+    apply();
+
+    return {
+      element: table,
+      setRows(newRows) {
+        rows = newRows || [];
+        apply();
+      },
+    };
+  }
+
+  function renderTable(targetId, headers, rows) {
+    const comp = createTableComponent(headers, rows);
+    const wrap = el(targetId);
+    wrap.innerHTML = '';
+    wrap.appendChild(comp.element);
+    return comp;
+  }
+
+  let ratioComponent = null;
+  let ratioData = [];
+  let ratioExpanded = false;
+
+  function renderAnalytics(data) {
+    MVPCard('mvpCurrent', data.mvp_current || [], el('toastCurrent'));
+    MVPCard('mvpPrevious', data.mvp_previous || [], el('toastPrevious'));
+
+    ratioData = (data.ratio_scores || []).map((row) => [
+      row.player,
+      row.role || '',
+      row.weeks_played,
+      row.attacks_done,
+      row.missed_attacks,
+      row.penalty_points,
+      row.reliability_score,
+    ]);
+
+    const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'Reliability %'];
+    ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
+
+    const contribution = data.contribution_table || { headers: [], rows: [] };
+    renderTable('contributionWrap', contribution.headers, contribution.rows);
+
+    const decks = data.decks_used_table || { headers: [], rows: [] };
+    renderTable('decksWrap', decks.headers, decks.rows);
+  }
+
+  async function fetchAnalytics() {
+    showError('');
+    el('status').textContent = 'Laden...';
+    try {
+      const res = await fetch('/api/analytics');
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Onbekende fout');
+      renderAnalytics(json);
+      el('status').textContent = '';
+      el('updated').textContent = `Laatste refresh: ${new Date().toLocaleString()}`;
+    } catch (e) {
+      console.error(e);
+      showError(e.message);
+      el('status').textContent = '';
+    }
+  }
+
+  el('refresh').addEventListener('click', fetchAnalytics);
+  el('toggleRatio').addEventListener('click', () => {
+    ratioExpanded = !ratioExpanded;
+    el('toggleRatio').textContent = ratioExpanded ? 'Toon minder' : 'Toon alles';
+    if (ratioComponent) {
+      const slice = ratioExpanded ? ratioData : ratioData.slice(0, 10);
+      ratioComponent.setRows(slice);
+    }
+  });
+
+  fetchAnalytics();
+</script>
+</body>
+</html>
