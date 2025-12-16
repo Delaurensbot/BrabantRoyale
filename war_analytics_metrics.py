@@ -400,6 +400,98 @@ def compute_reliability_scores(
     return results
 
 
+def parse_week_key(week_header: str) -> Tuple[int, int]:
+    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", week_header)
+    if not m:
+        return (math.inf, math.inf)
+    return (int(m.group(1)), int(m.group(2)))
+
+
+def sort_valid_weeks(decks_by_week: Dict[str, int]) -> List[Tuple[Tuple[int, int], str, int]]:
+    ordered: List[Tuple[Tuple[int, int], str, int]] = []
+    for week_header, decks_used in decks_by_week.items():
+        parsed = parse_week_key(week_header)
+        if math.isinf(parsed[0]) or math.isinf(parsed[1]):
+            continue
+        ordered.append((parsed, week_header, decks_used))
+    ordered.sort(key=lambda t: t[0])
+    return ordered
+
+
+def current_perfect_streak(decks_by_week: Dict[str, int]) -> int:
+    ordered = sort_valid_weeks(decks_by_week)
+    streak = 0
+    for _, _, decks_used in reversed(ordered):
+        if decks_used == 16:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+ELDER_REQUIRED_STREAK = 6
+
+
+def last_n_weeks_all_perfect(decks_by_week: Dict[str, int], n: int = ELDER_REQUIRED_STREAK) -> bool:
+    ordered = sort_valid_weeks(decks_by_week)
+    if len(ordered) < n:
+        return False
+    last_n = ordered[-n:]
+    return all(decks_used == 16 for _, _, decks_used in last_n)
+
+
+def should_promote_to_elder(player_name: str, role: str, decks_by_week: Dict[str, int]) -> bool:
+    """
+    True als:
+    - huidige role == "Member"
+    - huidige streak >= 6 weekends met D == 16
+    """
+
+    if (role or "").strip().lower() != "member":
+        return False
+
+    streak = current_perfect_streak(decks_by_week)
+    if streak < ELDER_REQUIRED_STREAK:
+        return False
+
+    return last_n_weeks_all_perfect(decks_by_week, n=ELDER_REQUIRED_STREAK)
+
+
+def average_contribution(per_week_contrib: Dict[str, int]) -> float:
+    played_weeks = [v for v in per_week_contrib.values() if v > 0]
+    if not played_weeks:
+        return 0.0
+    return round(sum(played_weeks) / len(played_weeks), 2)
+
+
+def build_promotion_candidates(
+    contrib_map: Dict[str, Dict[str, int]],
+    decks_map: Dict[str, Dict[str, int]],
+    role_map: Dict[str, str],
+    player_print_map: Dict[str, str],
+) -> List[Dict[str, object]]:
+    suggestions: List[Dict[str, object]] = []
+
+    for key, per_week_decks in decks_map.items():
+        role = role_map.get(key, "")
+        if not should_promote_to_elder(key, role, per_week_decks):
+            continue
+
+        streak = current_perfect_streak(per_week_decks)
+        avg_score = average_contribution(contrib_map.get(key, {}))
+        suggestions.append(
+            {
+                "player": player_print_map.get(key, key),
+                "streak_weeks": streak,
+                "average_contribution": avg_score,
+                "reason": f"Laatste {ELDER_REQUIRED_STREAK} weken perfecte attacks (D=16) als Member.",
+            }
+        )
+
+    suggestions.sort(key=lambda r: (r.get("streak_weeks", 0), r.get("average_contribution", 0)), reverse=True)
+    return suggestions
+
+
 def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optional[int], Optional[int]]:
     seasons = sorted({s for s in (season_of_week_header(wh) for wh in week_headers) if s is not None})
     if not seasons:
@@ -566,11 +658,13 @@ def collect_analytics_data(
         )
 
     ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
+    promotion_candidates = build_promotion_candidates(contrib_map, decks_map, role_map, player_print_map)
 
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
         "ratio_scores": ratio_scores,
+        "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
     }

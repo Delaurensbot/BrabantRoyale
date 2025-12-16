@@ -81,6 +81,18 @@
       <div id="mvpPrevious">(laden...)</div>
     </div>
 
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Promotie naar Elder</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoPromotions">ℹ️ Info</button>
+          <button class="iconBtn" id="copyPromotions">⧉ Kopieer lijst</button>
+        </div>
+      </div>
+      <div class="toast" id="toastPromotions"></div>
+      <div id="promotionList">(laden...)</div>
+    </div>
+
     <div class="card fullRow">
       <div class="cardHead toggleWrap">
         <div class="title">Reliability / Ratio Score</div>
@@ -157,6 +169,42 @@
       li.title = 'Klik om te kopiëren';
       li.innerHTML = `<span>${idx + 1}. ${row.player}</span><span class="copyIcon">${row.score} ⧉</span>`;
       li.addEventListener('click', () => copyText(`${row.player} ${row.score}`, toastEl));
+      container.appendChild(li);
+    });
+
+    const target = el(targetId);
+    target.innerHTML = '';
+    target.appendChild(container);
+  }
+
+  function PromotionList(targetId, items, toastEl) {
+    const container = document.createElement('ul');
+    container.className = 'mvpList';
+
+    if (!items || !items.length) {
+      container.innerHTML = '<li class="muted">Geen promotiekandidaten gevonden</li>';
+      el(targetId).innerHTML = '';
+      el(targetId).appendChild(container);
+      return;
+    }
+
+    items.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'mvpItem';
+      li.title = 'Klik om te kopiëren';
+      li.innerHTML = `
+        <div>
+          <div><strong>${row.player}</strong> <span class="pill">${row.streak_weeks}w streak</span></div>
+          <div class="muted">${row.reason}</div>
+        </div>
+        <span class="pill">Gem. C: ${row.average_contribution}</span>
+      `;
+      li.addEventListener('click', () =>
+        copyText(
+          `${row.player} (${row.streak_weeks}w streak) — ${row.reason} Gem. C: ${row.average_contribution}`,
+          toastEl
+        )
+      );
       container.appendChild(li);
     });
 
@@ -295,6 +343,7 @@
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
   let mvpCurrent = [];
   let mvpPrevious = [];
+  let promotionCandidates = [];
   let ratioExpanded = false;
 
   const infoContent = {
@@ -327,6 +376,17 @@
         <p><strong>Waarom</strong><br />MVP is "beste van het seizoen", dus alleen mogelijk met een volledig perfecte aanwezigheid en attack-ratio.</p>
       `,
     },
+    promotions: {
+      title: 'Promotie naar Elder',
+      body: `
+        <p><strong>Vereiste</strong></p>
+        <ul>
+          <li>Huidige rol is <em>Member</em>.</li>
+          <li>Minimaal 6 opeenvolgende weekenden met perfecte attacks (Decks Used = 16).</li>
+        </ul>
+        <p>We tonen alleen spelers waarvan de huidige streak 6 weken of meer is en de laatste 6 weekenden perfect waren.</p>
+      `,
+    },
     ratio: {
       title: 'Reliability / Ratio score',
       body: `
@@ -354,8 +414,10 @@
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
+    promotionCandidates = data.promotion_candidates || [];
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
+    PromotionList('promotionList', promotionCandidates, el('toastPromotions'));
 
     ratioData = (data.ratio_scores || []).map((row) => [
       row.player,
@@ -415,6 +477,16 @@
     copyTable(['#', 'Player', 'Score'], rows, el('toastPrevious'));
   });
 
+  el('copyPromotions').addEventListener('click', () => {
+    if (!promotionCandidates || !promotionCandidates.length) return;
+    const rows = promotionCandidates.map((row) => [
+      `${row.player} (${row.streak_weeks}w streak)`,
+      `${row.streak_weeks} weken perfect`,
+      `Gem. C: ${row.average_contribution}`,
+    ]);
+    copyTable(['Player', 'Streak', 'Gemiddelde score'], rows, el('toastPromotions'));
+  });
+
   el('copyRatio').addEventListener('click', () => {
     if (ratioComponent) {
       copyTable(ratioComponent.getHeaders(), ratioComponent.getVisibleRows(), el('toastRatio'));
@@ -435,6 +507,7 @@
 
   el('infoCurrent').addEventListener('click', () => showInfoOverlay('current'));
   el('infoPrevious').addEventListener('click', () => showInfoOverlay('previous'));
+  el('infoPromotions').addEventListener('click', () => showInfoOverlay('promotions'));
   el('infoRatio').addEventListener('click', () => showInfoOverlay('ratio'));
   el('infoOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'infoOverlay') {
