@@ -19,6 +19,9 @@
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; gap: 10px; }
     .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
     .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 6px; }
+    .actions { display: inline-flex; align-items: center; gap: 8px; }
+    .iconBtn { padding: 6px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); color: inherit; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.2); font-size: 13px; }
+    .iconBtn:hover { border-color: rgba(255,255,255,0.35); }
     .mvpList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
     .mvpItem { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
     .mvpItem:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.05); }
@@ -35,6 +38,12 @@
     .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
     .tableWrap { overflow-x: auto; }
     .toggleWrap { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .infoOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 10; }
+    .infoPanel { background: #111826; border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 18px; max-width: 720px; width: calc(100% - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
+    .infoPanel h3 { margin-top: 0; margin-bottom: 10px; }
+    .infoPanel p { margin: 0 0 10px; line-height: 1.5; }
+    .infoPanel ul { padding-left: 18px; margin: 8px 0 12px; }
+    .infoPanel .closeBtn { margin-top: 8px; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -50,30 +59,59 @@
 
   <div class="grid">
     <div class="card">
-      <div class="cardHead"><div class="title">Huidig seizoen MVP (Top 10)</div><div class="toast" id="toastCurrent"></div></div>
+      <div class="cardHead">
+        <div class="title">Huidig seizoen MVP (Top 10)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoCurrent">ℹ️ Info</button>
+          <button class="iconBtn" id="copyCurrent">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastCurrent"></div>
       <div id="mvpCurrent">(laden...)</div>
     </div>
     <div class="card">
-      <div class="cardHead"><div class="title">Vorig seizoen MVP (Top 10)</div><div class="toast" id="toastPrevious"></div></div>
+      <div class="cardHead">
+        <div class="title">Vorig seizoen MVP (Top 10)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoPrevious">ℹ️ Info</button>
+          <button class="iconBtn" id="copyPrevious">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastPrevious"></div>
       <div id="mvpPrevious">(laden...)</div>
     </div>
 
     <div class="card fullRow">
       <div class="cardHead toggleWrap">
         <div class="title">Reliability / Ratio Score</div>
-        <button id="toggleRatio">Toon alles</button>
+        <div class="actions">
+          <button class="iconBtn" id="infoRatio">ℹ️ Info</button>
+          <button class="iconBtn" id="copyRatio">⧉ Kopieer tabel</button>
+          <button id="toggleRatio">Toon alles</button>
+        </div>
       </div>
+      <div class="toast" id="toastRatio"></div>
       <div class="tableWrap" id="ratioTableWrap"></div>
     </div>
 
     <div class="card fullRow">
-      <div class="cardHead"><div class="title">Contribution table</div></div>
+      <div class="cardHead"><div class="title">Contribution table</div><div class="actions"><button class="iconBtn" id="copyContribution">⧉ Kopieer tabel</button></div></div>
+      <div class="toast" id="toastContribution"></div>
       <div class="tableWrap" id="contributionWrap">(laden...)</div>
     </div>
 
     <div class="card fullRow">
-      <div class="cardHead"><div class="title">Decks Used table</div></div>
+      <div class="cardHead"><div class="title">Decks Used table</div><div class="actions"><button class="iconBtn" id="copyDecks">⧉ Kopieer tabel</button></div></div>
+      <div class="toast" id="toastDecks"></div>
       <div class="tableWrap" id="decksWrap">(laden...)</div>
+    </div>
+  </div>
+
+  <div class="infoOverlay" id="infoOverlay">
+    <div class="infoPanel">
+      <h3 id="infoTitle"></h3>
+      <div id="infoBody"></div>
+      <button class="iconBtn closeBtn" id="closeInfo">Sluiten</button>
     </div>
   </div>
 
@@ -94,6 +132,12 @@
         setTimeout(() => (toastEl.textContent = ''), 1200);
       }
     });
+  }
+
+  function copyTable(headers, rows, toastEl) {
+    const headerLine = headers.join('\t');
+    const body = rows.map((r) => r.map((cell) => cell ?? '').join('\t')).join('\n');
+    copyText([headerLine, body].filter(Boolean).join('\n'), toastEl);
   }
 
   function MVPCard(targetId, items, toastEl) {
@@ -132,6 +176,8 @@
     let sortDir = 1;
     const filters = headers.map(() => '');
 
+    let lastRendered = [];
+
     function apply() {
       let filtered = rows.slice();
       filtered = filtered.filter((row) =>
@@ -168,6 +214,7 @@
         return;
       }
 
+      lastRendered = filtered.map((r) => r.slice());
       filtered.forEach((row) => {
         const tr = document.createElement('tr');
         row.forEach((cell) => {
@@ -224,6 +271,12 @@
         rows = newRows || [];
         apply();
       },
+      getHeaders() {
+        return headers.slice();
+      },
+      getVisibleRows() {
+        return lastRendered.slice();
+      },
     };
   }
 
@@ -237,11 +290,72 @@
 
   let ratioComponent = null;
   let ratioData = [];
+  let contributionComponent = null;
+  let decksComponent = null;
+  let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
+  let mvpCurrent = [];
+  let mvpPrevious = [];
   let ratioExpanded = false;
 
+  const infoContent = {
+    current: {
+      title: 'Huidig seizoen MVP (Top 10)',
+      body: `
+        <p><strong>Berekening</strong></p>
+        <ul>
+          <li>We nemen alleen weekenden uit het huidige seizoen.</li>
+          <li>Een weekend telt als "gespeeld" als de speler Contribution &gt; 0 heeft.</li>
+          <li>Voor MVP moet elke gespeelde weekend perfect zijn: Decks Used = 16 (dus 0 gemiste aanvallen).</li>
+          <li>Score = som van Contribution over alle gespeelde weekenden in dit seizoen.</li>
+          <li>Daarna sorteren we op hoogste score en tonen Top 10.</li>
+        </ul>
+        <p><strong>Waarom</strong><br />Zo belonen we alleen spelers die én veel bijdragen én geen gaten laten vallen die je niet kunt opvangen.</p>
+      `,
+    },
+    previous: {
+      title: 'Vorig seizoen MVP (Top 10)',
+      body: `
+        <p><strong>Berekening</strong></p>
+        <ul>
+          <li>We nemen alle weekenden uit het vorige seizoen.</li>
+          <li>Een speler is alleen eligible als:</li>
+          <li style="margin-left: 16px;">Contribution &gt; 0 in elk weekend (dus elk weekend aanwezig)</li>
+          <li style="margin-left: 16px;">én Decks Used = 16 in elk weekend (dus 0 gemiste aanvallen)</li>
+          <li>Score = som van Contribution over het hele seizoen.</li>
+          <li>Daarna sorteren we op hoogste score en tonen Top 10.</li>
+        </ul>
+        <p><strong>Waarom</strong><br />MVP is "beste van het seizoen", dus alleen mogelijk met een volledig perfecte aanwezigheid en attack-ratio.</p>
+      `,
+    },
+    ratio: {
+      title: 'Reliability / Ratio score',
+      body: `
+        <p><strong>Berekening</strong></p>
+        <ul>
+          <li>Voor elk weekend in de data kijken we of het weekend "gespeeld" is (Contribution &gt; 0).</li>
+          <li>Verwachte decks = 16 per gespeeld weekend.</li>
+          <li>Gemiste aanvallen = 16 - Decks Used (alleen voor gespeelde weekenden).</li>
+          <li>Strafpunten worden berekend op basis van gemiste aanvallen per weekend volgens jouw regels (zwaarder straffen bij 1–3 miss).</li>
+          <li>Reliability score is gebaseerd op totaal gemiste aanvallen + strafpunten en wordt genormaliseerd over het aantal gespeelde weekenden.</li>
+        </ul>
+        <p><strong>Waarom</strong><br />Dit pakt vooral het "gevaarlijke gedrag" aan: wel meedoen maar te weinig aanvallen doen, waardoor je 2–3 open attacks krijgt die je niet kunt opvangen.</p>
+      `,
+    },
+  };
+
+  function showInfoOverlay(key) {
+    const content = infoContent[key];
+    if (!content) return;
+    el('infoTitle').textContent = content.title;
+    el('infoBody').innerHTML = content.body;
+    el('infoOverlay').style.display = 'flex';
+  }
+
   function renderAnalytics(data) {
-    MVPCard('mvpCurrent', data.mvp_current || [], el('toastCurrent'));
-    MVPCard('mvpPrevious', data.mvp_previous || [], el('toastPrevious'));
+    mvpCurrent = data.mvp_current || [];
+    mvpPrevious = data.mvp_previous || [];
+    MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
+    MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
 
     ratioData = (data.ratio_scores || []).map((row) => [
       row.player,
@@ -256,11 +370,12 @@
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
 
-    const contribution = data.contribution_table || { headers: [], rows: [] };
-    renderTable('contributionWrap', contribution.headers, contribution.rows);
+    analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };
+    analyticsCache.decks = data.decks_used_table || { headers: [], rows: [] };
 
-    const decks = data.decks_used_table || { headers: [], rows: [] };
-    renderTable('decksWrap', decks.headers, decks.rows);
+    contributionComponent = renderTable('contributionWrap', analyticsCache.contribution.headers, analyticsCache.contribution.rows);
+
+    decksComponent = renderTable('decksWrap', analyticsCache.decks.headers, analyticsCache.decks.rows);
   }
 
   async function fetchAnalytics() {
@@ -288,6 +403,46 @@
       const slice = ratioExpanded ? ratioData : ratioData.slice(0, 10);
       ratioComponent.setRows(slice);
     }
+  });
+
+  el('copyCurrent').addEventListener('click', () => {
+    const rows = (mvpCurrent || []).map((row, idx) => [`${idx + 1}`, row.player, row.score]);
+    copyTable(['#', 'Player', 'Score'], rows, el('toastCurrent'));
+  });
+
+  el('copyPrevious').addEventListener('click', () => {
+    const rows = (mvpPrevious || []).map((row, idx) => [`${idx + 1}`, row.player, row.score]);
+    copyTable(['#', 'Player', 'Score'], rows, el('toastPrevious'));
+  });
+
+  el('copyRatio').addEventListener('click', () => {
+    if (ratioComponent) {
+      copyTable(ratioComponent.getHeaders(), ratioComponent.getVisibleRows(), el('toastRatio'));
+    }
+  });
+
+  el('copyContribution').addEventListener('click', () => {
+    if (contributionComponent) {
+      copyTable(contributionComponent.getHeaders(), contributionComponent.getVisibleRows(), el('toastContribution'));
+    }
+  });
+
+  el('copyDecks').addEventListener('click', () => {
+    if (decksComponent) {
+      copyTable(decksComponent.getHeaders(), decksComponent.getVisibleRows(), el('toastDecks'));
+    }
+  });
+
+  el('infoCurrent').addEventListener('click', () => showInfoOverlay('current'));
+  el('infoPrevious').addEventListener('click', () => showInfoOverlay('previous'));
+  el('infoRatio').addEventListener('click', () => showInfoOverlay('ratio'));
+  el('infoOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'infoOverlay') {
+      el('infoOverlay').style.display = 'none';
+    }
+  });
+  el('closeInfo').addEventListener('click', () => {
+    el('infoOverlay').style.display = 'none';
   });
 
   fetchAnalytics();
