@@ -430,6 +430,7 @@ def current_perfect_streak(decks_by_week: Dict[str, int]) -> int:
 
 
 ELDER_REQUIRED_STREAK = 6
+ELDER_MIN_AVG_CONTRIB = 2500
 
 
 def last_n_weeks_all_perfect(decks_by_week: Dict[str, int], n: int = ELDER_REQUIRED_STREAK) -> bool:
@@ -479,12 +480,17 @@ def build_promotion_candidates(
 
         streak = current_perfect_streak(per_week_decks)
         avg_score = average_contribution(contrib_map.get(key, {}))
+        if avg_score < ELDER_MIN_AVG_CONTRIB:
+            continue
         suggestions.append(
             {
                 "player": player_print_map.get(key, key),
                 "streak_weeks": streak,
                 "average_contribution": avg_score,
-                "reason": f"Laatste {ELDER_REQUIRED_STREAK} weken perfecte attacks (D=16) als Member.",
+                "reason": (
+                    f"Laatste {ELDER_REQUIRED_STREAK} weken perfecte attacks (D=16) als Member "
+                    f"en Gem. C ≥ {ELDER_MIN_AVG_CONTRIB}."
+                ),
             }
         )
 
