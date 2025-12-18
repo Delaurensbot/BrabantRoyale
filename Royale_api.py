@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 
 RACE_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY/war/race"
 CLAN_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY"
+CWSTATS_RACE_URL_DEFAULT = "https://cwstats.com/clan/9YP8UY/race"
 OUR_CLAN_NAME_DEFAULT = "Brabant Royale"
 
 
@@ -46,6 +47,99 @@ def clean_text(s: str) -> str:
     s = s.replace("\xa0", " ").strip()
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+# -----------------------------
+# CWStats parsing (for avg/deck, etc.)
+# -----------------------------
+def _find_cwstats_container(soup: BeautifulSoup):
+    node = soup.find(string=re.compile(r"\bClan\s+Stats\b", re.IGNORECASE))
+    if not node:
+        return None
+
+    cur = node.parent
+    for _ in range(10):
+        if not cur:
+            break
+        txt = " ".join(cur.stripped_strings).lower()
+        if ("battles left" in txt) and ("duels left" in txt) and ("projected finish" in txt):
+            return cur
+        cur = cur.parent
+
+    return None
+
+
+def parse_cwstats_clan_stats(html: str) -> Optional[Dict]:
+    soup = BeautifulSoup(html, "html.parser")
+
+    for t in soup(["script", "style", "noscript"]):
+        t.decompose()
+
+    container = _find_cwstats_container(soup)
+    if not container:
+        return None
+
+    tokens = [t.strip() for t in container.stripped_strings if t and t.strip()]
+    lower = [t.lower() for t in tokens]
+
+    def next_int_after(label: str):
+        label_l = label.lower()
+        for i, tok in enumerate(lower):
+            if tok == label_l:
+                for j in range(i + 1, min(i + 6, len(tokens))):
+                    if re.fullmatch(r"\d+", tokens[j]):
+                        return int(tokens[j])
+        return None
+
+    def pick_rank_and_value(finish_label: str):
+        fl = finish_label.lower()
+        for i, tok in enumerate(lower):
+            if tok == fl:
+                rank = None
+                value = None
+
+                if i - 1 >= 0 and re.fullmatch(r"\d+(st|nd|rd|th)", lower[i - 1]):
+                    rank = tokens[i - 1]
+
+                if i + 1 < len(tokens) and re.fullmatch(r"[\d,]+", tokens[i + 1]):
+                    value = tokens[i + 1]
+                else:
+                    for j in range(i + 1, min(i + 6, len(tokens))):
+                        if re.fullmatch(r"[\d,]+", tokens[j]):
+                            value = tokens[j]
+                            break
+
+                return rank, value
+        return None, None
+
+    battles_left = next_int_after("BATTLES LEFT")
+    duels_left = next_int_after("DUELS LEFT")
+
+    projected_rank, projected_finish = pick_rank_and_value("Projected Finish")
+    best_rank, best_finish = pick_rank_and_value("Best Possible Finish")
+    worst_rank, worst_finish = pick_rank_and_value("Worst Possible Finish")
+
+    avg_value = None
+    for t in tokens:
+        normalized = t.replace(",", ".")
+        if re.fullmatch(r"\d+\.\d{2}", normalized):
+            try:
+                avg_value = float(normalized)
+            except ValueError:
+                avg_value = None
+            break
+
+    return {
+        "avg_value": avg_value,
+        "battles_left": battles_left,
+        "duels_left": duels_left,
+        "projected_rank": projected_rank,
+        "projected_finish": projected_finish,
+        "best_rank": best_rank,
+        "best_finish": best_finish,
+        "worst_rank": worst_rank,
+        "worst_finish": worst_finish,
+    }
 
 
 # -----------------------------
@@ -878,6 +972,42 @@ def find_our_clan(clans: List[ClanOverview], our_clan_name: str) -> Optional[Cla
         if c.name.strip().lower() == our_clan_name.strip().lower():
             return c
     return None
+
+
+def apply_cwstats_overrides(
+    clans: List[ClanOverview],
+    cwstats_stats: Optional[Dict],
+    our_clan_name: str,
+    computed_battles_left: Optional[int] = None,
+):
+    if not cwstats_stats:
+        return
+
+    avg_value = cwstats_stats.get("avg_value") if isinstance(cwstats_stats, dict) else None
+    if avg_value is None:
+        return
+
+    try:
+        avg_float = float(avg_value)
+    except (TypeError, ValueError):
+        return
+
+    our = find_our_clan(clans, our_clan_name)
+    if not our:
+        return
+
+    our.avg_medals_per_deck = avg_float
+
+    remaining_attacks = computed_battles_left if computed_battles_left is not None else 0
+    if remaining_attacks <= 0:
+        try:
+            remaining_attacks = int(cwstats_stats.get("battles_left") or 0)
+        except Exception:
+            remaining_attacks = 0
+
+    if our.current_medals is not None:
+        projected = int(round(float(our.current_medals) + avg_float * remaining_attacks))
+        our.projected_medals = projected
 
 
 def render_clan_stats_block(

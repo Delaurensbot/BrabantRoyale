@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from Royale_api import (
     RACE_URL_DEFAULT,
     CLAN_URL_DEFAULT,
+    CWSTATS_RACE_URL_DEFAULT,
     OUR_CLAN_NAME_DEFAULT,
     fetch_html,
     fetch_clan_members,
@@ -25,6 +26,9 @@ from Royale_api import (
     render_day1_high_fame_players,
     render_day4_last_chance_players,
     build_short_story,
+    parse_cwstats_clan_stats,
+    apply_cwstats_overrides,
+    compute_battles_left,
 )
 
 class handler(BaseHTTPRequestHandler):
@@ -34,6 +38,9 @@ class handler(BaseHTTPRequestHandler):
 
             race_html = fetch_html(RACE_URL_DEFAULT)
             race_soup = BeautifulSoup(race_html, "html.parser")
+
+            cwstats_html = fetch_html(CWSTATS_RACE_URL_DEFAULT)
+            cwstats_stats = parse_cwstats_clan_stats(cwstats_html)
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             players = parse_player_rows_from_race_soup(race_soup)
@@ -47,6 +54,15 @@ class handler(BaseHTTPRequestHandler):
 
             filtered_players = sorted(filtered_players, key=lambda r: int(r.get("rank", 0) or 0))
             filtered_players = dedupe_rows(filtered_players)
+
+            battles_left_count = compute_battles_left(filtered_players)
+
+            apply_cwstats_overrides(
+                clans,
+                cwstats_stats,
+                OUR_CLAN_NAME_DEFAULT,
+                computed_battles_left=battles_left_count,
+            )
 
             race_overview_text = render_clan_overview_table(clans)
             insights_text = render_clan_insights(clans, OUR_CLAN_NAME_DEFAULT)
