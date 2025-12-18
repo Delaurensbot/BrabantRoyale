@@ -10,6 +10,9 @@
     h1 { margin: 0 0 10px; }
     .top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
     .muted { opacity: 0.8; }
+    .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); cursor: pointer; color: inherit; }
+    .clanButton--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
     a { color: #67c7ff; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
     button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
@@ -71,11 +74,13 @@
 <body>
   <div class="top">
     <h1 style="margin-right: 10px;">Clan War Analytics</h1>
-    <a class="muted" href="/index.html">← Terug naar dashboard</a>
+    <a class="muted" id="dashboardLink" href="/index.html">← Terug naar dashboard</a>
     <button id="refresh">Refresh</button>
     <div class="muted status" id="status"></div>
     <div class="muted" id="updated" style="margin-left:auto;"></div>
   </div>
+  <div class="clanSwitch" id="clanSwitch"></div>
+  <div class="muted" id="clanLabel"></div>
   <div class="error" id="errorBox"></div>
 
   <div class="grid">
@@ -198,6 +203,68 @@
 
 <script>
   const el = (id) => document.getElementById(id);
+  const CLANS = {
+    "9YP8UY": { name: "Brabant Royale" },
+    "GPCLVLPP": { name: "Brabant Royale 2" },
+  };
+  const DEFAULT_CLAN = "9YP8UY";
+  let currentClanTag = DEFAULT_CLAN;
+
+  function normalizeClanTag(tag) {
+    return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  }
+
+  function clanName(tag) {
+    return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
+  }
+
+  function updateClanLabel() {
+    const label = el('clanLabel');
+    if (label) {
+      label.textContent = `Analytics voor ${clanName(currentClanTag)} (${currentClanTag})`;
+    }
+  }
+
+  function updateNavLinks() {
+    const query = `?clan=${encodeURIComponent(currentClanTag)}`;
+    const dashboardLink = el('dashboardLink');
+    if (dashboardLink) dashboardLink.href = `/index.html${query}`;
+  }
+
+  function renderClanButtons() {
+    const switchEl = el('clanSwitch');
+    if (!switchEl) return;
+    switchEl.innerHTML = '';
+
+    Object.entries(CLANS).forEach(([tag, info]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'clanButton';
+      btn.dataset.clan = tag;
+      btn.textContent = `${info.name} (${tag})`;
+      btn.addEventListener('click', () => setClan(tag));
+      switchEl.appendChild(btn);
+    });
+  }
+
+  function setClan(tag, skipFetch = false) {
+    const normalized = normalizeClanTag(tag);
+    currentClanTag = CLANS[normalized] ? normalized : DEFAULT_CLAN;
+
+    document.querySelectorAll('.clanButton').forEach((btn) => {
+      if (btn.dataset.clan === currentClanTag) {
+        btn.classList.add('clanButton--active');
+      } else {
+        btn.classList.remove('clanButton--active');
+      }
+    });
+
+    updateClanLabel();
+    updateNavLinks();
+    if (!skipFetch) {
+      fetchAnalytics();
+    }
+  }
 
   function showError(msg) {
     const box = el('errorBox');
@@ -901,9 +968,9 @@
 
   async function fetchAnalytics() {
     showError('');
-    el('status').textContent = 'Laden...';
+    el('status').textContent = `Laden voor ${clanName(currentClanTag)}...`;
     try {
-      const res = await fetch('/api/analytics');
+      const res = await fetch(`/api/analytics?clan=${encodeURIComponent(currentClanTag)}`);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Onbekende fout');
       renderAnalytics(json);
@@ -1005,7 +1072,15 @@
     el('infoOverlay').style.display = 'none';
   });
 
-  fetchAnalytics();
+  function init() {
+    renderClanButtons();
+    const params = new URLSearchParams(window.location.search);
+    const desired = params.get('clan') || DEFAULT_CLAN;
+    setClan(desired, true);
+    fetchAnalytics();
+  }
+
+  init();
 </script>
 </body>
 </html>

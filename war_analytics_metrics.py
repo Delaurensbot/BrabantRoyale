@@ -16,9 +16,12 @@ from urllib.parse import unquote
 import requests
 from bs4 import BeautifulSoup
 
+from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
 
-ANALYTICS_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY/war/analytics"
-CLAN_MEMBERS_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY"
+
+DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
+ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["analytics_url"]
+CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["clan_url"]
 
 KNOWN_ROLES = ["Leader", "Co-leader", "Elder", "Member"]
 ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil "Owner"

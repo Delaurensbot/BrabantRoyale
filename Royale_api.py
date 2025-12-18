@@ -16,9 +16,11 @@ import requests
 from bs4 import BeautifulSoup
 
 
-RACE_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY/war/race"
-CLAN_URL_DEFAULT = "https://royaleapi.com/clan/9YP8UY"
-OUR_CLAN_NAME_DEFAULT = "Brabant Royale"
+DEFAULT_CLAN_TAG = "9YP8UY"
+CLAN_CONFIGS = {
+    DEFAULT_CLAN_TAG: {"name": "Brabant Royale"},
+    "GPCLVLPP": {"name": "Brabant Royale 2"},
+}
 
 
 # -----------------------------
@@ -56,6 +58,26 @@ def normalize_tag(tag: str) -> str:
     tag = tag.replace("%23", "").replace("#", "")
     tag = re.sub(r"[^A-Za-z0-9]", "", tag)
     return tag.upper()
+
+
+def get_clan_config(tag: Optional[str] = None) -> Dict[str, str]:
+    normalized = normalize_tag(tag or DEFAULT_CLAN_TAG) or DEFAULT_CLAN_TAG
+    config = CLAN_CONFIGS.get(normalized, CLAN_CONFIGS[DEFAULT_CLAN_TAG])
+
+    return {
+        "tag": normalized,
+        "name": config.get("name", ""),
+        "race_url": f"https://royaleapi.com/clan/{normalized}/war/race",
+        "clan_url": f"https://royaleapi.com/clan/{normalized}",
+        "analytics_url": f"https://royaleapi.com/clan/{normalized}/war/analytics",
+        "join_history_url": f"https://royaleapi.com/clan/{normalized}/history/join-leave",
+    }
+
+
+DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
+RACE_URL_DEFAULT = DEFAULT_CLAN_CONFIG["race_url"]
+CLAN_URL_DEFAULT = DEFAULT_CLAN_CONFIG["clan_url"]
+OUR_CLAN_NAME_DEFAULT = DEFAULT_CLAN_CONFIG["name"]
 
 
 def extract_player_tag_from_href(href: str) -> Optional[str]:

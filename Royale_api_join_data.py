@@ -7,8 +7,8 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from bs4 import BeautifulSoup
 
-CLAN_TAG = "9YP8UY"
-JOIN_LEAVE_URL = f"https://royaleapi.com/clan/{CLAN_TAG}/history/join-leave"
+from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
+
 PLAYER_URL_TEMPLATE = "https://royaleapi.com/player/{pid}"
 
 HEADERS = {
@@ -140,14 +140,16 @@ def print_table(rows: List[Dict[str, str]]) -> None:
         )
 
 
-def collect_join_data(limit: int = 10) -> Dict[str, object]:
+def collect_join_data(limit: int = 10, clan_tag: str = DEFAULT_CLAN_TAG) -> Dict[str, object]:
     """Collect join/leave data with account levels and links."""
 
     limit = max(1, min(50, int(limit)))
     fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    clan_config = get_clan_config(clan_tag)
+    join_url = clan_config["join_history_url"]
 
     with requests.Session() as session:
-        status, html = fetch_html(session, JOIN_LEAVE_URL)
+        status, html = fetch_html(session, join_url)
         if status != 200:
             raise RuntimeError(f"Failed to fetch join-leave page: HTTP {status}")
 
@@ -162,7 +164,9 @@ def collect_join_data(limit: int = 10) -> Dict[str, object]:
 
     return {
         "fetched_at": fetched_at,
-        "source_url": JOIN_LEAVE_URL,
+        "source_url": join_url,
+        "clan_tag": clan_config["tag"],
+        "clan_name": clan_config["name"],
         "joins": joins,
     }
 
