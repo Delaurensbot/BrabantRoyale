@@ -36,6 +36,10 @@
     .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .status { margin-left: 4px; }
     .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+    .pill--urgent { background: rgba(255, 81, 81, 0.18); border: 1px solid rgba(255, 81, 81, 0.45); }
+    .pill--A { background: rgba(0, 188, 255, 0.16); border: 1px solid rgba(0, 188, 255, 0.4); }
+    .pill--B { background: rgba(255, 206, 86, 0.14); border: 1px solid rgba(255, 206, 86, 0.3); }
+    .pill--NEW { background: rgba(153, 102, 255, 0.16); border: 1px solid rgba(153, 102, 255, 0.35); }
     .tableWrap { overflow-x: auto; }
     .toggleWrap { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .infoOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -44,6 +48,16 @@
     .infoPanel p { margin: 0 0 10px; line-height: 1.5; }
     .infoPanel ul { padding-left: 18px; margin: 8px 0 12px; }
     .infoPanel .closeBtn { margin-top: 8px; }
+    .cellMain { display: inline-flex; align-items: center; gap: 8px; }
+    .reasonText { font-size: 12px; opacity: 0.85; }
+    .detailRow td { background: rgba(255,255,255,0.03); padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .detailTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .detailTable th, .detailTable td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; text-align: left; }
+    .detailTable thead th { background: rgba(255,255,255,0.05); font-weight: 700; }
+    .detailTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .heatScore { color: #0d1117; font-weight: 700; border-radius: 8px; padding: 6px 10px; display: inline-block; min-width: 70px; text-align: center; }
+    .heatMissed { font-weight: 700; border-radius: 8px; padding: 6px 10px; display: inline-block; min-width: 70px; text-align: center; color: #0d1117; }
+    .clickableCell { cursor: pointer; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -107,6 +121,42 @@
     </div>
 
     <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Underperformers</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoUnderperformers">ℹ️ Info</button>
+          <button class="iconBtn" id="copyUnderperformers">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastUnderperformers"></div>
+      <div class="tableWrap" id="underperformersWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Watchlist (High performer maar onbetrouwbaar)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoWatchlistA">ℹ️ Info</button>
+          <button class="iconBtn" id="copyWatchlistA">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastWatchlistA"></div>
+      <div class="tableWrap" id="watchlistAWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Watchlist (Betrouwbaar lage score + Newbies)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoWatchlistB">ℹ️ Info</button>
+          <button class="iconBtn" id="copyWatchlistB">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastWatchlistB"></div>
+      <div class="tableWrap" id="watchlistBWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
       <div class="cardHead"><div class="title">Contribution table</div><div class="actions"><button class="iconBtn" id="copyContribution">⧉ Kopieer tabel</button></div></div>
       <div class="toast" id="toastContribution"></div>
       <div class="tableWrap" id="contributionWrap">(laden...)</div>
@@ -129,6 +179,15 @@
 
 <script>
   const el = (id) => document.getElementById(id);
+
+  function normalizeName(str) {
+    return (str || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function numberFromCell(cell) {
+    const num = Number(String(cell ?? '').replace(',', '.'));
+    return Number.isNaN(num) ? null : num;
+  }
 
   function showError(msg) {
     const box = el('errorBox');
@@ -213,7 +272,14 @@
     target.appendChild(container);
   }
 
-  function createTableComponent(headers, rows) {
+  function createTableComponent(headers, rows, options = {}) {
+    const getCellValue = (cell) => {
+      if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
+        return cell.value ?? '';
+      }
+      return cell ?? '';
+    };
+
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -226,20 +292,22 @@
 
     let lastRendered = [];
 
+    const expanded = options.expanded || new Set();
+
     function apply() {
       let filtered = rows.slice();
       filtered = filtered.filter((row) =>
         row.every((cell, idx) => {
           const needle = (filters[idx] || '').toLowerCase();
           if (!needle) return true;
-          return String(cell || '').toLowerCase().includes(needle);
+          return String(getCellValue(cell) || '').toLowerCase().includes(needle);
         })
       );
 
       if (sortIdx !== null) {
         filtered.sort((a, b) => {
-          const av = a[sortIdx] ?? '';
-          const bv = b[sortIdx] ?? '';
+          const av = getCellValue(a[sortIdx]);
+          const bv = getCellValue(b[sortIdx]);
           const aNum = parseFloat(av);
           const bNum = parseFloat(bv);
           const bothNum = !Number.isNaN(aNum) && !Number.isNaN(bNum);
@@ -262,15 +330,61 @@
         return;
       }
 
-      lastRendered = filtered.map((r) => r.slice());
+      lastRendered = filtered.map((r) => r.map((cell) => getCellValue(cell)));
       filtered.forEach((row) => {
         const tr = document.createElement('tr');
+        const rowKey = options.getRowKey ? options.getRowKey(row) : getCellValue(row[0]);
         row.forEach((cell) => {
           const td = document.createElement('td');
-          td.textContent = cell;
+          if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
+            const main = document.createElement('div');
+            main.className = 'cellMain';
+            const mainText = document.createElement('span');
+            mainText.textContent = cell.value ?? '';
+            main.appendChild(mainText);
+            if (cell.badge) {
+              const badge = document.createElement('span');
+              badge.className = `pill ${cell.badgeClass || ''}`.trim();
+              badge.textContent = cell.badge;
+              main.appendChild(badge);
+            }
+            td.appendChild(main);
+            if (cell.subtitle) {
+              const sub = document.createElement('div');
+              sub.className = 'reasonText';
+              sub.textContent = cell.subtitle;
+              td.appendChild(sub);
+            }
+            if (cell.title) td.title = cell.title;
+          } else {
+            td.textContent = cell;
+          }
           tr.appendChild(td);
         });
+
+        if (options.renderDetail && rowKey) {
+          const firstTd = tr.querySelector('td');
+          if (firstTd) {
+            firstTd.classList.add('clickableCell');
+            firstTd.addEventListener('click', () => {
+              if (expanded.has(rowKey)) expanded.delete(rowKey);
+              else expanded.add(rowKey);
+              apply();
+            });
+          }
+        }
+
         tbody.appendChild(tr);
+
+        if (options.renderDetail && rowKey && expanded.has(rowKey)) {
+          const detailTr = document.createElement('tr');
+          detailTr.className = 'detailRow';
+          const td = document.createElement('td');
+          td.colSpan = headers.length;
+          td.appendChild(options.renderDetail(rowKey));
+          detailTr.appendChild(td);
+          tbody.appendChild(detailTr);
+        }
       });
     }
 
@@ -328,8 +442,8 @@
     };
   }
 
-  function renderTable(targetId, headers, rows) {
-    const comp = createTableComponent(headers, rows);
+  function renderTable(targetId, headers, rows, options = {}) {
+    const comp = createTableComponent(headers, rows, options);
     const wrap = el(targetId);
     wrap.innerHTML = '';
     wrap.appendChild(comp.element);
@@ -338,6 +452,12 @@
 
   let ratioComponent = null;
   let ratioData = [];
+  let underperformersComponent = null;
+  let underperformersData = [];
+  let watchlistAComponent = null;
+  let watchlistAData = [];
+  let watchlistBComponent = null;
+  let watchlistBData = [];
   let contributionComponent = null;
   let decksComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
@@ -345,6 +465,15 @@
   let mvpPrevious = [];
   let promotionCandidates = [];
   let ratioExpanded = false;
+  const underperformersExpanded = new Set();
+  const watchlistAExpanded = new Set();
+  const watchlistBExpanded = new Set();
+
+  const rowPlayerKey = (row) => {
+    const first = row?.[0];
+    if (first && typeof first === 'object' && !Array.isArray(first)) return first.value;
+    return first;
+  };
 
   const infoContent = {
     current: {
@@ -402,6 +531,45 @@
         <p><strong>Waarom</strong><br />Dit pakt vooral het "gevaarlijke gedrag" aan: wel meedoen maar te weinig aanvallen doen, waardoor je 2–3 open attacks krijgt die je niet kunt opvangen.</p>
       `,
     },
+    underperformers: {
+      title: 'Underperformers',
+      body: `
+        <p><strong>Doel</strong><br />Combineert spelers met lage output én lage betrouwbaarheid. Weeks played is geen eis, nieuwe spelers komen dus direct mee.</p>
+        <p><strong>Criteria</strong></p>
+        <ul>
+          <li>Avg points &lt; 2400</li>
+          <li>Reliability % &lt; 95%</li>
+        </ul>
+        <p><strong>Urgent</strong><br />Toont URGENT badge bij Missed attacks ≥ 8 of Penalty points ≥ 24.</p>
+      `,
+    },
+    watchlistA: {
+      title: 'Watchlist A — High performer maar onbetrouwbaar',
+      body: `
+        <p><strong>Doel</strong><br />Spelers met hoge punten maar reliability onder 95%. Je wilt gedrag verbeteren zonder direct verlies van output.</p>
+        <p><strong>Criteria</strong></p>
+        <ul>
+          <li>Avg points ≥ 2800</li>
+          <li>Reliability % &lt; 95%</li>
+        </ul>
+      `,
+    },
+    watchlistB: {
+      title: 'Watchlist B/C — Betrouwbaar lage score en Newbies',
+      body: `
+        <p><strong>Watchlist B</strong></p>
+        <ul>
+          <li>Reliability % ≥ 95%</li>
+          <li>Avg points &lt; 2400</li>
+          <li>Niet protected (10 weken 16/16 en avg ≥ 2200)</li>
+        </ul>
+        <p><strong>Watchlist C (Newbies)</strong></p>
+        <ul>
+          <li>Weeks played &lt; 5</li>
+          <li>en Reliability % &lt; 95% of Avg points &lt; 2400</li>
+        </ul>
+      `,
+    },
   };
 
   function showInfoOverlay(key) {
@@ -412,15 +580,199 @@
     el('infoOverlay').style.display = 'flex';
   }
 
+  const reliabilityHeaders = ['Player', 'Role', 'Weeks played', 'Avg score', 'Missed attacks', 'Reliability %'];
+
+  let weeklyStats = { weeks: [], players: {} };
+
+  function buildWeeklyStats(contribTable, decksTable) {
+    weeklyStats = { weeks: [], players: {} };
+    const contribHeaders = (contribTable.headers || []).map((h) => String(h));
+    const decksHeaders = (decksTable.headers || []).map((h) => String(h));
+    const contribLower = contribHeaders.map((h) => h.toLowerCase().trim());
+    const decksLower = decksHeaders.map((h) => h.toLowerCase().trim());
+
+    const cIdx = contribLower.indexOf('c');
+    const dIdx = decksLower.indexOf('d');
+    if (cIdx === -1 || dIdx === -1) return;
+
+    const contribWeekHeaders = contribHeaders.slice(cIdx + 1);
+    const decksWeekHeaders = decksHeaders.slice(dIdx + 1);
+    const decksMap = {};
+
+    (decksTable.rows || []).forEach((row) => {
+      const player = row[0];
+      const key = normalizeName(player);
+      const perWeek = {};
+      decksWeekHeaders.forEach((wh, idx) => {
+        const val = numberFromCell(row[dIdx + 1 + idx]);
+        if (val !== null) perWeek[wh] = Math.max(0, Math.min(16, val));
+      });
+      decksMap[key] = perWeek;
+    });
+
+    (contribTable.rows || []).forEach((row) => {
+      const player = row[0];
+      const key = normalizeName(player);
+      const perWeek = [];
+      contribWeekHeaders.forEach((wh, idx) => {
+        const score = numberFromCell(row[cIdx + 1 + idx]);
+        const attacks = decksMap[key]?.[wh] ?? null;
+        if (score !== null || attacks !== null) {
+          perWeek.push({ week: wh, score: score ?? 0, attacks: attacks ?? 0 });
+        }
+      });
+      weeklyStats.weeks = contribWeekHeaders;
+      weeklyStats.players[key] = perWeek;
+    });
+  }
+
+  function renderPlayerDetail(name) {
+    const key = normalizeName(name);
+    const data = weeklyStats.players[key] || [];
+
+    const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+    const scoreHeatColor = (score) => {
+      if (score === null || score === undefined) return 'rgba(255,255,255,0.08)';
+      const val = clamp(score, 0, 3200);
+      if (val >= 2800) {
+        const t = clamp((val - 2800) / 400, 0, 1);
+        const light = 38 - t * 12;
+        return `hsl(130, 70%, ${light}%)`;
+      }
+      if (val >= 2500) {
+        const t = clamp((val - 2500) / 300, 0, 1);
+        const hue = 100 - t * 40; // green-ish to yellow
+        const light = 55 - t * 10;
+        return `hsl(${hue}, 75%, ${light}%)`;
+      }
+      const t = clamp((2500 - val) / 1500, 0, 1);
+      const hue = 60 - t * 60; // yellow to deep red
+      const light = 55 - t * 20;
+      return `hsl(${hue}, 80%, ${light}%)`;
+    };
+
+    const missedHeatColor = (attacks) => {
+      if (attacks === null || attacks === undefined) return 'rgba(255,255,255,0.1)';
+      const missed = Math.max(0, 16 - attacks);
+      if (missed === 0) return 'hsl(142, 62%, 45%)';
+      if (missed === 1) return 'hsl(50, 85%, 55%)';
+      if (missed === 2) return 'hsl(30, 90%, 55%)';
+      return `hsl(0, 80%, ${55 - Math.min(missed, 10) * 2}%)`;
+    };
+
+    const wrapper = document.createElement('div');
+
+    if (!data.length) {
+      wrapper.textContent = 'Geen weekdata beschikbaar';
+      return wrapper;
+    }
+
+    const order = weeklyStats.weeks || [];
+    const sorted = data.slice().sort((a, b) => {
+      const ai = order.indexOf(a.week);
+      const bi = order.indexOf(b.week);
+      if (ai !== -1 && bi !== -1) return bi - ai;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return String(b.week).localeCompare(String(a.week));
+    });
+
+    const table = document.createElement('table');
+    table.className = 'detailTable';
+
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    ['Week', 'Score', 'Attacks', 'Missed'].forEach((txt) => {
+      const th = document.createElement('th');
+      th.textContent = txt;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
+    sorted.forEach(({ week, score, attacks }) => {
+      const tr = document.createElement('tr');
+
+      const weekTd = document.createElement('td');
+      weekTd.textContent = week;
+      tr.appendChild(weekTd);
+
+      const scoreTd = document.createElement('td');
+      const scoreVal = score === null || score === undefined ? '-' : Math.round(score);
+      const scoreBadge = document.createElement('span');
+      scoreBadge.className = 'heatScore';
+      scoreBadge.style.background = scoreHeatColor(score);
+      scoreBadge.textContent = scoreVal;
+      scoreTd.appendChild(scoreBadge);
+      tr.appendChild(scoreTd);
+
+      const attacksTd = document.createElement('td');
+      attacksTd.textContent = attacks === null || attacks === undefined ? '-' : `${attacks}/16`;
+      tr.appendChild(attacksTd);
+
+      const missedTd = document.createElement('td');
+      const missedVal = attacks === null || attacks === undefined ? '-' : Math.max(0, 16 - attacks);
+      const missedBadge = document.createElement('span');
+      missedBadge.className = 'heatMissed';
+      missedBadge.style.background = missedHeatColor(attacks);
+      missedBadge.textContent = missedVal;
+      missedTd.appendChild(missedBadge);
+      tr.appendChild(missedTd);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+
+    return wrapper;
+  }
+
+  function getReliabilityPercent(row) {
+    const value = row.reliability_percent ?? row.reliability_score ?? row.reliability;
+    if (typeof value === 'number') return Math.round(value * 1000) / 1000;
+    const num = Number(value);
+    return Number.isNaN(num) ? value : Math.round(num * 1000) / 1000;
+  }
+
+  function playerCell(row, reason, badge, badgeClass) {
+    return {
+      value: row.player,
+      subtitle: reason,
+      badge,
+      badgeClass,
+      title: reason,
+    };
+  }
+
+  function buildReliabilityRow(row, reason, badge, badgeClass) {
+    return [
+      playerCell(row, reason, badge, badgeClass),
+      row.role || '',
+      row.weeks_played,
+      row.avg_points,
+      row.missed_attacks,
+      getReliabilityPercent(row),
+    ];
+  }
+
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
     promotionCandidates = data.promotion_candidates || [];
+    buildWeeklyStats(data.contribution_table || { headers: [], rows: [] }, data.decks_used_table || { headers: [], rows: [] });
+    underperformersExpanded.clear();
+    watchlistAExpanded.clear();
+    watchlistBExpanded.clear();
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
     PromotionList('promotionList', promotionCandidates, el('toastPromotions'));
 
-    ratioData = (data.ratio_scores || []).map((row) => [
+    const ratioRows = data.ratio_scores || [];
+    ratioData = ratioRows.map((row) => [
       row.player,
       row.role || '',
       row.weeks_played,
@@ -428,11 +780,54 @@
       row.missed_attacks,
       row.penalty_points,
       row.avg_points,
-      row.reliability_score,
+      getReliabilityPercent(row),
     ]);
 
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
+
+    const underperformers = ratioRows.filter((row) => Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95);
+    underperformersData = underperformers.map((row) => {
+      const urgent = Number(row.missed_attacks) >= 8 || Number(row.penalty_points) >= 24;
+      let reason = 'Underperformer: low avg + low reliability';
+      if (urgent && Number(row.missed_attacks) >= 8) reason = 'Underperformer (urgent): missed>=8';
+      else if (urgent && Number(row.penalty_points) >= 24) reason = 'Underperformer (urgent): penalty>=24';
+      return buildReliabilityRow(row, reason, urgent ? 'URGENT' : '', urgent ? 'pill--urgent' : '');
+    });
+    underperformersComponent = renderTable('underperformersWrap', reliabilityHeaders, underperformersData, {
+      renderDetail: renderPlayerDetail,
+      expanded: underperformersExpanded,
+      getRowKey: rowPlayerKey,
+    });
+
+    const watchlistA = ratioRows.filter((row) => Number(row.avg_points) >= 2800 && Number(getReliabilityPercent(row)) < 95);
+    watchlistAData = watchlistA.map((row) => buildReliabilityRow(row, 'Watchlist A: high avg but unreliable', 'A', 'pill--A'));
+    watchlistAComponent = renderTable('watchlistAWrap', reliabilityHeaders, watchlistAData, {
+      renderDetail: renderPlayerDetail,
+      expanded: watchlistAExpanded,
+      getRowKey: rowPlayerKey,
+    });
+
+    const protectedPlayer = (row) => Number(row.weeks_played) === 10 && Number(row.missed_attacks) === 0 && Number(row.avg_points) >= 2200;
+    const watchlistB = ratioRows.filter(
+      (row) =>
+        Number(row.weeks_played) >= 5 &&
+        Number(getReliabilityPercent(row)) >= 95 &&
+        Number(row.avg_points) < 2400 &&
+        !protectedPlayer(row)
+    );
+    const watchlistC = ratioRows.filter(
+      (row) => Number(row.weeks_played) < 5 && (Number(getReliabilityPercent(row)) < 95 || Number(row.avg_points) < 2400)
+    );
+    watchlistBData = [
+      ...watchlistB.map((row) => buildReliabilityRow(row, 'Watchlist B: reliable but low avg', 'B', 'pill--B')),
+      ...watchlistC.map((row) => buildReliabilityRow(row, 'Newbie watch: <5 weeks + risk', 'NEW', 'pill--NEW')),
+    ];
+    watchlistBComponent = renderTable('watchlistBWrap', reliabilityHeaders, watchlistBData, {
+      renderDetail: renderPlayerDetail,
+      expanded: watchlistBExpanded,
+      getRowKey: rowPlayerKey,
+    });
 
     analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };
     analyticsCache.decks = data.decks_used_table || { headers: [], rows: [] };
@@ -495,6 +890,24 @@
     }
   });
 
+  el('copyUnderperformers').addEventListener('click', () => {
+    if (underperformersComponent) {
+      copyTable(underperformersComponent.getHeaders(), underperformersComponent.getVisibleRows(), el('toastUnderperformers'));
+    }
+  });
+
+  el('copyWatchlistA').addEventListener('click', () => {
+    if (watchlistAComponent) {
+      copyTable(watchlistAComponent.getHeaders(), watchlistAComponent.getVisibleRows(), el('toastWatchlistA'));
+    }
+  });
+
+  el('copyWatchlistB').addEventListener('click', () => {
+    if (watchlistBComponent) {
+      copyTable(watchlistBComponent.getHeaders(), watchlistBComponent.getVisibleRows(), el('toastWatchlistB'));
+    }
+  });
+
   el('copyContribution').addEventListener('click', () => {
     if (contributionComponent) {
       copyTable(contributionComponent.getHeaders(), contributionComponent.getVisibleRows(), el('toastContribution'));
@@ -511,6 +924,9 @@
   el('infoPrevious').addEventListener('click', () => showInfoOverlay('previous'));
   el('infoPromotions').addEventListener('click', () => showInfoOverlay('promotions'));
   el('infoRatio').addEventListener('click', () => showInfoOverlay('ratio'));
+  el('infoUnderperformers').addEventListener('click', () => showInfoOverlay('underperformers'));
+  el('infoWatchlistA').addEventListener('click', () => showInfoOverlay('watchlistA'));
+  el('infoWatchlistB').addEventListener('click', () => showInfoOverlay('watchlistB'));
   el('infoOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'infoOverlay') {
       el('infoOverlay').style.display = 'none';
