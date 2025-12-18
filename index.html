@@ -404,7 +404,26 @@
 
     if (!rows.length) return text.trim();
 
-    const formattedRows = rows
+    const sortedRows = [...rows].sort((a, b) => {
+      const projectedA = parseFloat(a[2]);
+      const projectedB = parseFloat(b[2]);
+
+      const aIsNaN = Number.isNaN(projectedA);
+      const bIsNaN = Number.isNaN(projectedB);
+
+      if (aIsNaN && bIsNaN) return 0;
+      if (aIsNaN) return 1;
+      if (bIsNaN) return -1;
+
+      if (projectedB !== projectedA) return projectedB - projectedA;
+
+      const avgA = parseFloat(a[1]);
+      const avgB = parseFloat(b[1]);
+      if (Number.isNaN(avgA) || Number.isNaN(avgB)) return 0;
+      return avgB - avgA;
+    });
+
+    const formattedRows = sortedRows
       .map(([name, avg, projected]) => `${name} ${avg || "-"} --> ${projected || "-"}`);
 
     return ["Clan avg --> Projected", ...formattedRows].join("\n\n");
