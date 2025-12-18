@@ -690,7 +690,7 @@
       table.className = 'detailTable';
       const thead = document.createElement('thead');
       const trHead = document.createElement('tr');
-      ['Week', 'Score', 'Attacks', 'Missed'].forEach((titleText) => {
+      ['Week', 'Score', 'Missed'].forEach((titleText) => {
         const th = document.createElement('th');
         th.textContent = titleText;
         trHead.appendChild(th);
@@ -701,13 +701,11 @@
       const tbody = document.createElement('tbody');
       weeks.forEach((row) => {
         const tr = document.createElement('tr');
-        const attacksText = row.attacks === null ? '-' : `${row.attacks}/16`;
         const missedText = row.missed === null ? '-' : row.missed;
 
         const cells = [
           { text: row.week || '-', className: '' },
           { text: row.score === null ? '-' : row.score, className: 'scoreCell', bg: getScoreColor(row.score) },
-          { text: attacksText, className: 'statCell' },
           { text: missedText, className: 'statCell', bg: getMissedColor(row.missed) },
         ];
 
@@ -771,6 +769,11 @@
     ];
   }
 
+  function hasMeaningfulStats(row) {
+    const metrics = [row.weeks_played, row.attacks_done, row.missed_attacks, row.penalty_points, row.avg_points];
+    return metrics.some((value) => Number(value) > 0);
+  }
+
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
@@ -794,7 +797,9 @@
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
 
-    const underperformers = ratioRows.filter((row) => Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95);
+    const underperformers = ratioRows.filter(
+      (row) => hasMeaningfulStats(row) && Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95
+    );
     underperformersData = underperformers.map((row) => {
       const urgent = Number(row.missed_attacks) >= 8 || Number(row.penalty_points) >= 24;
       let reason = 'Underperformer: low avg + low reliability';
@@ -804,20 +809,26 @@
     });
     underperformersComponent = renderTable('underperformersWrap', reliabilityHeaders, underperformersData);
 
-    const watchlistA = ratioRows.filter((row) => Number(row.avg_points) >= 2800 && Number(getReliabilityPercent(row)) < 95);
+    const watchlistA = ratioRows.filter(
+      (row) => hasMeaningfulStats(row) && Number(row.avg_points) >= 2800 && Number(getReliabilityPercent(row)) < 95
+    );
     watchlistAData = watchlistA.map((row) => buildReliabilityRow(row, 'Watchlist A: high avg but unreliable', 'A', 'pill--A'));
     watchlistAComponent = renderTable('watchlistAWrap', reliabilityHeaders, watchlistAData);
 
     const protectedPlayer = (row) => Number(row.weeks_played) === 10 && Number(row.missed_attacks) === 0 && Number(row.avg_points) >= 2200;
     const watchlistB = ratioRows.filter(
       (row) =>
+        hasMeaningfulStats(row) &&
         Number(row.weeks_played) >= 5 &&
         Number(getReliabilityPercent(row)) >= 95 &&
         Number(row.avg_points) < 2400 &&
         !protectedPlayer(row)
     );
     const watchlistC = ratioRows.filter(
-      (row) => Number(row.weeks_played) < 5 && (Number(getReliabilityPercent(row)) < 95 || Number(row.avg_points) < 2400)
+      (row) =>
+        hasMeaningfulStats(row) &&
+        Number(row.weeks_played) < 5 &&
+        (Number(getReliabilityPercent(row)) < 95 || Number(row.avg_points) < 2400)
     );
     watchlistBData = [
       ...watchlistB.map((row) => buildReliabilityRow(row, 'Watchlist B: reliable but low avg', 'B', 'pill--B')),
