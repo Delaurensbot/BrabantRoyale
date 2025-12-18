@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler
 import json
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -30,6 +31,10 @@ from Royale_api import (
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
+            parsed = urlparse(self.path)
+            query = parse_qs(parsed.query)
+            tone = (query.get("tone") or ["neutral"])[0]
+
             clan_tags, clan_names = fetch_clan_members(CLAN_URL_DEFAULT)
 
             race_html = fetch_html(RACE_URL_DEFAULT)
@@ -72,6 +77,7 @@ class handler(BaseHTTPRequestHandler):
                 OUR_CLAN_NAME_DEFAULT,
                 filtered_players,
                 max_chars=short_story_limit,
+                tone=tone,
             )
 
             sections = [

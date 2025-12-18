@@ -6,6 +6,7 @@
 # 4) Short story (Discord-friendly) with character limit
 
 import argparse
+import random
 import re
 import sys
 from dataclasses import dataclass
@@ -928,18 +929,234 @@ def render_clan_stats_block(
     return "\n".join(out)
 
 
+STATUS_PACKS = {
+    "neutral": [
+        "{day}: proj {rank}e | avg {ourAvg} | gap {gap}.",
+        "{day}: {rank}e plek (proj) | avg {ourAvg} | gap {gap}.",
+    ],
+    "streng": [
+        "{day}: proj {rank}e. avg {ourAvg}. gap {gap}.",
+        "{day}: {rank}e proj | avg {ourAvg} | gap {gap}.",
+    ],
+    "hype": [
+        "🔥 {day}: proj {rank}e | avg {ourAvg} | gap {gap}.",
+        "🚀 {day}: {rank}e plek | avg {ourAvg} | gap {gap}.",
+    ],
+}
+
+DIAG_BASE = {
+    "GOOD": [
+        "Sterk bezig, dit ziet er goed uit.",
+        "Mooie stand, vasthouden.",
+    ],
+    "PODIUM_RISK": [
+        "Podium is haalbaar, maar we moeten nog stijgen.",
+        "Dichtbij, nu telt kwaliteit extra.",
+    ],
+    "BEHIND": [
+        "We lopen achter, avg moet omhoog.",
+        "Nog te laag; we moeten bijtrekken.",
+    ],
+    "SPIKES_BUT_DRAG": [
+        "Uitschieters zijn er, maar lage runs drukken avg.",
+        "Top runs oké, basis trekt ons omlaag.",
+    ],
+    "LOW_DRAG": [
+        "Te veel lage scores drukken ons gemiddelde.",
+        "Onderkant is te laag en kost plaatsen.",
+    ],
+    "NEED_SPIKES": [
+        "We missen uitschieters (800/900).",
+        "Meer topscores nodig om te klimmen.",
+    ],
+    "NEUTRAL": [
+        "Stabiel, maar er is ruimte omhoog.",
+        "Prima, maar we kunnen scherper.",
+    ],
+}
+
+DIAG_TONE = {
+    "streng": {
+        "BEHIND": ["Achterstand is groot; direct avg omhoog."],
+        "LOW_DRAG": ["Onderkant moet omhoog, anders blijven we hangen."],
+        "NEED_SPIKES": ["Te weinig pieken, fix dat."],
+    },
+    "hype": {
+        "GOOD": ["🔥 Sterke basis, zo houden!"],
+        "PODIUM_RISK": ["Podium lonkt, push nog wat extra."],
+        "SPIKES_BUT_DRAG": ["Er zitten kanonnen bij, nu de lows eruit!"],
+    },
+}
+
+ACTION_BASE = {
+    "GOOD": [
+        "Mik op 700+ waar kan.",
+        "Houd de basis hoog: geen lage runs.",
+    ],
+    "PODIUM_RISK": [
+        "Pak 800+ waar kan; dat maakt het verschil.",
+        "Trek de onderkant omhoog (600+), dan klimmen we.",
+    ],
+    "BEHIND": [
+        "Doel: minder 500’s, meer 700/800+.",
+        "Focus op sterke decks en mik op 700+.",
+    ],
+    "SPIKES_BUT_DRAG": [
+        "Minimum 600+, dat tilt avg direct.",
+        "Minder 400/500 scores, dan stijgt de projection snel.",
+    ],
+    "LOW_DRAG": [
+        "Trek de onderkant omhoog: 600+ als basis.",
+        "Minder lage runs, avg stijgt meteen.",
+    ],
+    "NEED_SPIKES": [
+        "Probeer extra 800+ te pakken vandaag.",
+        "Elke 900 run is een grote boost.",
+    ],
+    "NEUTRAL": [
+        "Mik op 650+ consistent.",
+        "Pak waar kan een 800+ mee.",
+    ],
+}
+
+ACTION_TONE = {
+    "streng": {
+        "BEHIND": ["Geen 500’s meer; push 700+ nu."],
+        "LOW_DRAG": ["Ondergrens 600, anders halen we het niet."],
+    },
+    "hype": {
+        "GOOD": ["✨ Hou dit vast, elke 700+ telt."],
+        "NEED_SPIKES": ["🚀 Pak die 800+/900’s voor een jump!"],
+    },
+}
+
+_STORY_CACHE: Dict[str, str] = {}
+
+
+def story_fmt_number(n: Optional[float], digits: int = 2) -> str:
+    if n is None:
+        return ""
+    txt = f"{float(n):.{digits}f}"
+    if txt.endswith(".00"):
+        return txt[:-3]
+    return txt
+
+
+def pick_with_avoid(options: List[str], cache_key: str) -> str:
+    if not options:
+        return ""
+
+    prev = _STORY_CACHE.get(cache_key)
+    candidates = [opt for opt in options if opt != prev]
+    if not candidates:
+        choice = options[0]
+    else:
+        choice = random.choice(candidates)
+
+    _STORY_CACHE[cache_key] = choice
+    return choice
+
+
+def trim_to_limit(msg: str, max_chars: int) -> str:
+    if len(msg) <= max_chars:
+        return msg
+
+    sentences = re.split(r"(?<=\.)\s+", msg.strip())
+    while len(sentences) > 1 and len(" ".join(sentences)) > max_chars:
+        sentences.pop()
+
+    shortened = " ".join(sentences).strip()
+    if shortened and len(shortened) <= max_chars:
+        return shortened
+
+    return (msg[: max(0, max_chars - 3)].rstrip() + "...").strip()
+
+
+def count_players_with_min_fame(rows: List[Dict], threshold: int) -> int:
+    total = 0
+    for r in rows:
+        try:
+            fame_val = int(r.get("fame", 0))
+        except (TypeError, ValueError):
+            continue
+        if fame_val >= threshold:
+            total += 1
+    return total
+
+
+def calculate_share_low_scores(rows: List[Dict], threshold: int = 500) -> float:
+    total_done = 0
+    low_count = 0
+
+    for r in rows:
+        try:
+            decks_done = int(r.get("decks_used_today", 0))
+            fame_val = int(r.get("fame", 0))
+        except (TypeError, ValueError):
+            continue
+
+        if decks_done < 4:
+            continue
+
+        total_done += 1
+        if fame_val <= threshold:
+            low_count += 1
+
+    if total_done == 0:
+        return 0.0
+
+    return low_count / total_done
+
+
+def classify_story_bucket(ctx: Dict[str, float]) -> str:
+    rank = ctx.get("rank_proj") or 0
+    gap = ctx.get("gap_avg") or 0.0
+    count_800 = ctx.get("count_800plus") or 0
+    count_900 = ctx.get("count_900plus") or 0
+    share_low = ctx.get("share_low") or 0.0
+    our_avg = ctx.get("our_avg")
+    leader_avg = ctx.get("leader_avg")
+
+    good = (rank <= 2) or (rank == 3 and gap <= 5)
+    podium_risk = (rank == 3 and gap > 5) or (rank == 4 and gap <= 6)
+    behind = (rank >= 4 and gap > 6)
+    need_spikes = (count_800 < 5) or (count_900 == 0)
+    too_low = share_low >= 0.35
+    spikes_but_drag = (
+        rank >= 4
+        and count_800 >= 8
+        and our_avg is not None
+        and leader_avg is not None
+        and our_avg < (leader_avg - 6)
+    )
+
+    if good:
+        return "GOOD"
+    if spikes_but_drag:
+        return "SPIKES_BUT_DRAG"
+    if behind:
+        return "BEHIND"
+    if podium_risk:
+        return "PODIUM_RISK"
+    if too_low:
+        return "LOW_DRAG"
+    if need_spikes:
+        return "NEED_SPIKES"
+    return "NEUTRAL"
+
+
 def build_short_story(
     soup: BeautifulSoup,
     clans: List[ClanOverview],
     our_clan_name: str,
     members_rows: List[Dict],
     max_chars: int,
+    tone: str = "neutral",
 ) -> str:
-    day_label = translate_day_label(parse_day_label(soup))
+    day_label = translate_day_label(parse_day_label(soup)) or "Dag"
     our = find_our_clan(clans, our_clan_name)
     ranking = get_projected_ranking(clans)
 
-    # Determine position based on projected medals
     pos = None
     if our and our.projected_medals is not None and ranking:
         for i, c in enumerate(ranking, start=1):
@@ -947,45 +1164,62 @@ def build_short_story(
                 pos = i
                 break
 
-    # Determine lead/deficit based on average medals per deck
-    avg_sorted = [c for c in clans if c.avg_medals_per_deck is not None]
-    avg_sorted.sort(key=lambda c: c.avg_medals_per_deck or 0, reverse=True)
-    gap_line = ""
-    if our and our.avg_medals_per_deck is not None and avg_sorted:
-        our_idx = next(
-            (i for i, c in enumerate(avg_sorted) if c.name.strip().lower() == our.name.strip().lower()),
-            None,
+    leader_avg = None
+    averages = [c.avg_medals_per_deck for c in clans if c.avg_medals_per_deck is not None]
+    if averages:
+        leader_avg = max(averages)
+
+    our_avg = our.avg_medals_per_deck if our else None
+    gap_avg = None
+    if leader_avg is not None and our_avg is not None:
+        gap_avg = max(0.0, leader_avg - our_avg)
+
+    count_800 = count_players_with_min_fame(members_rows, 800)
+    count_900 = count_players_with_min_fame(members_rows, 900)
+    share_low = calculate_share_low_scores(members_rows, threshold=500)
+
+    ctx = {
+        "day": day_label,
+        "rank_proj": pos if pos is not None else 0,
+        "our_avg": our_avg,
+        "leader_avg": leader_avg,
+        "gap_avg": gap_avg if gap_avg is not None else 0.0,
+        "count_800plus": count_800,
+        "count_900plus": count_900,
+        "share_low": share_low,
+        "low_threshold_label": "≤500",
+    }
+
+    bucket = classify_story_bucket(ctx)
+    tone_key = tone.lower().strip() if tone else "neutral"
+    if tone_key not in STATUS_PACKS:
+        tone_key = "neutral"
+
+    def fill(template: str) -> str:
+        return (
+            template.replace("{day}", ctx.get("day", "") or "Dag")
+            .replace("{rank}", str(ctx.get("rank_proj") or "-"))
+            .replace("{ourAvg}", story_fmt_number(ctx.get("our_avg")))
+            .replace("{gap}", story_fmt_number(ctx.get("gap_avg")))
         )
-        if our_idx is not None:
-            if our_idx == 0 and len(avg_sorted) > 1:
-                lead = our.avg_medals_per_deck - (avg_sorted[1].avg_medals_per_deck or 0)
-                gap_line = f"voorsprong op 2e plaats: {lead:.2f}"
-            elif our_idx > 0:
-                deficit = (avg_sorted[0].avg_medals_per_deck or 0) - our.avg_medals_per_deck
-                gap_line = f"achterstand op 1e plaats: {deficit:.2f}"
 
-    # Build compact, NL-focused story
-    title = f"{day_label} update" if day_label else "Dag update"
-    lines = [f"{title}:"]
+    status_tpl = pick_with_avoid(
+        STATUS_PACKS.get(tone_key, STATUS_PACKS["neutral"]), f"{bucket}:status"
+    )
+    status = fill(status_tpl)
 
-    if our and our.decks_used_today is not None and our.decks_total_today is not None:
-        lines.append(f"{our.decks_used_today}/{our.decks_total_today} aanvallen")
+    diag_options = list(DIAG_BASE.get(bucket, DIAG_BASE["NEUTRAL"]))
+    diag_options.extend(DIAG_TONE.get(tone_key, {}).get(bucket, []))
+    diag = pick_with_avoid(diag_options, f"{bucket}:diag")
 
-    if pos is not None:
-        lines.append(f"voorspelde uitkomst: {pos}e plek")
+    action_options = list(ACTION_BASE.get(bucket, ACTION_BASE["NEUTRAL"]))
+    action_options.extend(ACTION_TONE.get(tone_key, {}).get(bucket, []))
+    action = pick_with_avoid(action_options, f"{bucket}:action")
 
-    if our and our.avg_medals_per_deck is not None:
-        lines.append(f"Avg {our.avg_medals_per_deck:.2f} 🎖")
+    message = " ".join([status, diag, action]).strip()
+    message = re.sub(r"\s+", " ", message)
 
-    if gap_line:
-        lines.append(gap_line)
-
-    story = "\n".join(lines).strip()
-
-    if len(story) <= max_chars:
-        return story
-
-    return story[: max(0, max_chars - 1)] + "…"
+    return trim_to_limit(message, max_chars)
 
 
 # -----------------------------
@@ -998,6 +1232,12 @@ def main() -> None:
     ap.add_argument("--our-clan", default=OUR_CLAN_NAME_DEFAULT)
     ap.add_argument("--top", type=int, default=0, help="Toon alleen top N players (0 = alles)")
     ap.add_argument("--story-max", type=int, default=220, help="Max lengte short story (chars)")
+    ap.add_argument(
+        "--tone",
+        default="neutral",
+        choices=list(STATUS_PACKS.keys()),
+        help="Toon-modus voor short story",
+    )
     args = ap.parse_args()
 
     try:
@@ -1057,7 +1297,14 @@ def main() -> None:
         print(day4_block)
         print()
 
-    story = build_short_story(race_soup, clans, args.our_clan, filtered, max_chars=args.story_max)
+    story = build_short_story(
+        race_soup,
+        clans,
+        args.our_clan,
+        filtered,
+        max_chars=args.story_max,
+        tone=args.tone,
+    )
     print("Short story (copy/paste):")
     print(story)
     print()
