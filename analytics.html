@@ -30,6 +30,7 @@
     thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .overperformerHighlight { box-shadow: inset 0 0 0 9999px rgba(0, 255, 170, 0.08); }
     .filtersRow input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: inherit; font: inherit; box-sizing: border-box; }
     .sortHeader { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
     .sortHeader .arrow { font-size: 12px; opacity: 0.7; }
@@ -160,6 +161,18 @@
       </div>
       <div class="toast" id="toastWatchlistB"></div>
       <div class="tableWrap" id="watchlistBWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Overperformers</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoOverperformers">ℹ️ Info</button>
+          <button class="iconBtn" id="copyOverperformers">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastOverperformers"></div>
+      <div class="tableWrap" id="overperformersWrap">(laden...)</div>
     </div>
 
     <div class="card fullRow">
@@ -333,6 +346,7 @@
       lastRendered = filtered.map((r) => r.map((cell) => getCellValue(cell)));
       filtered.forEach((row) => {
         const tr = document.createElement('tr');
+        if (row._rowClass) tr.classList.add(row._rowClass);
         row.forEach((cell) => {
           const td = document.createElement('td');
           if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
@@ -438,6 +452,8 @@
   let watchlistAData = [];
   let watchlistBComponent = null;
   let watchlistBData = [];
+  let overperformersComponent = null;
+  let overperformersData = [];
   let contributionComponent = null;
   let decksComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
@@ -539,6 +555,19 @@
         <ul>
           <li>Weeks played &lt; 5</li>
           <li>en Reliability % &lt; 95% of Avg points &lt; 2400</li>
+        </ul>
+      `,
+    },
+    overperformers: {
+      title: 'Overperformers',
+      body: `
+        <p><strong>Doel</strong><br />Spelers identificeren die consistent sterk scoren én betrouwbaar zijn. Deze spelers zijn kandidaten voor doorgroei (bijv. promotie naar Elder).</p>
+        <p><strong>Criteria</strong></p>
+        <ul>
+          <li>Avg points ≥ 2800</li>
+          <li>Reliability % ≥ 95%</li>
+          <li>Missed attacks ≤ 2</li>
+          <li>Weeks played ≥ 5</li>
         </ul>
       `,
     },
@@ -836,6 +865,32 @@
     ];
     watchlistBComponent = renderTable('watchlistBWrap', reliabilityHeaders, watchlistBData);
 
+    const overperformers = ratioRows
+      .filter(
+        (row) =>
+          hasMeaningfulStats(row) &&
+          Number(row.avg_points) >= 2800 &&
+          Number(getReliabilityPercent(row)) >= 95 &&
+          Number(row.missed_attacks) <= 2 &&
+          Number(row.weeks_played) >= 5
+      )
+      .sort((a, b) => {
+        const avgDiff = Number(b.avg_points) - Number(a.avg_points);
+        if (avgDiff !== 0) return avgDiff;
+        const relDiff = Number(getReliabilityPercent(b)) - Number(getReliabilityPercent(a));
+        if (relDiff !== 0) return relDiff;
+        return Number(a.missed_attacks) - Number(b.missed_attacks);
+      });
+
+    overperformersData = overperformers.map((row) => {
+      const mapped = buildReliabilityRow(row, 'Overperformer: high avg + reliable');
+      if ((row.role || '').toLowerCase() === 'member') {
+        mapped._rowClass = 'overperformerHighlight';
+      }
+      return mapped;
+    });
+    overperformersComponent = renderTable('overperformersWrap', reliabilityHeaders, overperformersData);
+
     analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };
     analyticsCache.decks = data.decks_used_table || { headers: [], rows: [] };
 
@@ -915,6 +970,12 @@
     }
   });
 
+  el('copyOverperformers').addEventListener('click', () => {
+    if (overperformersComponent) {
+      copyTable(overperformersComponent.getHeaders(), overperformersComponent.getVisibleRows(), el('toastOverperformers'));
+    }
+  });
+
   el('copyContribution').addEventListener('click', () => {
     if (contributionComponent) {
       copyTable(contributionComponent.getHeaders(), contributionComponent.getVisibleRows(), el('toastContribution'));
@@ -934,6 +995,7 @@
   el('infoUnderperformers').addEventListener('click', () => showInfoOverlay('underperformers'));
   el('infoWatchlistA').addEventListener('click', () => showInfoOverlay('watchlistA'));
   el('infoWatchlistB').addEventListener('click', () => showInfoOverlay('watchlistB'));
+  el('infoOverperformers').addEventListener('click', () => showInfoOverlay('overperformers'));
   el('infoOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'infoOverlay') {
       el('infoOverlay').style.display = 'none';
