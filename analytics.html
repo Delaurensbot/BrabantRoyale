@@ -36,6 +36,10 @@
     .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .status { margin-left: 4px; }
     .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+    .pill--urgent { background: rgba(255, 81, 81, 0.18); border: 1px solid rgba(255, 81, 81, 0.45); }
+    .pill--A { background: rgba(0, 188, 255, 0.16); border: 1px solid rgba(0, 188, 255, 0.4); }
+    .pill--B { background: rgba(255, 206, 86, 0.14); border: 1px solid rgba(255, 206, 86, 0.3); }
+    .pill--NEW { background: rgba(153, 102, 255, 0.16); border: 1px solid rgba(153, 102, 255, 0.35); }
     .tableWrap { overflow-x: auto; }
     .toggleWrap { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .infoOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -44,6 +48,8 @@
     .infoPanel p { margin: 0 0 10px; line-height: 1.5; }
     .infoPanel ul { padding-left: 18px; margin: 8px 0 12px; }
     .infoPanel .closeBtn { margin-top: 8px; }
+    .cellMain { display: inline-flex; align-items: center; gap: 8px; }
+    .reasonText { font-size: 12px; opacity: 0.85; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -104,6 +110,42 @@
       </div>
       <div class="toast" id="toastRatio"></div>
       <div class="tableWrap" id="ratioTableWrap"></div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Underperformers</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoUnderperformers">ℹ️ Info</button>
+          <button class="iconBtn" id="copyUnderperformers">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastUnderperformers"></div>
+      <div class="tableWrap" id="underperformersWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Watchlist (High performer maar onbetrouwbaar)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoWatchlistA">ℹ️ Info</button>
+          <button class="iconBtn" id="copyWatchlistA">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastWatchlistA"></div>
+      <div class="tableWrap" id="watchlistAWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Watchlist (Betrouwbaar lage score + Newbies)</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoWatchlistB">ℹ️ Info</button>
+          <button class="iconBtn" id="copyWatchlistB">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastWatchlistB"></div>
+      <div class="tableWrap" id="watchlistBWrap">(laden...)</div>
     </div>
 
     <div class="card fullRow">
@@ -214,6 +256,13 @@
   }
 
   function createTableComponent(headers, rows) {
+    const getCellValue = (cell) => {
+      if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
+        return cell.value ?? '';
+      }
+      return cell ?? '';
+    };
+
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -232,14 +281,14 @@
         row.every((cell, idx) => {
           const needle = (filters[idx] || '').toLowerCase();
           if (!needle) return true;
-          return String(cell || '').toLowerCase().includes(needle);
+          return String(getCellValue(cell) || '').toLowerCase().includes(needle);
         })
       );
 
       if (sortIdx !== null) {
         filtered.sort((a, b) => {
-          const av = a[sortIdx] ?? '';
-          const bv = b[sortIdx] ?? '';
+          const av = getCellValue(a[sortIdx]);
+          const bv = getCellValue(b[sortIdx]);
           const aNum = parseFloat(av);
           const bNum = parseFloat(bv);
           const bothNum = !Number.isNaN(aNum) && !Number.isNaN(bNum);
@@ -262,12 +311,34 @@
         return;
       }
 
-      lastRendered = filtered.map((r) => r.slice());
+      lastRendered = filtered.map((r) => r.map((cell) => getCellValue(cell)));
       filtered.forEach((row) => {
         const tr = document.createElement('tr');
         row.forEach((cell) => {
           const td = document.createElement('td');
-          td.textContent = cell;
+          if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
+            const main = document.createElement('div');
+            main.className = 'cellMain';
+            const mainText = document.createElement('span');
+            mainText.textContent = cell.value ?? '';
+            main.appendChild(mainText);
+            if (cell.badge) {
+              const badge = document.createElement('span');
+              badge.className = `pill ${cell.badgeClass || ''}`.trim();
+              badge.textContent = cell.badge;
+              main.appendChild(badge);
+            }
+            td.appendChild(main);
+            if (cell.subtitle) {
+              const sub = document.createElement('div');
+              sub.className = 'reasonText';
+              sub.textContent = cell.subtitle;
+              td.appendChild(sub);
+            }
+            if (cell.title) td.title = cell.title;
+          } else {
+            td.textContent = cell;
+          }
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
@@ -338,6 +409,12 @@
 
   let ratioComponent = null;
   let ratioData = [];
+  let underperformersComponent = null;
+  let underperformersData = [];
+  let watchlistAComponent = null;
+  let watchlistAData = [];
+  let watchlistBComponent = null;
+  let watchlistBData = [];
   let contributionComponent = null;
   let decksComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
@@ -402,6 +479,45 @@
         <p><strong>Waarom</strong><br />Dit pakt vooral het "gevaarlijke gedrag" aan: wel meedoen maar te weinig aanvallen doen, waardoor je 2–3 open attacks krijgt die je niet kunt opvangen.</p>
       `,
     },
+    underperformers: {
+      title: 'Underperformers',
+      body: `
+        <p><strong>Doel</strong><br />Combineert spelers met lage output én lage betrouwbaarheid. Weeks played is geen eis, nieuwe spelers komen dus direct mee.</p>
+        <p><strong>Criteria</strong></p>
+        <ul>
+          <li>Avg points &lt; 2400</li>
+          <li>Reliability % &lt; 95%</li>
+        </ul>
+        <p><strong>Urgent</strong><br />Toont URGENT badge bij Missed attacks ≥ 8 of Penalty points ≥ 24.</p>
+      `,
+    },
+    watchlistA: {
+      title: 'Watchlist A — High performer maar onbetrouwbaar',
+      body: `
+        <p><strong>Doel</strong><br />Spelers met hoge punten maar reliability onder 95%. Je wilt gedrag verbeteren zonder direct verlies van output.</p>
+        <p><strong>Criteria</strong></p>
+        <ul>
+          <li>Avg points ≥ 2800</li>
+          <li>Reliability % &lt; 95%</li>
+        </ul>
+      `,
+    },
+    watchlistB: {
+      title: 'Watchlist B/C — Betrouwbaar lage score en Newbies',
+      body: `
+        <p><strong>Watchlist B</strong></p>
+        <ul>
+          <li>Reliability % ≥ 95%</li>
+          <li>Avg points &lt; 2400</li>
+          <li>Niet protected (10 weken 16/16 en avg ≥ 2200)</li>
+        </ul>
+        <p><strong>Watchlist C (Newbies)</strong></p>
+        <ul>
+          <li>Weeks played &lt; 5</li>
+          <li>en Reliability % &lt; 95% of Avg points &lt; 2400</li>
+        </ul>
+      `,
+    },
   };
 
   function showInfoOverlay(key) {
@@ -412,6 +528,36 @@
     el('infoOverlay').style.display = 'flex';
   }
 
+  const reliabilityHeaders = ['Player', 'Role', 'Weeks played', 'Avg score', 'Missed attacks', 'Reliability %'];
+
+  function getReliabilityPercent(row) {
+    const value = row.reliability_percent ?? row.reliability_score ?? row.reliability;
+    if (typeof value === 'number') return Math.round(value * 1000) / 1000;
+    const num = Number(value);
+    return Number.isNaN(num) ? value : Math.round(num * 1000) / 1000;
+  }
+
+  function playerCell(row, reason, badge, badgeClass) {
+    return {
+      value: row.player,
+      subtitle: reason,
+      badge,
+      badgeClass,
+      title: reason,
+    };
+  }
+
+  function buildReliabilityRow(row, reason, badge, badgeClass) {
+    return [
+      playerCell(row, reason, badge, badgeClass),
+      row.role || '',
+      row.weeks_played,
+      row.avg_points,
+      row.missed_attacks,
+      getReliabilityPercent(row),
+    ];
+  }
+
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
@@ -420,7 +566,8 @@
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
     PromotionList('promotionList', promotionCandidates, el('toastPromotions'));
 
-    ratioData = (data.ratio_scores || []).map((row) => [
+    const ratioRows = data.ratio_scores || [];
+    ratioData = ratioRows.map((row) => [
       row.player,
       row.role || '',
       row.weeks_played,
@@ -428,11 +575,42 @@
       row.missed_attacks,
       row.penalty_points,
       row.avg_points,
-      row.reliability_score,
+      getReliabilityPercent(row),
     ]);
 
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
+
+    const underperformers = ratioRows.filter((row) => Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95);
+    underperformersData = underperformers.map((row) => {
+      const urgent = Number(row.missed_attacks) >= 8 || Number(row.penalty_points) >= 24;
+      let reason = 'Underperformer: low avg + low reliability';
+      if (urgent && Number(row.missed_attacks) >= 8) reason = 'Underperformer (urgent): missed>=8';
+      else if (urgent && Number(row.penalty_points) >= 24) reason = 'Underperformer (urgent): penalty>=24';
+      return buildReliabilityRow(row, reason, urgent ? 'URGENT' : '', urgent ? 'pill--urgent' : '');
+    });
+    underperformersComponent = renderTable('underperformersWrap', reliabilityHeaders, underperformersData);
+
+    const watchlistA = ratioRows.filter((row) => Number(row.avg_points) >= 2800 && Number(getReliabilityPercent(row)) < 95);
+    watchlistAData = watchlistA.map((row) => buildReliabilityRow(row, 'Watchlist A: high avg but unreliable', 'A', 'pill--A'));
+    watchlistAComponent = renderTable('watchlistAWrap', reliabilityHeaders, watchlistAData);
+
+    const protectedPlayer = (row) => Number(row.weeks_played) === 10 && Number(row.missed_attacks) === 0 && Number(row.avg_points) >= 2200;
+    const watchlistB = ratioRows.filter(
+      (row) =>
+        Number(row.weeks_played) >= 5 &&
+        Number(getReliabilityPercent(row)) >= 95 &&
+        Number(row.avg_points) < 2400 &&
+        !protectedPlayer(row)
+    );
+    const watchlistC = ratioRows.filter(
+      (row) => Number(row.weeks_played) < 5 && (Number(getReliabilityPercent(row)) < 95 || Number(row.avg_points) < 2400)
+    );
+    watchlistBData = [
+      ...watchlistB.map((row) => buildReliabilityRow(row, 'Watchlist B: reliable but low avg', 'B', 'pill--B')),
+      ...watchlistC.map((row) => buildReliabilityRow(row, 'Newbie watch: <5 weeks + risk', 'NEW', 'pill--NEW')),
+    ];
+    watchlistBComponent = renderTable('watchlistBWrap', reliabilityHeaders, watchlistBData);
 
     analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };
     analyticsCache.decks = data.decks_used_table || { headers: [], rows: [] };
@@ -495,6 +673,24 @@
     }
   });
 
+  el('copyUnderperformers').addEventListener('click', () => {
+    if (underperformersComponent) {
+      copyTable(underperformersComponent.getHeaders(), underperformersComponent.getVisibleRows(), el('toastUnderperformers'));
+    }
+  });
+
+  el('copyWatchlistA').addEventListener('click', () => {
+    if (watchlistAComponent) {
+      copyTable(watchlistAComponent.getHeaders(), watchlistAComponent.getVisibleRows(), el('toastWatchlistA'));
+    }
+  });
+
+  el('copyWatchlistB').addEventListener('click', () => {
+    if (watchlistBComponent) {
+      copyTable(watchlistBComponent.getHeaders(), watchlistBComponent.getVisibleRows(), el('toastWatchlistB'));
+    }
+  });
+
   el('copyContribution').addEventListener('click', () => {
     if (contributionComponent) {
       copyTable(contributionComponent.getHeaders(), contributionComponent.getVisibleRows(), el('toastContribution'));
@@ -511,6 +707,9 @@
   el('infoPrevious').addEventListener('click', () => showInfoOverlay('previous'));
   el('infoPromotions').addEventListener('click', () => showInfoOverlay('promotions'));
   el('infoRatio').addEventListener('click', () => showInfoOverlay('ratio'));
+  el('infoUnderperformers').addEventListener('click', () => showInfoOverlay('underperformers'));
+  el('infoWatchlistA').addEventListener('click', () => showInfoOverlay('watchlistA'));
+  el('infoWatchlistB').addEventListener('click', () => showInfoOverlay('watchlistB'));
   el('infoOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'infoOverlay') {
       el('infoOverlay').style.display = 'none';
