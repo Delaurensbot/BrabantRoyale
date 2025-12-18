@@ -12,6 +12,7 @@ from Royale_api import (
     fetch_clan_members,
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
+    parse_day_number,
     dedupe_rows,
     render_player_table,
     render_clan_overview_table,
@@ -32,6 +33,7 @@ class handler(BaseHTTPRequestHandler):
 
             race_html = fetch_html(RACE_URL_DEFAULT)
             race_soup = BeautifulSoup(race_html, "html.parser")
+            day_number = parse_day_number(race_soup)
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             players = parse_player_rows_from_race_soup(race_soup)
@@ -55,7 +57,11 @@ class handler(BaseHTTPRequestHandler):
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
-            high_fame_text = render_high_fame_players(filtered_players)
+            high_fame_text = (
+                render_high_fame_players(filtered_players)
+                if day_number == 4
+                else ""
+            )
             day4_last_chance_text = render_day4_last_chance_players(
                 race_soup, filtered_players
             )
@@ -99,6 +105,7 @@ class handler(BaseHTTPRequestHandler):
                 "battles_left_text": battles_left_text,
                 "risk_left_text": risk_left_text,
                 "high_fame_text": high_fame_text,
+                "day_number": day_number,
                 "day4_last_chance_text": day4_last_chance_text,
                 "short_story_text": short_story_text,
                 "short_story_limit": short_story_limit,
