@@ -50,6 +50,20 @@
     .infoPanel .closeBtn { margin-top: 8px; }
     .cellMain { display: inline-flex; align-items: center; gap: 8px; }
     .reasonText { font-size: 12px; opacity: 0.85; }
+    .detailRow td { background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .detailRowInner { padding: 12px; border-radius: 12px; background: #0f1724; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 32px rgba(0,0,0,0.3); animation: slideDown 200ms ease; }
+    .detailHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .detailTitle { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    .detailSubtitle { color: rgba(232,235,240,0.75); margin-top: 4px; font-size: 13px; }
+    .detailTable { width: 100%; border-collapse: collapse; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; overflow: hidden; }
+    .detailTable thead th { background: linear-gradient(135deg, rgba(0, 255, 170, 0.16), rgba(0, 112, 243, 0.12)); padding: 10px 12px; text-align: left; font-size: 13px; letter-spacing: 0.1px; }
+    .detailTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+    .detailTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .detailTable .mutedCell { color: rgba(232,235,240,0.6); }
+    .detailTable .statCell { border-radius: 8px; }
+    .detailTable .scoreCell { font-weight: 700; }
+    .clickableCell { cursor: pointer; }
+    @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -276,6 +290,11 @@
     let lastRendered = [];
 
     function apply() {
+      if (openPlayerDetail && openPlayerDetail.table === table) {
+        openPlayerDetail.row.remove();
+        openPlayerDetail = null;
+      }
+
       let filtered = rows.slice();
       filtered = filtered.filter((row) =>
         row.every((cell, idx) => {
@@ -336,6 +355,10 @@
               td.appendChild(sub);
             }
             if (cell.title) td.title = cell.title;
+            if (cell.onClick) {
+              td.classList.add('clickableCell');
+              td.addEventListener('click', (e) => cell.onClick({ rowEl: tr, tableEl: table }, e));
+            }
           } else {
             td.textContent = cell;
           }
@@ -422,6 +445,7 @@
   let mvpPrevious = [];
   let promotionCandidates = [];
   let ratioExpanded = false;
+  let openPlayerDetail = null;
 
   const infoContent = {
     current: {
@@ -530,6 +554,194 @@
 
   const reliabilityHeaders = ['Player', 'Role', 'Weeks played', 'Avg score', 'Missed attacks', 'Reliability %'];
 
+  const normalizeName = (name) => (name || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  function parseWeekKeyJs(week) {
+    if (!week || typeof week !== 'string') return [-Infinity, -Infinity];
+    const [season, idx] = week.split('-').map((part) => parseInt(part.trim(), 10));
+    if (Number.isNaN(season) || Number.isNaN(idx)) return [-Infinity, -Infinity];
+    return [season, idx];
+  }
+
+  function sortWeeksDesc(weeks) {
+    return weeks.sort((a, b) => {
+      const [sa, ia] = parseWeekKeyJs(a.week);
+      const [sb, ib] = parseWeekKeyJs(b.week);
+      if (sa !== sb) return sb - sa;
+      if (ia !== ib) return ib - ia;
+      return (b.week || '').localeCompare(a.week || '');
+    });
+  }
+
+  function getMissedColor(missed) {
+    if (missed === null || missed === undefined) return '';
+    if (missed <= 0) return 'rgba(34, 197, 94, 0.25)';
+    if (missed === 1) return 'rgba(234, 179, 8, 0.32)';
+    if (missed === 2) return 'rgba(249, 115, 22, 0.32)';
+    const intensity = Math.min(missed, 8);
+    const alpha = 0.28 + (intensity - 3) * 0.04;
+    return `rgba(239, 68, 68, ${Math.min(alpha, 0.5)})`;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function getScoreColor(score) {
+    if (score === null || score === undefined || Number.isNaN(score)) return '';
+    if (score >= 2800) {
+      const clamped = Math.min(score, 3200);
+      const t = (clamped - 2800) / 400;
+      const light = lerp(42, 30, t);
+      return `hsla(140, 65%, ${light}%, 0.32)`;
+    }
+    if (score >= 2500) {
+      const t = (score - 2500) / 300;
+      const hue = lerp(60, 140, t);
+      const light = lerp(48, 42, t);
+      return `hsla(${hue}, 70%, ${light}%, 0.3)`;
+    }
+    const clamped = Math.max(0, Math.min(score, 2500));
+    const t = Math.min((2500 - clamped) / 700, 1);
+    const hue = lerp(40, 8, t);
+    const light = lerp(48, 32, t);
+    return `hsla(${hue}, 75%, ${light}%, 0.32)`;
+  }
+
+  function getPlayerWeekData(player) {
+    const contrib = analyticsCache.contribution || { headers: [], rows: [] };
+    const decks = analyticsCache.decks || { headers: [], rows: [] };
+    const contribIdx = (contrib.headers || []).findIndex((h) => (h || '').toLowerCase() === 'c');
+    const decksIdx = (decks.headers || []).findIndex((h) => (h || '').toLowerCase() === 'd');
+    if (contribIdx === -1 || decksIdx === -1) return [];
+
+    const weekHeaders = (contrib.headers || []).slice(contribIdx + 1);
+    const contribRow = (contrib.rows || []).find((r) => normalizeName(r[0]) === normalizeName(player));
+    const decksRow = (decks.rows || []).find((r) => normalizeName(r[0]) === normalizeName(player));
+    if (!contribRow || !decksRow) return [];
+
+    const weekData = weekHeaders
+      .map((wh, idx) => {
+        const scoreRaw = contribRow[contribIdx + 1 + idx];
+        const scoreNum = scoreRaw === undefined || scoreRaw === '' ? null : Number(scoreRaw);
+        const score = Number.isNaN(scoreNum) ? null : scoreNum;
+        const attacksRaw = decksRow[decksIdx + 1 + idx];
+        const attacksNum = attacksRaw === undefined || attacksRaw === '' ? null : Number(attacksRaw);
+        const attacks = Number.isNaN(attacksNum) ? null : attacksNum;
+        if (score === null && attacks === null) return null;
+        const missed = attacks === null ? null : Math.max(0, 16 - attacks);
+        return { week: wh, score, attacks, missed };
+      })
+      .filter(Boolean);
+
+    return sortWeeksDesc(weekData);
+  }
+
+  function clearPlayerDetail() {
+    if (openPlayerDetail && openPlayerDetail.row && openPlayerDetail.row.parentNode) {
+      openPlayerDetail.row.remove();
+    }
+    openPlayerDetail = null;
+  }
+
+  function renderPlayerDetail(player, reason, tableEl, anchorRow) {
+    clearPlayerDetail();
+
+    const weeks = sortWeeksDesc(getPlayerWeekData(player));
+    const colCount = tableEl.querySelector('thead tr')?.children.length || anchorRow.children.length || 1;
+
+    const detailTr = document.createElement('tr');
+    detailTr.className = 'detailRow';
+    detailTr.dataset.player = player;
+
+    const detailTd = document.createElement('td');
+    detailTd.colSpan = colCount;
+
+    const inner = document.createElement('div');
+    inner.className = 'detailRowInner';
+
+    const head = document.createElement('div');
+    head.className = 'detailHead';
+    const headLeft = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'detailTitle';
+    title.textContent = player || '';
+    const subtitle = document.createElement('div');
+    subtitle.className = 'detailSubtitle';
+    subtitle.textContent = reason || '';
+    headLeft.appendChild(title);
+    headLeft.appendChild(subtitle);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'iconBtn';
+    closeBtn.textContent = 'Sluiten';
+    closeBtn.addEventListener('click', clearPlayerDetail);
+    head.appendChild(headLeft);
+    head.appendChild(closeBtn);
+    inner.appendChild(head);
+
+    const tableWrap = document.createElement('div');
+    if (!weeks.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = 'Geen weekdata gevonden voor deze speler.';
+      tableWrap.appendChild(empty);
+    } else {
+      const table = document.createElement('table');
+      table.className = 'detailTable';
+      const thead = document.createElement('thead');
+      const trHead = document.createElement('tr');
+      ['Week', 'Score', 'Attacks', 'Missed'].forEach((titleText) => {
+        const th = document.createElement('th');
+        th.textContent = titleText;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      weeks.forEach((row) => {
+        const tr = document.createElement('tr');
+        const attacksText = row.attacks === null ? '-' : `${row.attacks}/16`;
+        const missedText = row.missed === null ? '-' : row.missed;
+
+        const cells = [
+          { text: row.week || '-', className: '' },
+          { text: row.score === null ? '-' : row.score, className: 'scoreCell', bg: getScoreColor(row.score) },
+          { text: attacksText, className: 'statCell' },
+          { text: missedText, className: 'statCell', bg: getMissedColor(row.missed) },
+        ];
+
+        cells.forEach((cell) => {
+          const td = document.createElement('td');
+          td.textContent = cell.text;
+          if (cell.className) td.classList.add(cell.className);
+          if (cell.bg) td.style.background = cell.bg;
+          if (cell.text === '-') td.classList.add('mutedCell');
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+    }
+
+    inner.appendChild(tableWrap);
+    detailTd.appendChild(inner);
+    detailTr.appendChild(detailTd);
+
+    anchorRow.parentNode.insertBefore(detailTr, anchorRow.nextSibling);
+    openPlayerDetail = { row: detailTr, table: tableEl, player };
+  }
+
+  function showPlayerDetail(player, reason, tableEl, anchorRow) {
+    if (openPlayerDetail && openPlayerDetail.player === player && openPlayerDetail.table === tableEl) {
+      clearPlayerDetail();
+      return;
+    }
+    renderPlayerDetail(player, reason, tableEl, anchorRow);
+  }
+
   function getReliabilityPercent(row) {
     const value = row.reliability_percent ?? row.reliability_score ?? row.reliability;
     if (typeof value === 'number') return Math.round(value * 1000) / 1000;
@@ -544,6 +756,7 @@
       badge,
       badgeClass,
       title: reason,
+      onClick: (ctx) => showPlayerDetail(row.player, reason, ctx.tableEl, ctx.rowEl),
     };
   }
 
