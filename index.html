@@ -37,6 +37,11 @@
     .playersTable tbody tr:nth-child(odd) { background: rgba(255,255,255,0.02); }
     .playersTable .role { font-weight: 700; letter-spacing: 0.2px; }
     .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: rgba(0, 170, 255, 0.15); font-size: 12px; margin-left: 6px; }
+    .simpleTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .simpleTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .simpleTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .simpleTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .hiddenCopy { display: none; }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
     @media (max-width: 640px) {
       body { padding: 0 12px; }
@@ -134,6 +139,17 @@
       <pre id="highFame" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="highFameToast"></div>
       <div class="muted" id="highFameLen"></div>
+    </div>
+
+    <div class="card" id="day1Card" style="display: none;">
+      <div class="cardHead">
+        <div class="title">Spelers 800+</div>
+        <button data-copy="day1HighFame">Copy</button>
+      </div>
+      <div id="day1HighFameWrap" class="empty">Alleen zichtbaar op dag 1</div>
+      <pre id="day1HighFame" class="hiddenCopy" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="day1HighFameToast"></div>
+      <div class="muted" id="day1HighFameLen"></div>
     </div>
 
     <div class="card" id="day4Card">
@@ -340,6 +356,60 @@
     container.appendChild(table);
   }
 
+  function renderDay1HighFameTable(players, text) {
+    const card = el("day1Card");
+    const container = el("day1HighFameWrap");
+    const hiddenPre = el("day1HighFame");
+
+    if (!card || !container || !hiddenPre) return;
+
+    const hasPlayers = Array.isArray(players) && players.length > 0;
+
+    if (!hasPlayers || !text) {
+      card.style.display = "none";
+      container.innerHTML = "";
+      hiddenPre.textContent = "";
+      return;
+    }
+
+    card.style.display = "";
+    hiddenPre.textContent = text;
+
+    container.className = "tableWrap";
+    container.innerHTML = "";
+
+    const table = document.createElement("table");
+    table.className = "simpleTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["Speler", "Score"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    players.forEach((player) => {
+      const tr = document.createElement("tr");
+
+      const nameTd = document.createElement("td");
+      nameTd.textContent = player.name || "-";
+      tr.appendChild(nameTd);
+
+      const fameTd = document.createElement("td");
+      fameTd.textContent = player.fame != null ? player.fame : "-";
+      tr.appendChild(fameTd);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
   async function copyText(targetId) {
     const map = {
       insights: "insights",
@@ -349,6 +419,7 @@
       risk: "risk",
       story: "story",
       highFame: "highFame",
+      day1HighFame: "day1HighFame",
       day4: "day4",
     };
     const preId = map[targetId];
@@ -391,6 +462,12 @@
     el("risk").textContent = data.risk_left_text || "(geen data)";
     el("highFame").textContent = data.high_fame_text || "(geen data)";
 
+    const day1Players = Array.isArray(data.day1_high_famers)
+      ? data.day1_high_famers
+      : [];
+    const day1Text = (data.day1_high_fame_text || "").trim();
+    renderDay1HighFameTable(day1Players, day1Text);
+
     const day4Text = (data.day4_last_chance_text || "").trim();
     const day4Card = el("day4Card");
     if (day4Card) {
@@ -410,6 +487,7 @@
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
     updateLength("highFame", data.high_fame_text);
+    updateLength("day1HighFame", day1Text);
     updateLength("day4", day4Text);
     updateLength("story", data.short_story_text, data.short_story_limit);
 
@@ -424,7 +502,7 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["insights","clan","clanAvg","battles","risk","story","highFame","day4"].forEach(id => {
+  ["insights","clan","clanAvg","battles","risk","story","highFame","day1HighFame","day4"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });
