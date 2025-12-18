@@ -843,6 +843,25 @@
     return Number.isNaN(num) ? value : Math.round(num * 1000) / 1000;
   }
 
+  function buildReliabilitySummary(row) {
+    const parts = [];
+    if (row.avg_points !== undefined && row.avg_points !== null && row.avg_points !== '') {
+      parts.push(`Avg: ${row.avg_points}`);
+    }
+    if (row.missed_attacks !== undefined && row.missed_attacks !== null && row.missed_attacks !== '') {
+      parts.push(`Missed: ${row.missed_attacks}`);
+    }
+    if (row.penalty_points !== undefined && row.penalty_points !== null && row.penalty_points !== '') {
+      parts.push(`Penalty: ${row.penalty_points}`);
+    }
+    const reliability = getReliabilityPercent(row);
+    if (reliability !== undefined && reliability !== null && reliability !== '') {
+      parts.push(`Reliability: ${reliability}%`);
+    }
+    if (row.weeks_played) parts.push(`${row.weeks_played}w`);
+    return parts.join(' · ');
+  }
+
   function playerCell(row, reason, badge, badgeClass) {
     return {
       value: row.player,
@@ -865,6 +884,20 @@
     ];
   }
 
+  function buildRatioRow(row) {
+    const summary = buildReliabilitySummary(row) || 'Klik om weekdetails te openen';
+    return [
+      playerCell(row, summary),
+      row.role || '',
+      row.weeks_played,
+      row.attacks_done,
+      row.missed_attacks,
+      row.penalty_points,
+      row.avg_points,
+      getReliabilityPercent(row),
+    ];
+  }
+
   function hasMeaningfulStats(row) {
     const metrics = [row.weeks_played, row.attacks_done, row.missed_attacks, row.penalty_points, row.avg_points];
     return metrics.some((value) => Number(value) > 0);
@@ -879,16 +912,7 @@
     PromotionList('promotionList', promotionCandidates, el('toastPromotions'));
 
     const ratioRows = data.ratio_scores || [];
-    ratioData = ratioRows.map((row) => [
-      row.player,
-      row.role || '',
-      row.weeks_played,
-      row.attacks_done,
-      row.missed_attacks,
-      row.penalty_points,
-      row.avg_points,
-      getReliabilityPercent(row),
-    ]);
+    ratioData = ratioRows.map((row) => buildRatioRow(row));
 
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
