@@ -427,10 +427,11 @@
       row.attacks_done,
       row.missed_attacks,
       row.penalty_points,
+      row.avg_points,
       row.reliability_score,
     ]);
 
-    const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'Reliability %'];
+    const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
 
     analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };

@@ -366,12 +366,14 @@ def compute_reliability_scores(
         missed_attacks = 0
         penalty_points = 0
         attacks_done = 0
+        total_points = 0
 
         for wh, c_val in per_week_c.items():
             if c_val <= 0:
                 continue
 
             weeks_played += 1
+            total_points += c_val
             d_val = decks_map.get(key, {}).get(wh, 0)
             done = max(0, min(16, d_val))
             attacks_done += done
@@ -381,8 +383,10 @@ def compute_reliability_scores(
 
         total_possible = weeks_played * 16
         reliability_score = 0.0
+        avg_points = 0.0
         if total_possible > 0:
             reliability_score = round((attacks_done / total_possible) * 100, 2)
+            avg_points = round(total_points / weeks_played, 2)
 
         results.append(
             {
@@ -392,6 +396,7 @@ def compute_reliability_scores(
                 "attacks_done": attacks_done,
                 "missed_attacks": missed_attacks,
                 "penalty_points": penalty_points,
+                "avg_points": avg_points,
                 "reliability_score": reliability_score,
             }
         )
