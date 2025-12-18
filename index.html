@@ -11,6 +11,8 @@
     .muted { opacity: 0.75; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
     button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
+    select { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.04); color: inherit; }
+    select:focus { outline: 1px solid rgba(255,255,255,0.3); }
     .ctaLink { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; text-decoration: none; font-weight: 700; color: #e8ebf0; background: linear-gradient(135deg, rgba(86, 38, 153, 0.35), rgba(141, 66, 245, 0.18)); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 10px 28px rgba(0,0,0,0.28); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
     .ctaLink:hover { border-color: rgba(255,255,255,0.34); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
@@ -56,6 +58,12 @@
   <div class="top">
     <div class="muted">Last updated: <span id="updated">-</span></div>
     <button id="refresh">Refresh</button>
+    <label class="muted" for="toneMode">Tone</label>
+    <select id="toneMode" aria-label="Tone modus">
+      <option value="neutral">Neutraal</option>
+      <option value="streng">Streng</option>
+      <option value="hype">Hype</option>
+    </select>
     <div class="muted" id="status"></div>
     <a class="ctaLink" href="/analytics.html">Analytics <span aria-hidden="true">→</span></a>
     <a class="ctaLink" href="/join.html">Recent joins <span aria-hidden="true">→</span></a>
@@ -452,7 +460,9 @@
     el("errorBox").style.display = "none";
     el("status").textContent = "Loading...";
 
-    const url = "/api/cwstats?t=" + Date.now();
+    const toneSelect = el("toneMode");
+    const tone = toneSelect ? toneSelect.value : "neutral";
+    const url = "/api/cwstats?t=" + Date.now() + "&tone=" + encodeURIComponent(tone);
     const res = await fetch(url, { cache: "no-store" });
 
     if (!res.ok) {
@@ -522,6 +532,10 @@
 
   // Buttons
   el("refresh").addEventListener("click", () => fetchData());
+  const toneSelect = el("toneMode");
+  if (toneSelect) {
+    toneSelect.addEventListener("change", () => fetchData());
+  }
 
   document.querySelectorAll("button[data-copy]").forEach(btn => {
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
