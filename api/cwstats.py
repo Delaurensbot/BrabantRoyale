@@ -57,7 +57,7 @@ class handler(BaseHTTPRequestHandler):
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
-            high_fame_text = render_high_fame_players(filtered_players)
+            high_fame_text = render_high_fame_players(race_soup, filtered_players)
             day1_high_famers = collect_day1_high_famers(race_soup, filtered_players)
             day1_high_fame_text = render_day1_high_fame_players(
                 race_soup, filtered_players

@@ -376,7 +376,14 @@ def render_risk_left_attacks(rows: List[Dict]) -> str:
     return "\n".join(out)
 
 
-def render_high_fame_players(rows: List[Dict], threshold: int = 3000) -> str:
+def render_high_fame_players(
+    soup: BeautifulSoup, rows: List[Dict], threshold: int = 3000
+) -> str:
+    day_num = parse_day_number(soup)
+
+    if day_num != 4:
+        return ""
+
     high_famers = []
     for r in rows:
         fame = r.get("fame")

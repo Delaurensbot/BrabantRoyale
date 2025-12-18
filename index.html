@@ -131,7 +131,7 @@
       <div class="muted" id="insightsLen"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="highFameCard" style="display: none;">
       <div class="cardHead">
         <div class="title">Spelers 3000+ 🌟</div>
         <button data-copy="highFame">Copy</button>
@@ -460,7 +460,18 @@
     renderPlayersTable(data.players_text || "");
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
-    el("highFame").textContent = data.high_fame_text || "(geen data)";
+
+    const highFameText = (data.high_fame_text || "").trim();
+    const highFameCard = el("highFameCard");
+    if (highFameCard) {
+      if (highFameText) {
+        highFameCard.style.display = "";
+        el("highFame").textContent = highFameText;
+      } else {
+        highFameCard.style.display = "none";
+        el("highFame").textContent = "";
+      }
+    }
 
     const day1Players = Array.isArray(data.day1_high_famers)
       ? data.day1_high_famers
@@ -486,7 +497,7 @@
     updateLength("clanAvg", data.clan_avg_projection_text);
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
-    updateLength("highFame", data.high_fame_text);
+    updateLength("highFame", highFameText);
     updateLength("day1HighFame", day1Text);
     updateLength("day4", day4Text);
     updateLength("story", data.short_story_text, data.short_story_limit);
