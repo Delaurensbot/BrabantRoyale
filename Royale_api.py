@@ -408,6 +408,54 @@ def render_high_fame_players(rows: List[Dict], threshold: int = 3000) -> str:
     return "\n".join(out)
 
 
+def collect_day1_high_famers(
+    soup: BeautifulSoup, rows: List[Dict], threshold: int = 800
+) -> List[Tuple[str, int]]:
+    day_num = parse_day_number(soup)
+
+    if day_num != 1:
+        return []
+
+    high_famers: List[Tuple[str, int]] = []
+    for r in rows:
+        fame = r.get("fame")
+        name = (r.get("name") or "").strip()
+
+        if fame is None or not name:
+            continue
+
+        try:
+            fame_val = int(fame)
+        except (TypeError, ValueError):
+            continue
+
+        if fame_val >= threshold:
+            high_famers.append((name, fame_val))
+
+    high_famers.sort(key=lambda item: item[1], reverse=True)
+
+    return high_famers
+
+
+def render_day1_high_fame_players(
+    soup: BeautifulSoup, rows: List[Dict], threshold: int = 800
+) -> str:
+    high_famers = collect_day1_high_famers(soup, rows, threshold)
+
+    if not high_famers:
+        return ""
+
+    out: List[str] = []
+    out.append("Spelers 800+ 🏅")
+    out.append(f"- Aantal: {len(high_famers)}")
+    out.append("")
+
+    for name, fame_val in high_famers:
+        out.append(f"- {name}: {fame_val}")
+
+    return "\n".join(out)
+
+
 def render_day4_last_chance_players(
     soup: BeautifulSoup, rows: List[Dict], min_fame: int = 2100
 ) -> str:

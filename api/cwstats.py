@@ -21,6 +21,8 @@ from Royale_api import (
     render_battles_left_today,
     render_risk_left_attacks,
     render_high_fame_players,
+    collect_day1_high_famers,
+    render_day1_high_fame_players,
     render_day4_last_chance_players,
     build_short_story,
 )
@@ -56,6 +58,10 @@ class handler(BaseHTTPRequestHandler):
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
             high_fame_text = render_high_fame_players(filtered_players)
+            day1_high_famers = collect_day1_high_famers(race_soup, filtered_players)
+            day1_high_fame_text = render_day1_high_fame_players(
+                race_soup, filtered_players
+            )
             day4_last_chance_text = render_day4_last_chance_players(
                 race_soup, filtered_players
             )
@@ -77,6 +83,7 @@ class handler(BaseHTTPRequestHandler):
                 ("Battles left", battles_left_text),
                 ("Risk left", risk_left_text),
                 ("High fame", high_fame_text),
+                ("Day 1 high fame", day1_high_fame_text),
                 ("Day 4 last chance", day4_last_chance_text),
                 ("Short story", short_story_text),
             ]
@@ -99,6 +106,11 @@ class handler(BaseHTTPRequestHandler):
                 "battles_left_text": battles_left_text,
                 "risk_left_text": risk_left_text,
                 "high_fame_text": high_fame_text,
+                "day1_high_famers": [
+                    {"name": name, "fame": fame}
+                    for name, fame in day1_high_famers
+                ],
+                "day1_high_fame_text": day1_high_fame_text,
                 "day4_last_chance_text": day4_last_chance_text,
                 "short_story_text": short_story_text,
                 "short_story_limit": short_story_limit,
