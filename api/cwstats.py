@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 
@@ -26,6 +26,67 @@ from Royale_api import (
     render_day4_last_chance_players,
     build_short_story,
 )
+from Royale_api_join_data import collect_join_data
+
+
+def parse_join_utc(value: str) -> datetime | None:
+    if not value:
+        return None
+
+    candidates = [
+        "%Y-%m-%d %H:%M:%S %Z",
+        "%Y-%m-%d %H:%M:%S UTC",
+        "%Y-%m-%d %H:%M %Z",
+        "%Y-%m-%d %H:%M UTC",
+    ]
+
+    cleaned = value.strip().replace("UTC", "UTC")
+    for fmt in candidates:
+        try:
+            dt = datetime.strptime(cleaned, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def build_newbie_watchlist(join_rows, players):
+    joins_by_tag = {}
+    for row in join_rows or []:
+        tag = (row.get("pid") or "").strip().upper()
+        joined_at = parse_join_utc(row.get("utc", ""))
+        if tag and joined_at:
+            joins_by_tag[tag] = joined_at
+
+    if not joins_by_tag:
+        return []
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(weeks=3)
+
+    newbies = []
+    for player in players:
+        tag = (player.get("tag") or "").strip().upper()
+        joined_at = joins_by_tag.get(tag)
+        if not tag or not joined_at:
+            continue
+        if joined_at < cutoff:
+            continue
+
+        days_in = max(0, (now - joined_at).days)
+        newbies.append(
+            {
+                "name": player.get("name", ""),
+                "fame": player.get("fame"),
+                "joined_at": joined_at.isoformat(),
+                "days_in_clan": days_in,
+            }
+        )
+
+    newbies.sort(key=lambda r: r.get("joined_at", ""))
+    return newbies
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -65,6 +126,14 @@ class handler(BaseHTTPRequestHandler):
             day4_last_chance_text = render_day4_last_chance_players(
                 race_soup, filtered_players
             )
+            newbie_watchlist = []
+            try:
+                join_data = collect_join_data(limit=60)
+                newbie_watchlist = build_newbie_watchlist(
+                    join_data.get("joins", []), filtered_players
+                )
+            except Exception:
+                newbie_watchlist = []
             short_story_limit = 220
             short_story_text = build_short_story(
                 race_soup,
@@ -114,6 +183,7 @@ class handler(BaseHTTPRequestHandler):
                 "day4_last_chance_text": day4_last_chance_text,
                 "short_story_text": short_story_text,
                 "short_story_limit": short_story_limit,
+                "newbie_watchlist": newbie_watchlist,
                 "copy_all_text": copy_all_text,
             }
 
