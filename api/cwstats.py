@@ -1,38 +1,47 @@
 from http.server import BaseHTTPRequestHandler
 import json
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
 from Royale_api import (
+    OUR_CLAN_NAME_DEFAULT,
     RACE_URL_DEFAULT,
     CLAN_URL_DEFAULT,
-    OUR_CLAN_NAME_DEFAULT,
-    fetch_html,
+    build_short_story,
+    collect_day1_high_famers,
+    dedupe_rows,
     fetch_clan_members,
+    fetch_html,
+    get_clan_config,
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
-    dedupe_rows,
-    render_player_table,
-    render_clan_overview_table,
-    render_clan_insights,
-    render_clan_stats_block,
-    render_clan_avg_projection,
     render_battles_left_today,
-    render_risk_left_attacks,
-    render_high_fame_players,
-    collect_day1_high_famers,
+    render_clan_avg_projection,
+    render_clan_insights,
+    render_clan_overview_table,
+    render_clan_stats_block,
     render_day1_high_fame_players,
     render_day4_last_chance_players,
-    build_short_story,
+    render_high_fame_players,
+    render_player_table,
+    render_risk_left_attacks,
 )
+
+def pick_clan_config(path: str):
+    parsed = urlparse(path)
+    params = parse_qs(parsed.query)
+    return get_clan_config(params.get("clan", [""])[0])
+
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            clan_tags, clan_names = fetch_clan_members(CLAN_URL_DEFAULT)
+            clan_config = pick_clan_config(self.path)
+            clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
 
-            race_html = fetch_html(RACE_URL_DEFAULT)
+            race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
 
             clans = parse_clan_overview_from_race_soup(race_soup)
@@ -49,9 +58,12 @@ class handler(BaseHTTPRequestHandler):
             filtered_players = dedupe_rows(filtered_players)
 
             race_overview_text = render_clan_overview_table(clans)
-            insights_text = render_clan_insights(clans, OUR_CLAN_NAME_DEFAULT)
+            insights_text = render_clan_insights(clans, clan_config.get("name") or OUR_CLAN_NAME_DEFAULT)
             clan_stats_text = render_clan_stats_block(
-                race_soup, clans, OUR_CLAN_NAME_DEFAULT, filtered_players
+                race_soup,
+                clans,
+                clan_config.get("name") or OUR_CLAN_NAME_DEFAULT,
+                filtered_players,
             )
             clan_avg_projection_text = render_clan_avg_projection(clans)
             players_text = render_player_table(filtered_players)
@@ -69,7 +81,7 @@ class handler(BaseHTTPRequestHandler):
             short_story_text = build_short_story(
                 race_soup,
                 clans,
-                OUR_CLAN_NAME_DEFAULT,
+                clan_config.get("name") or OUR_CLAN_NAME_DEFAULT,
                 filtered_players,
                 max_chars=short_story_limit,
             )
@@ -114,6 +126,8 @@ class handler(BaseHTTPRequestHandler):
                 "day4_last_chance_text": day4_last_chance_text,
                 "short_story_text": short_story_text,
                 "short_story_limit": short_story_limit,
+                "clan_tag": clan_config.get("tag"),
+                "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
             }
 
