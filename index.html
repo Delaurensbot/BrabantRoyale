@@ -73,16 +73,6 @@
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Clan Stats</div>
-        <button data-copy="clan">Copy</button>
-      </div>
-      <pre id="clan" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="clanToast"></div>
-      <div class="muted" id="clanLen"></div>
-    </div>
-
-    <div class="card">
-      <div class="cardHead">
         <div class="title">Clan avg/projection</div>
         <button data-copy="clanAvg">Copy</button>
       </div>
@@ -119,16 +109,6 @@
       <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="battlesToast"></div>
       <div class="muted" id="battlesLen"></div>
-    </div>
-
-    <div class="card">
-      <div class="cardHead">
-        <div class="title">Insights</div>
-        <button data-copy="insights">Copy</button>
-      </div>
-      <pre id="insights" title="Klik om te kopieren">(loading...)</pre>
-      <div class="toast" id="insightsToast"></div>
-      <div class="muted" id="insightsLen"></div>
     </div>
 
     <div class="card" id="highFameCard" style="display: none;">
@@ -410,10 +390,28 @@
     container.appendChild(table);
   }
 
+  function formatClanAvgProjection(text) {
+    if (!text || !text.trim()) return "(geen data)";
+
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const dataLines = lines.filter((line) => line.includes("|"));
+
+    if (!dataLines.length) return text.trim();
+
+    const rows = dataLines
+      .map((line) => line.split("|").map((part) => part.trim()))
+      .filter((parts) => parts.length >= 3 && parts[0].toLowerCase() !== "clan name");
+
+    if (!rows.length) return text.trim();
+
+    const formattedRows = rows
+      .map(([name, avg, projected]) => `${name} ${avg || "-"} --> ${projected || "-"}`);
+
+    return ["Clan avg --> Projected", ...formattedRows].join("\n\n");
+  }
+
   async function copyText(targetId) {
     const map = {
-      insights: "insights",
-      clan: "clan",
       clanAvg: "clanAvg",
       battles: "battles",
       risk: "risk",
@@ -454,9 +452,8 @@
     }
 
     renderOverviewTable(data.race_overview_text || "");
-    el("insights").textContent = data.insights_text || "(geen data)";
-    el("clan").textContent = data.clan_stats_text || "(geen data)";
-    el("clanAvg").textContent = data.clan_avg_projection_text || "(geen data)";
+    const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
+    el("clanAvg").textContent = formattedClanAvg;
     renderPlayersTable(data.players_text || "");
     el("battles").textContent = data.battles_left_text || "(geen data)";
     el("risk").textContent = data.risk_left_text || "(geen data)";
@@ -492,9 +489,7 @@
     }
 
     el("story").textContent = data.short_story_text || "(geen data)";
-    updateLength("insights", data.insights_text);
-    updateLength("clan", data.clan_stats_text);
-    updateLength("clanAvg", data.clan_avg_projection_text);
+    updateLength("clanAvg", formattedClanAvg);
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
     updateLength("highFame", highFameText);
@@ -513,7 +508,7 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["insights","clan","clanAvg","battles","risk","story","highFame","day1HighFame","day4"].forEach(id => {
+  ["clanAvg","battles","risk","story","highFame","day1HighFame","day4"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });
