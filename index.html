@@ -144,6 +144,13 @@
 
     <div class="card fullRow">
       <div class="cardHead">
+        <div class="title">Newbie watchlist (&lt; 3 weken)</div>
+      </div>
+      <div id="newbieWatchlist" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
         <div class="title">Players</div>
       </div>
       <div id="players" class="empty">(loading...)</div>
@@ -336,6 +343,59 @@
     container.appendChild(table);
   }
 
+  function renderNewbieWatchlist(players) {
+    const container = el("newbieWatchlist");
+    container.innerHTML = "";
+
+    if (!Array.isArray(players) || !players.length) {
+      container.className = "empty";
+      container.textContent = "Geen spelers met minder dan 3 weken in de clan";
+      return;
+    }
+
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "simpleTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["Speler", "Score", "Gejoind"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    players.forEach((p) => {
+      const tr = document.createElement("tr");
+
+      const nameTd = document.createElement("td");
+      nameTd.textContent = p.name || "-";
+      tr.appendChild(nameTd);
+
+      const scoreTd = document.createElement("td");
+      scoreTd.textContent = p.fame != null ? p.fame : "-";
+      tr.appendChild(scoreTd);
+
+      const joinedTd = document.createElement("td");
+      const joinedDate = p.joined_at ? new Date(p.joined_at) : null;
+      const joinedText = joinedDate ? joinedDate.toLocaleDateString() : "-";
+      const daysText =
+        typeof p.days_in_clan === "number" ? `(${p.days_in_clan} dagen)` : "";
+      joinedTd.textContent = [joinedText, daysText].filter(Boolean).join(" ");
+      tr.appendChild(joinedTd);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
   function renderDay1HighFameTable(players, text) {
     const card = el("day1Card");
     const container = el("day1HighFameWrap");
@@ -508,6 +568,7 @@
     }
 
     el("story").textContent = data.short_story_text || "(geen data)";
+    renderNewbieWatchlist(data.newbie_watchlist || []);
     updateLength("clanAvg", formattedClanAvg);
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
