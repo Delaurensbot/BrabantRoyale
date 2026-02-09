@@ -13,6 +13,10 @@
     .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); cursor: pointer; color: inherit; }
     .clanButton--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    .analyticsNav { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 16px; }
+    .analyticsNav a { text-decoration: none; }
+    .navBtn { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .navBtn--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
     a { color: #67c7ff; }
     button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
     button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
@@ -81,6 +85,11 @@
     <div class="muted" id="updated" style="margin-left:auto;"></div>
   </div>
   <div class="clanSwitch" id="clanSwitch"></div>
+  <div class="analyticsNav">
+    <span class="navBtn navBtn--active">Overzicht</span>
+    <a class="navBtn" id="recapLink" href="/analytics-recap.html">Recap</a>
+    <a class="navBtn" id="endWarLink" href="/analytics-einde-war.html">Einde war</a>
+  </div>
   <div class="muted" id="clanLabel"></div>
   <div class="error" id="errorBox"></div>
 
@@ -231,6 +240,10 @@
     const query = `?clan=${encodeURIComponent(currentClanTag)}`;
     const dashboardLink = el('dashboardLink');
     if (dashboardLink) dashboardLink.href = `/index.html${query}`;
+    const recapLink = el('recapLink');
+    const endWarLink = el('endWarLink');
+    if (recapLink) recapLink.href = `/analytics-recap.html${query}`;
+    if (endWarLink) endWarLink.href = `/analytics-einde-war.html${query}`;
   }
 
   function renderClanButtons() {
