@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Analytics Recap</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
+    h1 { margin: 0 0 10px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .muted { opacity: 0.8; }
+    .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); cursor: pointer; color: inherit; }
+    .clanButton--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    a { color: #67c7ff; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
+    .analyticsNav { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 16px; }
+    .analyticsNav a { text-decoration: none; }
+    .navBtn { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .navBtn--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.2); }
+    .card { border-radius: 16px; padding: 16px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 12px; gap: 12px; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    .statGrid { display: grid; gap: 10px; }
+    .statRow { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+    .statRow span { font-weight: 600; }
+    .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 6px; }
+    .infoRow { margin-top: 10px; font-size: 13px; color: rgba(232,235,240,0.7); }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1 style="margin-right: 10px;">Analytics Recap</h1>
+    <a class="muted" id="dashboardLink" href="/index.html">← Terug naar dashboard</a>
+    <button id="refresh">Refresh</button>
+    <div class="muted" id="status"></div>
+    <div class="muted" id="updated" style="margin-left:auto;"></div>
+  </div>
+  <div class="clanSwitch" id="clanSwitch"></div>
+  <div class="analyticsNav">
+    <a class="navBtn" id="overviewLink" href="/analytics.html">Overzicht</a>
+    <span class="navBtn navBtn--active">Recap</span>
+    <a class="navBtn" id="endWarLink" href="/analytics-einde-war.html">Einde war</a>
+  </div>
+  <div class="muted" id="clanLabel"></div>
+  <div class="error" id="errorBox"></div>
+
+  <div class="card">
+    <div class="cardHead">
+      <div class="title">NL leaderboard recap</div>
+      <div>
+        <button id="copyRecap">Kopieer recap</button>
+      </div>
+    </div>
+    <div class="toast" id="toastRecap"></div>
+    <div class="statGrid" id="recapStats">(laden...)</div>
+    <div class="infoRow" id="recapInfo"></div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  const CLANS = {
+    "9YP8UY": { name: "Brabant Royale" },
+    "GPCLVLPP": { name: "Brabant Royale 2" },
+  };
+  const DEFAULT_CLAN = "9YP8UY";
+  let currentClanTag = DEFAULT_CLAN;
+  let recapText = '';
+
+  function normalizeClanTag(tag) {
+    return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  }
+
+  function clanName(tag) {
+    return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
+  }
+
+  function updateClanLabel() {
+    const label = el('clanLabel');
+    if (label) {
+      label.textContent = `Recap voor ${clanName(currentClanTag)} (${currentClanTag})`;
+    }
+  }
+
+  function updateNavLinks() {
+    const query = `?clan=${encodeURIComponent(currentClanTag)}`;
+    const dashboardLink = el('dashboardLink');
+    const overviewLink = el('overviewLink');
+    const endWarLink = el('endWarLink');
+    if (dashboardLink) dashboardLink.href = `/index.html${query}`;
+    if (overviewLink) overviewLink.href = `/analytics.html${query}`;
+    if (endWarLink) endWarLink.href = `/analytics-einde-war.html${query}`;
+  }
+
+  function renderClanButtons() {
+    const switchEl = el('clanSwitch');
+    if (!switchEl) return;
+    switchEl.innerHTML = '';
+
+    Object.entries(CLANS).forEach(([tag, info]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'clanButton';
+      btn.dataset.clan = tag;
+      btn.textContent = `${info.name} (${tag})`;
+      btn.addEventListener('click', () => setClan(tag));
+      switchEl.appendChild(btn);
+    });
+  }
+
+  function setClan(tag, skipFetch = false) {
+    const normalized = normalizeClanTag(tag);
+    currentClanTag = CLANS[normalized] ? normalized : DEFAULT_CLAN;
+
+    document.querySelectorAll('.clanButton').forEach((btn) => {
+      if (btn.dataset.clan === currentClanTag) {
+        btn.classList.add('clanButton--active');
+      } else {
+        btn.classList.remove('clanButton--active');
+      }
+    });
+
+    updateClanLabel();
+    updateNavLinks();
+    if (!skipFetch) {
+      fetchRecap();
+    }
+  }
+
+  function showError(msg) {
+    const box = el('errorBox');
+    box.textContent = msg;
+    box.style.display = msg ? 'block' : 'none';
+  }
+
+  function copyText(text, toastEl) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      if (toastEl) {
+        toastEl.textContent = 'Copied!';
+        setTimeout(() => (toastEl.textContent = ''), 1200);
+      }
+    });
+  }
+
+  function movementLabel(movement) {
+    switch (movement) {
+      case 'gestegen':
+        return 'gestegen';
+      case 'gezakt':
+        return 'gezakt';
+      case 'gelijk':
+        return 'gelijk gebleven';
+      default:
+        return 'onbekend';
+    }
+  }
+
+  function buildRecapText(data) {
+    const lines = [];
+    if (data.rank_now) lines.push(`NL Rank: #${data.rank_now}`);
+    lines.push(`Beweging: ${movementLabel(data.movement)}`);
+    if (data.trophies_now) lines.push(`Trophies: ${data.trophies_now}`);
+    if (data.rank_prev) lines.push(`Vorige rank: #${data.rank_prev}`);
+    return lines.join('\n');
+  }
+
+  function renderRecap(data) {
+    const container = el('recapStats');
+    container.innerHTML = '';
+
+    const rows = [
+      ['NL Rank', data.rank_now ? `#${data.rank_now}` : 'Onbekend'],
+      ['Beweging', movementLabel(data.movement)],
+      ['Trophies', data.trophies_now ?? 'Onbekend'],
+    ];
+    if (data.rank_prev) {
+      rows.push(['Vorige rank', `#${data.rank_prev}`]);
+    }
+
+    rows.forEach(([label, value]) => {
+      const row = document.createElement('div');
+      row.className = 'statRow';
+      row.innerHTML = `<div>${label}</div><span>${value}</span>`;
+      container.appendChild(row);
+    });
+
+    recapText = buildRecapText(data);
+    const info = [];
+    if (data.source) info.push(`Bron: ${data.source}`);
+    if (data.errors && data.errors.length) info.push(`Let op: ${data.errors.join(' | ')}`);
+    el('recapInfo').textContent = info.join(' · ');
+  }
+
+  async function fetchRecap() {
+    showError('');
+    el('status').textContent = `Laden voor ${clanName(currentClanTag)}...`;
+    try {
+      const res = await fetch(`/api/recap?clan=${encodeURIComponent(currentClanTag)}`);
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Onbekende fout');
+      renderRecap(json);
+      el('status').textContent = '';
+      el('updated').textContent = `Laatste refresh: ${new Date().toLocaleString()}`;
+    } catch (e) {
+      console.error(e);
+      showError(e.message);
+      el('status').textContent = '';
+    }
+  }
+
+  el('refresh').addEventListener('click', fetchRecap);
+  el('copyRecap').addEventListener('click', () => copyText(recapText, el('toastRecap')));
+
+  function init() {
+    renderClanButtons();
+    const params = new URLSearchParams(window.location.search);
+    const desired = params.get('clan') || DEFAULT_CLAN;
+    setClan(desired, true);
+    fetchRecap();
+  }
+
+  init();
+</script>
+</body>
+</html>
