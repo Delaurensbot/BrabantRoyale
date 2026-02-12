@@ -262,7 +262,7 @@
       btn.type = "button";
       btn.className = "clanButton";
       btn.dataset.clan = tag;
-      btn.textContent = `${info.name} (${tag})`;
+      btn.textContent = `${info.name} ($${(data.clan_tag || currentClanTag)})`;
       btn.addEventListener("click", () => setClan(tag));
       switchEl.appendChild(btn);
     });

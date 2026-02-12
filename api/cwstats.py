@@ -18,6 +18,7 @@ from Royale_api import (
     get_clan_config,
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
+    parse_cwstats_finish_outlook_from_html,
     render_battles_left_today,
     render_clan_avg_projection,
     render_clan_insights,

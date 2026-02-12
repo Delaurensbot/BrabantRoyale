@@ -50,6 +50,51 @@ def clean_text(s: str) -> str:
     return s
 
 
+def parse_compact_number(value: str) -> Optional[int]:
+    raw = clean_text(value or "")
+    if not raw:
+        return None
+    digits = re.sub(r"[^0-9]", "", raw)
+    if not digits:
+        return None
+    return int(digits)
+
+
+def parse_cwstats_finish_outlook_from_html(html: str) -> Dict[str, Optional[int]]:
+    soup = BeautifulSoup(html or "", "html.parser")
+    blob = clean_text(soup.get_text(" ", strip=True))
+
+    def find_number(pattern: str) -> Optional[int]:
+        m = re.search(pattern, blob, flags=re.IGNORECASE)
+        if not m:
+            return None
+        return parse_compact_number(m.group(1))
+
+    def find_rank_score(pattern: str) -> Tuple[Optional[int], Optional[int]]:
+        m = re.search(pattern, blob, flags=re.IGNORECASE)
+        if not m:
+            return None, None
+        rank_txt = (m.group(1) or "").lower()
+        rank = parse_compact_number(rank_txt)
+        score = parse_compact_number(m.group(2))
+        return rank, score
+
+    projected_rank, projected_finish = find_rank_score(r"(\d+(?:st|nd|rd|th))\s*Projected\s*Finish\s*([\d.,]+)")
+    best_rank, best_finish = find_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
+    worst_rank, worst_finish = find_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
+
+    return {
+        "battles_left": find_number(r"Battles\s*Left\s*([\d.,]+)"),
+        "duels_left": find_number(r"Duels\s*Left\s*([\d.,]+)"),
+        "projected_rank": projected_rank,
+        "projected_finish": projected_finish,
+        "best_rank": best_rank,
+        "best_finish": best_finish,
+        "worst_rank": worst_rank,
+        "worst_finish": worst_finish,
+    }
+
+
 # -----------------------------
 # Clan member filtering
 # -----------------------------
