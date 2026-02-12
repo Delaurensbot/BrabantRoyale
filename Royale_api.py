@@ -89,13 +89,13 @@ def extract_player_tag_from_href(href: str) -> Optional[str]:
     return normalize_tag(m.group(1))
 
 
-def fetch_clan_members(clan_url: str) -> Tuple[Set[str], Set[str]]:
+def fetch_clan_members(clan_url: str, clan_html: Optional[str] = None) -> Tuple[Set[str], Set[str]]:
     """
     Returns:
       tags: set of player tags (best signal)
       names: set of player names (fallback)
     """
-    html = fetch_html(clan_url)
+    html = clan_html if clan_html is not None else fetch_html(clan_url)
     soup = BeautifulSoup(html, "html.parser")
 
     tags: Set[str] = set()
