@@ -302,30 +302,50 @@ def render_player_table(rows: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def attacks_left_today(row: Dict) -> Optional[int]:
+def attacks_left_today(row: Dict, max_decks_per_player: int = 4) -> Optional[int]:
     try:
         used = int(row.get("decks_used_today", 0))
     except Exception:
         return None
-    left = 4 - used
-    if left < 0:
-        left = 0
-    if left > 4:
-        left = 4
+    left = max_decks_per_player - used
+    left = min(max(left, 0), max_decks_per_player)
     return left
 
 
-def compute_battles_left(rows: List[Dict]) -> int:
+def infer_max_decks_per_player(rows: List[Dict], default: int = 4, colosseum_cap: int = 16) -> int:
+    """Infer the per-player deck limit.
+
+    During Colosseum weeks RoyaleAPI shows one combined total instead of per-day usage,
+    which means the "today" column can exceed 4. When we detect that, assume the
+    expanded limit (16) so battles-left stats remain meaningful.
+    """
+
+    max_used_today = default
+    for r in rows:
+        try:
+            used = int(r.get("decks_used_today", 0))
+        except (TypeError, ValueError):
+            continue
+        if used > max_used_today:
+            max_used_today = used
+
+    if max_used_today > default:
+        return max(colosseum_cap, max_used_today)
+
+    return default
+
+
+def compute_battles_left(rows: List[Dict], max_decks_per_player: int = 4) -> int:
     total = 0
     for r in rows:
-        left = attacks_left_today(r)
+        left = attacks_left_today(r, max_decks_per_player=max_decks_per_player)
         if left is None:
             continue
         total += left
     return total
 
 
-def compute_duels_left(rows: List[Dict]) -> int:
+def compute_duels_left(rows: List[Dict], max_decks_per_player: int = 4) -> int:
     """
     Jouw definitie:
     Als een speler 3 of 4 aanvallen open heeft, kan die nog een duel spelen.
@@ -333,7 +353,7 @@ def compute_duels_left(rows: List[Dict]) -> int:
     """
     count = 0
     for r in rows:
-        left = attacks_left_today(r)
+        left = attacks_left_today(r, max_decks_per_player=max_decks_per_player)
         if left is None:
             continue
         if left >= 3:
@@ -341,26 +361,27 @@ def compute_duels_left(rows: List[Dict]) -> int:
     return count
 
 
-def bucket_open_players(rows: List[Dict]) -> Dict[int, List[str]]:
-    buckets: Dict[int, List[str]] = {4: [], 3: [], 2: [], 1: [], 0: []}
+def bucket_open_players(rows: List[Dict], max_decks_per_player: int = 4) -> Dict[int, List[str]]:
+    buckets: Dict[int, List[str]] = {k: [] for k in range(max_decks_per_player + 1)}
     for r in rows:
-        left = attacks_left_today(r)
+        left = attacks_left_today(r, max_decks_per_player=max_decks_per_player)
         if left is None:
             continue
         name = (r.get("name") or "").strip()
         if not name:
             continue
+        left = min(max(left, 0), max_decks_per_player)
         buckets[left].append(name)
     return buckets
 
 
-def render_battles_left_today(rows: List[Dict]) -> str:
-    buckets = bucket_open_players(rows)
+def render_battles_left_today(rows: List[Dict], max_decks_per_player: int = 4) -> str:
+    buckets = bucket_open_players(rows, max_decks_per_player=max_decks_per_player)
     out: List[str] = []
     out.append("Battles left (today):")
 
     any_added = False
-    for k in [4, 3, 2, 1]:
+    for k in range(max_decks_per_player, 0, -1):
         names = buckets.get(k, [])
         if not names:
             continue
@@ -376,13 +397,13 @@ def render_battles_left_today(rows: List[Dict]) -> str:
     return "\n".join(out)
 
 
-def render_risk_left_attacks(rows: List[Dict]) -> str:
-    buckets = bucket_open_players(rows)
+def render_risk_left_attacks(rows: List[Dict], max_decks_per_player: int = 4) -> str:
+    buckets = bucket_open_players(rows, max_decks_per_player=max_decks_per_player)
     out: List[str] = []
     out.append("Spelers met nog losse aanvallen:")
 
     any_added = False
-    for k in [3, 2, 1]:
+    for k in range(max_decks_per_player, 0, -1):
         names = buckets.get(k, [])
         if not names:
             continue
@@ -394,7 +415,7 @@ def render_risk_left_attacks(rows: List[Dict]) -> str:
 
     if not any_added:
         out.append("")
-        out.append("Geen risico spelers gevonden (niemand met 1-3 open).")
+        out.append("Geen risico spelers gevonden (niemand met open aanvallen).")
     return "\n".join(out)
 
 
@@ -1040,13 +1061,14 @@ def render_clan_stats_block(
     clans: List[ClanOverview],
     our_clan_name: str,
     members_rows: List[Dict],
+    max_decks_per_player: int = 4,
 ) -> str:
     day = parse_day_label(soup)
     our = find_our_clan(clans, our_clan_name)
     ranking = get_projected_ranking(clans)
 
-    battles_left = compute_battles_left(members_rows)
-    duels_left = compute_duels_left(members_rows)
+    battles_left = compute_battles_left(members_rows, max_decks_per_player=max_decks_per_player)
+    duels_left = compute_duels_left(members_rows, max_decks_per_player=max_decks_per_player)
 
     out: List[str] = []
     out.append("Clan Stats:")
@@ -1175,6 +1197,8 @@ def main() -> None:
     filtered = sorted(filtered, key=lambda x: int(x["rank"]))
     filtered = dedupe_rows(filtered)
 
+    max_decks_per_player = infer_max_decks_per_player(filtered)
+
     if args.top and args.top > 0:
         filtered = filtered[: args.top]
 
@@ -1189,15 +1213,19 @@ def main() -> None:
     print(render_clan_insights(clans, args.our_clan))
     print()
 
-    print(render_clan_stats_block(race_soup, clans, args.our_clan, filtered))
+    print(
+        render_clan_stats_block(
+            race_soup, clans, args.our_clan, filtered, max_decks_per_player=max_decks_per_player
+        )
+    )
     print()
 
     print("Players (only current clan members):")
     print(render_player_table(filtered))
     print()
-    print(render_battles_left_today(filtered))
+    print(render_battles_left_today(filtered, max_decks_per_player=max_decks_per_player))
     print()
-    print(render_risk_left_attacks(filtered))
+    print(render_risk_left_attacks(filtered, max_decks_per_player=max_decks_per_player))
     print()
 
     day4_block = render_day4_last_chance_players(race_soup, filtered)
