@@ -68,6 +68,7 @@ def get_clan_config(tag: Optional[str] = None) -> Dict[str, str]:
         "tag": normalized,
         "name": config.get("name", ""),
         "race_url": f"https://royaleapi.com/clan/{normalized}/war/race",
+        "cwstats_race_url": f"https://cwstats.com/clan/{normalized}/race",
         "clan_url": f"https://royaleapi.com/clan/{normalized}",
         "analytics_url": f"https://royaleapi.com/clan/{normalized}/war/analytics",
         "join_history_url": f"https://royaleapi.com/clan/{normalized}/history/join-leave",
@@ -673,9 +674,6 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
 
         if not name:
             continue
-        if used is None or total is None:
-            continue
-
         clans.append(
             ClanOverview(
                 name=name,

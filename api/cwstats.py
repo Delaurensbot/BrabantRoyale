@@ -1,5 +1,6 @@
 from http.server import BaseHTTPRequestHandler
 import json
+import re
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -28,6 +29,118 @@ from Royale_api import (
     render_player_table,
     render_risk_left_attacks,
 )
+
+
+def parse_cwstats_overview(html: str):
+    soup = BeautifulSoup(html, "html.parser")
+    tokens = [t.strip() for t in soup.stripped_strings if t and t.strip()]
+    rows = []
+    i = 0
+
+    def parse_number(raw: str):
+        txt = raw.replace(",", ".")
+        if re.fullmatch(r"\d+", txt):
+            return int(txt)
+        if re.fullmatch(r"\d+\.\d+", txt):
+            return float(txt)
+        return None
+
+    while i < len(tokens):
+        if not re.fullmatch(r"\d+", tokens[i]):
+            i += 1
+            continue
+
+        rank = int(tokens[i])
+        j = i + 1
+        if j < len(tokens) and tokens[j].lower() == "badge":
+            j += 1
+
+        name = tokens[j] if j < len(tokens) else ""
+        if not name:
+            i += 1
+            continue
+        j += 1
+
+        trophy = boat = fame = None
+        if j < len(tokens) and re.fullmatch(r"\d+", tokens[j]):
+            trophy = int(tokens[j])
+            j += 1
+
+        while j + 1 < len(tokens):
+            label = tokens[j].lower()
+            value = parse_number(tokens[j + 1])
+
+            if label == "cw trophy" and isinstance(value, int):
+                j += 2
+                continue
+            if label == "boat movement" and isinstance(value, int):
+                boat = value
+                j += 2
+                continue
+            if label == "fame" and isinstance(value, (int, float)):
+                fame = float(value)
+                j += 2
+                break
+
+            if re.fullmatch(r"\d+", tokens[j]):
+                break
+            j += 1
+
+        if trophy is not None or boat is not None or fame is not None:
+            rows.append(
+                {
+                    "rank": rank,
+                    "name": name,
+                    "trophies": trophy,
+                    "boat": boat,
+                    "fame_avg": fame,
+                }
+            )
+            i = j
+        else:
+            i += 1
+
+    deduped = []
+    seen = set()
+    for row in rows:
+        key = (row["rank"], row["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+
+    deduped.sort(key=lambda r: r["rank"])
+    return deduped
+
+
+def render_cwstats_overview_table(rows):
+    if not rows:
+        return ""
+
+    rank_w = max([len(str(r["rank"])) for r in rows] + [len("#")])
+    name_w = max([len(r["name"]) for r in rows] + [len("Clan")])
+    trophy_w = max([len(str(r.get("trophies") or "")) for r in rows] + [len("Trophies")])
+    boat_w = max([len(str(r.get("boat") or "")) for r in rows] + [len("Boat")])
+    fame_w = max([
+        len(f"{r.get('fame_avg'):.2f}") if r.get("fame_avg") is not None else 0
+        for r in rows
+    ] + [len("Fame")])
+
+    header = (
+        f"{'#':>{rank_w}} | {'Clan':<{name_w}} | {'Trophies':>{trophy_w}} | "
+        f"{'Boat':>{boat_w}} | {'Fame':>{fame_w}}"
+    )
+    out = ["Clan overview (cwstats):", header, "-" * len(header)]
+
+    for r in rows:
+        fame_txt = "" if r.get("fame_avg") is None else f"{r['fame_avg']:.2f}"
+        out.append(
+            f"{r['rank']:>{rank_w}} | {r['name']:<{name_w}} | "
+            f"{str(r.get('trophies') or ''):>{trophy_w}} | "
+            f"{str(r.get('boat') or ''):>{boat_w}} | {fame_txt:>{fame_w}}"
+        )
+
+    return "\n".join(out)
 
 def pick_clan_config(path: str):
     parsed = urlparse(path)
@@ -58,6 +171,12 @@ class handler(BaseHTTPRequestHandler):
             filtered_players = dedupe_rows(filtered_players)
 
             race_overview_text = render_clan_overview_table(clans)
+            if "niet gevonden" in race_overview_text.lower():
+                cwstats_html = fetch_html(clan_config["cwstats_race_url"])
+                cwstats_rows = parse_cwstats_overview(cwstats_html)
+                cwstats_overview = render_cwstats_overview_table(cwstats_rows)
+                if cwstats_overview:
+                    race_overview_text = cwstats_overview
             insights_text = render_clan_insights(clans, clan_config.get("name") or OUR_CLAN_NAME_DEFAULT)
             clan_stats_text = render_clan_stats_block(
                 race_soup,
