@@ -68,6 +68,31 @@ def parse_cwstats_finish_outlook_from_html(html: str):
         "worst_finish": worst_finish,
     }
 
+
+def parse_clan_join_policy_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+
+    # Preferred layout: label/value pairs where label is "Type" and value is "Invite Only" / "Open".
+    for row in soup.select("div.item"):
+        label = row.select_one(".label")
+        value = row.select_one(".value")
+        if not label or not value:
+            continue
+        if (label.get_text(" ", strip=True) or "").lower() == "type":
+            return value.get_text(" ", strip=True)
+
+    text_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+    if re.search(r"\bInvite\s+Only\b", text_blob, flags=re.IGNORECASE):
+        return "Invite Only"
+    if re.search(r"\bOpen\b", text_blob, flags=re.IGNORECASE):
+        return "Open"
+    return None
+
+
+def is_cw_official_started(race_soup: BeautifulSoup):
+    page_text = race_soup.get_text(" ", strip=True)
+    return bool(re.search(r"\bDay\s+\d+\b", page_text, flags=re.IGNORECASE))
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -78,10 +103,13 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             clan_config = pick_clan_config(self.path)
-            clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
+            clan_html = fetch_html(clan_config["clan_url"])
+            clan_join_policy = parse_clan_join_policy_from_html(clan_html)
+            clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"], clan_html=clan_html)
 
             race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
+            cw_official_started = is_cw_official_started(race_soup)
 
             cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
             cwstats_finish_outlook = {}
@@ -177,6 +205,8 @@ class handler(BaseHTTPRequestHandler):
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
+                "clan_join_policy": clan_join_policy,
+                "cw_official_started": cw_official_started,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

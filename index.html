@@ -29,6 +29,7 @@
     .ctaLink { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; text-decoration: none; font-weight: 700; color: var(--text); background: linear-gradient(135deg, rgba(177, 92, 255, 0.4), rgba(116, 255, 141, 0.15)); border: 1px solid rgba(177, 92, 255, 0.5); box-shadow: 0 10px 28px rgba(0,0,0,0.28); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
     .ctaLink:hover { border-color: rgba(116, 255, 141, 0.85); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .alertOpenClan { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 80, 80, 0.65); background: rgba(160, 0, 0, 0.2); color: #ff8e8e; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; display: none; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
     .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
@@ -85,6 +86,7 @@
 </head>
 <body>
   <h1>Clan War Stats</h1>
+  <div class="alertOpenClan" id="openClanAlert">CLAN STAAT OP OPEN ZET TERUG NAAR INVITE ONLY</div>
   <div class="clanSwitch" id="clanSwitch"></div>
   <div class="muted" id="clanLabel"></div>
   <div class="top">
@@ -819,6 +821,18 @@
     setTimeout(() => { el(toastId).textContent = ""; }, 900);
   }
 
+
+  function updateOpenClanAlert(data) {
+    const alert = el("openClanAlert");
+    if (!alert) return;
+
+    const policy = (data.clan_join_policy || "").trim().toLowerCase();
+    const cwStarted = Boolean(data.cw_official_started);
+    const showAlert = cwStarted && policy === "open";
+
+    alert.style.display = showAlert ? "block" : "none";
+  }
+
   async function fetchData() {
     el("errorBox").style.display = "none";
     el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
@@ -841,6 +855,7 @@
       throw new Error(data.error || "unknown");
     }
 
+    updateOpenClanAlert(data);
     renderOverviewTable(data.race_overview_text || "");
     renderFinishOutlook(data);
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
