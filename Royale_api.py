@@ -341,6 +341,22 @@ def compute_duels_left(rows: List[Dict]) -> int:
     return count
 
 
+def compute_total_players_participated(rows: List[Dict]) -> int:
+    """
+    Aantal unieke spelers uit de huidige clan die minimaal 1 aanval hebben gedaan.
+    Gebaseerd op decks_total_so_far uit de players tabel.
+    """
+    count = 0
+    for r in rows:
+        try:
+            total_so_far = int(r.get("decks_total_so_far", 0) or 0)
+        except Exception:
+            continue
+        if total_so_far >= 1:
+            count += 1
+    return count
+
+
 def bucket_open_players(rows: List[Dict]) -> Dict[int, List[str]]:
     buckets: Dict[int, List[str]] = {4: [], 3: [], 2: [], 1: [], 0: []}
     for r in rows:
@@ -1047,6 +1063,7 @@ def render_clan_stats_block(
 
     battles_left = compute_battles_left(members_rows)
     duels_left = compute_duels_left(members_rows)
+    total_players_participated = compute_total_players_participated(members_rows)
 
     out: List[str] = []
     out.append("Clan Stats:")
@@ -1059,6 +1076,7 @@ def render_clan_stats_block(
 
     out.append(f"- Battles left: {battles_left}")
     out.append(f"- Duels left: {duels_left}")
+    out.append(f"- Total players participated: {total_players_participated}")
 
     if our and our.projected_medals is not None and ranking:
         pos = 1
