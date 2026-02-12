@@ -56,6 +56,23 @@
     .simpleTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     .simpleTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     .simpleTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .finishOutlook { display: grid; gap: 14px; }
+    .finishTopStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .finishStatBox { border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .finishStatLabel { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+    .finishStatValue { margin-top: 4px; font-size: 36px; line-height: 1; font-weight: 800; }
+    .finishCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .finishCard { display: flex; align-items: center; gap: 14px; border-radius: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .finishMetaTitle { color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; font-size: 12px; font-weight: 700; }
+    .finishMetaRank { font-size: 32px; line-height: 1; font-weight: 800; }
+    .finishMetaScore { font-size: 28px; line-height: 1.1; font-weight: 700; }
+    .ring { --p: 0; --ring-color: var(--purple); width: 90px; height: 90px; border-radius: 50%; position: relative; flex: 0 0 auto; background: conic-gradient(var(--ring-color) calc(var(--p) * 1%), rgba(255,255,255,0.16) 0); }
+    .ring::before { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: rgba(12, 16, 27, 0.92); border: 1px solid rgba(255,255,255,0.08); }
+    .ringValue { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; font-size: 31px; font-weight: 800; }
+    .ring--projected { --ring-color: #f5b83d; }
+    .ring--best { --ring-color: #55d66a; }
+    .ring--worst { --ring-color: #ff5c5c; }
+    .finishHint { color: var(--muted); font-size: 13px; }
     .hiddenCopy { display: none; }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
     @media (max-width: 640px) {
@@ -86,6 +103,13 @@
         <div class="title">Race Overview</div>
       </div>
       <div id="overview" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Clan finish outlook</div>
+      </div>
+      <div id="finishOutlook" class="empty">(loading...)</div>
     </div>
 
     <div class="card">
@@ -238,7 +262,7 @@
       btn.type = "button";
       btn.className = "clanButton";
       btn.dataset.clan = tag;
-      btn.textContent = `${info.name} (${tag})`;
+      btn.textContent = `${info.name} ($${(data.clan_tag || currentClanTag)})`;
       btn.addEventListener("click", () => setClan(tag));
       switchEl.appendChild(btn);
     });
@@ -381,6 +405,238 @@
     overviewSortKey = "medals";
 
     sortOverviewRows("medals");
+  }
+
+
+  function parseMetricNumber(value, allowDecimal = false) {
+    if (value == null) return null;
+    const raw = String(value).trim().replace(/\s+/g, "");
+    if (!raw) return null;
+
+    if (!allowDecimal) {
+      const digitsOnly = raw.replace(/[^\d]/g, "");
+      if (!digitsOnly) return null;
+      const n = Number(digitsOnly);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    let normalized = raw;
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+      if (lastComma > lastDot) {
+        normalized = normalized.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
+    } else if (hasComma) {
+      if (/,[0-9]{1,2}$/.test(normalized)) {
+        normalized = normalized.replace(",", ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
+    } else if (hasDot) {
+      if (/\.[0-9]{1,2}$/.test(normalized)) {
+        // decimal dot, keep as-is
+      } else {
+        normalized = normalized.replace(/\./g, "");
+      }
+    }
+
+    normalized = normalized.replace(/[^\d.-]/g, "");
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseDecksCell(value) {
+    const m = (value || "").match(/(\d+)\s*\/\s*(\d+)/);
+    if (!m) return { used: null, total: null, remaining: null };
+    const used = Number(m[1]);
+    const total = Number(m[2]);
+    return { used, total, remaining: Math.max(0, total - used) };
+  }
+
+  function getOverviewRowsWithMetrics() {
+    const head = overviewData.headCells || [];
+    const rows = overviewData.rows || [];
+    if (!head.length || !rows.length) return [];
+
+    const idxBy = (needle) => head.findIndex((cell) => (cell || "").toLowerCase().includes(needle));
+    const idxClan = idxBy("clan");
+    const idxDecks = idxBy("decks");
+    const idxAvg = idxBy("avg");
+    const idxProjected = idxBy("projected");
+    const idxMedals = idxBy("medals");
+
+    return rows.map((row) => {
+      const decks = parseDecksCell(row[idxDecks] || "");
+      return {
+        clan: row[idxClan] || "",
+        avg: parseMetricNumber(row[idxAvg], true),
+        projected: parseMetricNumber(row[idxProjected]),
+        medals: parseMetricNumber(row[idxMedals]),
+        decksUsed: decks.used,
+        decksTotal: decks.total,
+        decksRemaining: decks.remaining,
+      };
+    });
+  }
+
+  function parseClanStats(text) {
+    const raw = text || "";
+    const battles = raw.match(/battles left:\s*([\d.,]+)/i);
+    const duels = raw.match(/duels left:\s*([\d.,]+)/i);
+    return {
+      battlesLeft: battles ? parseMetricNumber(battles[1]) : null,
+      duelsLeft: duels ? parseMetricNumber(duels[1]) : null,
+    };
+  }
+
+  function formatRank(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 1) return "-";
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${n}st`;
+    if (mod10 === 2 && mod100 !== 12) return `${n}nd`;
+    if (mod10 === 3 && mod100 !== 13) return `${n}rd`;
+    return `${n}th`;
+  }
+
+  function renderFinishOutlook(data) {
+    const container = el("finishOutlook");
+    const rows = getOverviewRowsWithMetrics();
+    const localeFmt = new Intl.NumberFormat("en-US");
+
+    const rankProgress = (rank) => {
+      const safeRank = Number.isFinite(Number(rank)) ? Number(rank) : (rows.length || 5);
+      const total = Math.max(1, rows.length || 5);
+      return Math.max(8, Math.min(100, ((total - safeRank + 1) / total) * 100));
+    };
+
+    const direct = data.finish_outlook || {};
+    const directHasAll = [
+      direct.battles_left,
+      direct.duels_left,
+      direct.projected_rank,
+      direct.projected_finish,
+      direct.best_rank,
+      direct.best_finish,
+      direct.worst_rank,
+      direct.worst_finish,
+    ].every((v) => Number.isFinite(Number(v)));
+
+    let battlesLeft;
+    let duelsLeft;
+    let projectedRank;
+    let projectedMedals;
+    let bestRank;
+    let bestPossibleMedals;
+    let worstRank;
+    let worstPossibleMedals;
+    let hintText;
+
+    if (directHasAll) {
+      battlesLeft = Number(direct.battles_left);
+      duelsLeft = Number(direct.duels_left);
+      projectedRank = Number(direct.projected_rank);
+      projectedMedals = Number(direct.projected_finish);
+      bestRank = Number(direct.best_rank);
+      bestPossibleMedals = Number(direct.best_finish);
+      worstRank = Number(direct.worst_rank);
+      worstPossibleMedals = Number(direct.worst_finish);
+      hintText = `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
+    } else {
+      if (!rows.length) {
+        container.className = "empty";
+        container.textContent = "(geen data)";
+        return;
+      }
+
+      const ourClanName = (data.clan_name || clanName(currentClanTag) || "").trim().toLowerCase();
+      const ours = rows.find((r) => (r.clan || "").trim().toLowerCase() === ourClanName) || rows[0];
+      const currentMedals = ours.medals || 0;
+      projectedMedals = ours.projected != null
+        ? Math.round(ours.projected)
+        : Math.round(currentMedals + ((ours.avg || 0) * (ours.decksRemaining || 0)));
+
+      const avgPool = rows.map((r) => r.avg).filter((v) => Number.isFinite(v));
+      const minAvg = avgPool.length ? Math.min(...avgPool) : (ours.avg || 0);
+      const maxAvg = avgPool.length ? Math.max(...avgPool) : (ours.avg || 0);
+      const remainingDecks = ours.decksRemaining || 0;
+
+      worstPossibleMedals = Math.round(currentMedals + (remainingDecks * minAvg));
+      bestPossibleMedals = Math.round(currentMedals + (remainingDecks * maxAvg));
+
+      const rankFor = (score) => {
+        const better = rows.filter((r) => {
+          const baseScore = r.projected != null ? r.projected : r.medals;
+          if (baseScore == null) return false;
+          return r !== ours && baseScore > score;
+        }).length;
+        return Math.min(rows.length, better + 1);
+      };
+
+      projectedRank = rankFor(projectedMedals);
+      bestRank = rankFor(bestPossibleMedals);
+      worstRank = rankFor(worstPossibleMedals);
+
+      const stats = parseClanStats(data.clan_stats_text || "");
+      battlesLeft = stats.battlesLeft;
+      duelsLeft = stats.duelsLeft;
+      hintText = "Schatting op basis van huidige score, resterende decks en de huidige avg/deck-range van alle clans.";
+    }
+
+    container.className = "finishOutlook";
+    container.innerHTML = `
+      <div class="finishTopStats">
+        <div class="finishStatBox">
+          <div class="finishStatLabel">Battles left</div>
+          <div class="finishStatValue">${battlesLeft != null ? localeFmt.format(battlesLeft) : "-"}</div>
+        </div>
+        <div class="finishStatBox">
+          <div class="finishStatLabel">Duels left</div>
+          <div class="finishStatValue">${duelsLeft != null ? localeFmt.format(duelsLeft) : "-"}</div>
+        </div>
+      </div>
+
+      <div class="finishCards">
+        <div class="finishCard">
+          <div class="ring ring--projected" style="--p:${rankProgress(projectedRank)}">
+            <span class="ringValue">${formatRank(projectedRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Projected finish</div>
+            <div class="finishMetaScore">${projectedMedals != null ? localeFmt.format(projectedMedals) : "-"}</div>
+          </div>
+        </div>
+
+        <div class="finishCard">
+          <div class="ring ring--best" style="--p:${rankProgress(bestRank)}">
+            <span class="ringValue">${formatRank(bestRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Best possible finish</div>
+            <div class="finishMetaScore">${bestPossibleMedals != null ? localeFmt.format(bestPossibleMedals) : "-"}</div>
+          </div>
+        </div>
+
+        <div class="finishCard">
+          <div class="ring ring--worst" style="--p:${rankProgress(worstRank)}">
+            <span class="ringValue">${formatRank(worstRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Worst possible finish</div>
+            <div class="finishMetaScore">${worstPossibleMedals != null ? localeFmt.format(worstPossibleMedals) : "-"}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finishHint">${hintText}</div>
+    `;
   }
 
   function renderPlayersTable(text) {
@@ -586,6 +842,7 @@
     }
 
     renderOverviewTable(data.race_overview_text || "");
+    renderFinishOutlook(data);
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
     renderPlayersTable(data.players_text || "");

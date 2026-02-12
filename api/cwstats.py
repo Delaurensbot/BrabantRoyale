@@ -17,6 +17,7 @@ from Royale_api import (
     get_clan_config,
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
+    parse_cwstats_finish_outlook_from_html,
     render_battles_left_today,
     render_clan_avg_projection,
     render_clan_insights,
@@ -43,6 +44,14 @@ class handler(BaseHTTPRequestHandler):
 
             race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
+
+            cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
+            cwstats_finish_outlook = {}
+            try:
+                cwstats_html = fetch_html(cwstats_race_url)
+                cwstats_finish_outlook = parse_cwstats_finish_outlook_from_html(cwstats_html)
+            except Exception:
+                cwstats_finish_outlook = {}
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             players = parse_player_rows_from_race_soup(race_soup)
@@ -129,6 +138,7 @@ class handler(BaseHTTPRequestHandler):
                 "clan_tag": clan_config.get("tag"),
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
+                "finish_outlook": cwstats_finish_outlook,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
