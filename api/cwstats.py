@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler
 import json
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
+import re
 
 from bs4 import BeautifulSoup
 
@@ -29,6 +30,44 @@ from Royale_api import (
     render_risk_left_attacks,
 )
 
+
+
+def _compact_number(raw: str):
+    digits = re.sub(r"[^0-9]", "", (raw or ""))
+    return int(digits) if digits else None
+
+
+def parse_cwstats_finish_outlook_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+    blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+
+    def extract_number(pattern: str):
+        m = re.search(pattern, blob, flags=re.IGNORECASE)
+        return _compact_number(m.group(1)) if m else None
+
+    def extract_rank_score(pattern: str):
+        m = re.search(pattern, blob, flags=re.IGNORECASE)
+        if not m:
+            return None, None
+        rank = _compact_number(m.group(1))
+        score = _compact_number(m.group(2))
+        return rank, score
+
+    projected_rank, projected_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Projected\s*Finish\s*([\d.,]+)")
+    best_rank, best_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
+    worst_rank, worst_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
+
+    return {
+        "battles_left": extract_number(r"Battles\s*Left\s*([\d.,]+)"),
+        "duels_left": extract_number(r"Duels\s*Left\s*([\d.,]+)"),
+        "projected_rank": projected_rank,
+        "projected_finish": projected_finish,
+        "best_rank": best_rank,
+        "best_finish": best_finish,
+        "worst_rank": worst_rank,
+        "worst_finish": worst_finish,
+    }
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -43,6 +82,14 @@ class handler(BaseHTTPRequestHandler):
 
             race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
+
+            cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
+            cwstats_finish_outlook = {}
+            try:
+                cwstats_html = fetch_html(cwstats_race_url)
+                cwstats_finish_outlook = parse_cwstats_finish_outlook_from_html(cwstats_html)
+            except Exception:
+                cwstats_finish_outlook = {}
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             players = parse_player_rows_from_race_soup(race_soup)
@@ -129,6 +176,7 @@ class handler(BaseHTTPRequestHandler):
                 "clan_tag": clan_config.get("tag"),
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
+                "finish_outlook": cwstats_finish_outlook,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
