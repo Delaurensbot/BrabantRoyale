@@ -245,7 +245,57 @@
   }
 
   let overviewData = { headCells: [], rows: [] };
+  let overviewSortKey = "medals";
   let currentClanTag = DEFAULT_CLAN;
+
+  function parseOverviewValue(value, columnName) {
+    const col = (columnName || "").toLowerCase();
+    const raw = (value || "").trim();
+
+    if (col.includes("decks")) {
+      const m = raw.match(/^(\d+)\s*\/\s*(\d+)/);
+      if (!m) return Number.NEGATIVE_INFINITY;
+      return parseInt(m[1], 10);
+    }
+
+    const n = parseFloat(raw.replace(",", "."));
+    if (Number.isNaN(n)) return Number.NEGATIVE_INFINITY;
+    return n;
+  }
+
+  function sortOverviewRows(key) {
+    overviewSortKey = key;
+    const idx = overviewData.headCells.findIndex((cell) => cell.toLowerCase().includes(key));
+    if (idx === -1) {
+      buildOverviewTable(overviewData.headCells, overviewData.rows);
+      return;
+    }
+
+    const sortedRows = [...overviewData.rows].sort((a, b) => {
+      const aVal = parseOverviewValue(a[idx], overviewData.headCells[idx]);
+      const bVal = parseOverviewValue(b[idx], overviewData.headCells[idx]);
+      if (aVal === bVal) {
+        return (a[0] || "").localeCompare(b[0] || "");
+      }
+      return bVal - aVal;
+    });
+
+    buildOverviewTable(overviewData.headCells, sortedRows);
+  }
+
+  function isSortableOverviewColumn(label) {
+    const l = (label || "").toLowerCase();
+    return l.includes("decks") || l.includes("avg") || l.includes("projected") || l.includes("medals");
+  }
+
+  function sortKeyForHeader(label) {
+    const l = (label || "").toLowerCase();
+    if (l.includes("decks")) return "decks";
+    if (l.includes("avg")) return "avg";
+    if (l.includes("projected")) return "projected";
+    if (l.includes("medals")) return "medals";
+    return "";
+  }
 
   function buildOverviewTable(headCells, rows) {
     const container = el("overview");
@@ -255,21 +305,20 @@
     const table = document.createElement("table");
     table.className = "overviewTable";
 
-    const avgIdx = headCells.findIndex((cell) => cell.toLowerCase().includes("avg"));
-
     const thead = document.createElement("thead");
     const headTr = document.createElement("tr");
-    headCells.forEach((cell, idx) => {
+    headCells.forEach((cell) => {
       const th = document.createElement("th");
-      if (idx === avgIdx) {
+      const key = sortKeyForHeader(cell);
+      if (isSortableOverviewColumn(cell) && key) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "sortButton";
-        btn.textContent = cell || (idx === 0 ? "Clan" : "");
-        btn.addEventListener("click", () => sortOverviewByAvg());
+        btn.textContent = cell || "";
+        btn.addEventListener("click", () => sortOverviewRows(key));
         th.appendChild(btn);
       } else {
-        th.textContent = cell || (idx === 0 ? "Clan" : "");
+        th.textContent = cell || "";
       }
       headTr.appendChild(th);
     });
@@ -306,22 +355,6 @@
     container.appendChild(table);
   }
 
-  function sortOverviewByAvg() {
-    const avgIdx = overviewData.headCells.findIndex((cell) => cell.toLowerCase().includes("avg"));
-    if (avgIdx === -1) return;
-
-    const sortedRows = [...overviewData.rows].sort((a, b) => {
-      const aVal = parseFloat(a[avgIdx]);
-      const bVal = parseFloat(b[avgIdx]);
-      if (Number.isNaN(aVal) && Number.isNaN(bVal)) return 0;
-      if (Number.isNaN(aVal)) return 1;
-      if (Number.isNaN(bVal)) return -1;
-      return bVal - aVal;
-    });
-
-    buildOverviewTable(overviewData.headCells, sortedRows);
-  }
-
   function renderOverviewTable(text) {
     const container = el("overview");
     container.innerHTML = "";
@@ -345,8 +378,9 @@
     const headCells = header.split("|").map(c => c.trim());
     const parsedRows = rows.map(line => line.split("|").map(p => p.trim()));
     overviewData = { headCells, rows: parsedRows };
+    overviewSortKey = "medals";
 
-    buildOverviewTable(headCells, parsedRows);
+    sortOverviewRows("medals");
   }
 
   function renderPlayersTable(text) {
