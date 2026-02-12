@@ -14,9 +14,10 @@ from Royale_api import (
     collect_day1_high_famers,
     compute_total_players_participated,
     dedupe_rows,
-    fetch_clan_members,
     fetch_html,
     get_clan_config,
+    fetch_clan_members,
+    parse_day_number,
     parse_clan_overview_from_race_soup,
     parse_player_rows_from_race_soup,
     render_battles_left_today,
@@ -69,6 +70,22 @@ def parse_cwstats_finish_outlook_from_html(html: str):
         "worst_finish": worst_finish,
     }
 
+
+def parse_clan_access_type_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+    for value_el in soup.select("div.value"):
+        value_text = value_el.get_text(" ", strip=True)
+        if not value_text:
+            continue
+
+        normalized = value_text.lower()
+        if normalized == "invite only":
+            return "Invite Only"
+        if normalized == "open":
+            return "Open"
+
+    return None
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -79,10 +96,14 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             clan_config = pick_clan_config(self.path)
+            clan_html = fetch_html(clan_config["clan_url"])
             clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
+            clan_access_type = parse_clan_access_type_from_html(clan_html)
 
             race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
+            day_num = parse_day_number(race_soup)
+            cw_official_started = day_num in {1, 2, 3, 4}
 
             cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
             cwstats_finish_outlook = {}
@@ -180,6 +201,8 @@ class handler(BaseHTTPRequestHandler):
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
                 "total_players_participated": total_players_participated,
+                "clan_access_type": clan_access_type,
+                "cw_official_started": cw_official_started,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
