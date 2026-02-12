@@ -673,9 +673,6 @@ def parse_clan_overview_from_race_soup_div(soup: BeautifulSoup) -> List[ClanOver
 
         if not name:
             continue
-        if used is None or total is None:
-            continue
-
         clans.append(
             ClanOverview(
                 name=name,
@@ -753,11 +750,129 @@ def parse_clan_overview_from_race_soup_table(soup: BeautifulSoup) -> List[ClanOv
     return out
 
 
+def parse_clan_overview_from_race_soup_text(soup: BeautifulSoup) -> List[ClanOverview]:
+    tokens = [clean_text(t) for t in soup.stripped_strings if clean_text(t)]
+    if not tokens:
+        return []
+
+    start = 0
+    for i in range(len(tokens) - 3):
+        if (
+            tokens[i].lower() == "clan"
+            and tokens[i + 1].lower() == "boat"
+            and tokens[i + 2].lower() == "medal"
+            and tokens[i + 3].lower() == "trophy"
+        ):
+            start = i + 4
+            break
+
+    rows: List[ClanOverview] = []
+    i = start
+
+    def parse_int(value: str) -> Optional[int]:
+        if re.fullmatch(r"\d+", value or ""):
+            return int(value)
+        return None
+
+    while i < len(tokens):
+        name = tokens[i]
+        if name.lower() in {"clan", "boat", "medal", "trophy"}:
+            i += 1
+            continue
+        if re.fullmatch(r"\d+\s*/\s*\d+", name):
+            i += 1
+            continue
+        if re.fullmatch(r"\d+\.\d+", name):
+            i += 1
+            continue
+        if name in {"→", "->"}:
+            i += 1
+            continue
+        if parse_int(name) is not None:
+            i += 1
+            continue
+        if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿА-Яа-я]", name):
+            i += 1
+            continue
+
+        boat = medal = trophy = None
+        used = total = projected = None
+        avg = None
+
+        j = i + 1
+        ints: List[int] = []
+        while j < len(tokens) and len(ints) < 3:
+            val = parse_int(tokens[j])
+            if val is not None:
+                ints.append(val)
+            j += 1
+
+        if len(ints) < 3:
+            i += 1
+            continue
+
+        boat, medal, trophy = ints[0], ints[1], ints[2]
+
+        for k in range(i + 1, min(i + 20, len(tokens))):
+            tk = tokens[k]
+            m_decks = re.fullmatch(r"(\d+)\s*/\s*(\d+)", tk)
+            if m_decks:
+                used = int(m_decks.group(1))
+                total = int(m_decks.group(2))
+
+            m_avg = re.fullmatch(r"\d+\.\d+", tk)
+            if m_avg and avg is None:
+                avg = float(tk)
+
+            m_proj = re.search(r"(?:→|->)\s*(\d+)", tk)
+            if m_proj:
+                projected = int(m_proj.group(1))
+            elif tk in {"→", "->"} and k + 1 < len(tokens):
+                nxt = parse_int(tokens[k + 1])
+                if nxt is not None:
+                    projected = nxt
+
+            if used is not None and avg is not None and projected is not None:
+                break
+
+        if used is None and avg is None and projected is None:
+            i += 1
+            continue
+
+        rows.append(
+            ClanOverview(
+                name=name,
+                decks_used_today=used,
+                decks_total_today=total,
+                avg_medals_per_deck=avg,
+                projected_medals=projected,
+                boat_points=boat,
+                current_medals=medal,
+                trophies=trophy,
+            )
+        )
+        i += 1
+
+    out: List[ClanOverview] = []
+    seen: Set[str] = set()
+    for c in rows:
+        key = c.name.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+
+    return out
+
+
 def parse_clan_overview_from_race_soup(soup: BeautifulSoup) -> List[ClanOverview]:
     clans = parse_clan_overview_from_race_soup_div(soup)
     if clans:
         return clans
-    return parse_clan_overview_from_race_soup_table(soup)
+    clans = parse_clan_overview_from_race_soup_table(soup)
+    if clans:
+        return clans
+    return parse_clan_overview_from_race_soup_text(soup)
 
 
 def render_clan_overview_table(clans: List[ClanOverview]) -> str:
@@ -770,9 +885,10 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
         return int(avg * 200)
 
     for clan in clans:
-        proj = projected_from_avg(clan.avg_medals_per_deck)
-        if proj is not None:
-            clan.projected_medals = proj
+        if clan.projected_medals is None:
+            proj = projected_from_avg(clan.avg_medals_per_deck)
+            if proj is not None:
+                clan.projected_medals = proj
 
     def s(x) -> str:
         return "" if x is None else str(x)
@@ -786,19 +902,29 @@ def render_clan_overview_table(clans: List[ClanOverview]) -> str:
     proj_w = max([len(s(c.projected_medals)) for c in clans] + [len("Projected")])
     boat_w = max([len(s(c.boat_points)) for c in clans] + [len("Boat")])
     medal_w = max([len(s(c.current_medals)) for c in clans] + [len("Medals")])
+    trophy_w = max([len(s(c.trophies)) for c in clans] + [len("Trophies")])
 
     head = (
         f'{"Clan":<{name_w}} | {"Decks":>{decks_w}} | {"Avg/deck":>{avg_w}} | {"Projected":>{proj_w}} | '
-        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}}'
+        f'{"Boat":>{boat_w}} | {"Medals":>{medal_w}} | {"Trophies":>{trophy_w}}'
     )
     sep = "-" * len(head)
+
+    clans = sorted(
+        clans,
+        key=lambda c: (
+            -(c.current_medals if c.current_medals is not None else -1),
+            c.name.lower(),
+        ),
+    )
 
     lines = ["Clan overview:", head, sep]
     for c in clans:
         decks = f"{s(c.decks_used_today)}/{s(c.decks_total_today)}"
         lines.append(
             f"{c.name:<{name_w}} | {decks:>{decks_w}} | {sf(c.avg_medals_per_deck):>{avg_w}} | "
-            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}}"
+            f"{s(c.projected_medals):>{proj_w}} | {s(c.boat_points):>{boat_w}} | {s(c.current_medals):>{medal_w}} | "
+            f"{s(c.trophies):>{trophy_w}}"
         )
     return "\n".join(lines)
 
