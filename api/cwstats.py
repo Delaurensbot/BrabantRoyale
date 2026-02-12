@@ -12,6 +12,7 @@ from Royale_api import (
     CLAN_URL_DEFAULT,
     build_short_story,
     collect_day1_high_famers,
+    compute_total_players_participated,
     dedupe_rows,
     fetch_clan_members,
     fetch_html,
@@ -103,6 +104,7 @@ class handler(BaseHTTPRequestHandler):
 
             filtered_players = sorted(filtered_players, key=lambda r: int(r.get("rank", 0) or 0))
             filtered_players = dedupe_rows(filtered_players)
+            total_players_participated = compute_total_players_participated(filtered_players)
 
             race_overview_text = render_clan_overview_table(clans)
             insights_text = render_clan_insights(clans, clan_config.get("name") or OUR_CLAN_NAME_DEFAULT)
@@ -177,6 +179,7 @@ class handler(BaseHTTPRequestHandler):
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
+                "total_players_participated": total_players_participated,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
