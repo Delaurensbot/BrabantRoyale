@@ -5,33 +5,33 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clan War Analytics</title>
   <style>
-    :root { color-scheme: dark; }
-    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
+    :root { color-scheme: dark; --text: #eef2ff; --muted: rgba(238, 242, 255, 0.76); --card: rgba(22, 26, 40, 0.9); --card-border: rgba(177, 92, 255, 0.28); --purple: #b15cff; --green: #74ff8d; }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: var(--text); background: radial-gradient(circle at 22% 16%, rgba(177, 92, 255, 0.3), transparent 36%), radial-gradient(circle at 76% 0%, rgba(116, 255, 141, 0.24), transparent 28%), linear-gradient(165deg, #141829, #0c0e16); }
     h1 { margin: 0 0 10px; }
     .top { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-    .muted { opacity: 0.8; }
+    .muted { color: var(--muted); }
     .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); cursor: pointer; color: inherit; }
-    .clanButton--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
-    a { color: #67c7ff; }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
-    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
+    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(20, 24, 36, 0.9); cursor: pointer; color: inherit; }
+    .clanButton--active { border-color: var(--green); box-shadow: 0 0 0 1px rgba(116, 255, 141, 0.4), 0 10px 24px rgba(0,0,0,0.36); }
+    a { color: #bfffc8; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: linear-gradient(145deg, rgba(177, 92, 255, 0.22), rgba(116, 255, 141, 0.08)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(116, 255, 141, 0.85); background: linear-gradient(145deg, rgba(177, 92, 255, 0.34), rgba(116, 255, 141, 0.18)); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
-    .card { border-radius: 16px; padding: 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; gap: 10px; }
     .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
     .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 6px; }
     .promotionDetail { margin-top: 8px; font-size: 14px; line-height: 1.4; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); cursor: text; user-select: text; }
     .actions { display: inline-flex; align-items: center; gap: 8px; }
-    .iconBtn { padding: 6px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.04); color: inherit; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.2); font-size: 13px; }
-    .iconBtn:hover { border-color: rgba(255,255,255,0.35); }
+    .iconBtn { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(177, 92, 255, 0.16); color: inherit; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.2); font-size: 13px; }
+    .iconBtn:hover { border-color: rgba(116, 255, 141, 0.85); }
     .mvpList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
     .mvpItem { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
     .mvpItem:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.05); }
     .copyIcon { opacity: 0.7; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; }
-    thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     .overperformerHighlight { box-shadow: inset 0 0 0 9999px rgba(0, 255, 170, 0.08); }
@@ -61,7 +61,7 @@
     .detailTitle { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
     .detailSubtitle { color: rgba(232,235,240,0.75); margin-top: 4px; font-size: 13px; }
     .detailTable { width: 100%; border-collapse: collapse; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; overflow: hidden; }
-    .detailTable thead th { background: linear-gradient(135deg, rgba(0, 255, 170, 0.16), rgba(0, 112, 243, 0.12)); padding: 10px 12px; text-align: left; font-size: 13px; letter-spacing: 0.1px; }
+    .detailTable thead th { background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); padding: 10px 12px; text-align: left; font-size: 13px; letter-spacing: 0.1px; }
     .detailTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
     .detailTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     .detailTable .mutedCell { color: rgba(232,235,240,0.6); }

@@ -5,27 +5,39 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clan War Stats</title>
   <style>
-    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: #e8ebf0; background: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.04), transparent 35%), radial-gradient(circle at 80% 0%, rgba(0, 212, 255, 0.08), transparent 25%), #0d1117; }
+    :root {
+      --bg: #0c0e16;
+      --bg-soft: #141829;
+      --card: rgba(22, 26, 40, 0.9);
+      --card-border: rgba(177, 92, 255, 0.28);
+      --text: #eef2ff;
+      --muted: rgba(238, 242, 255, 0.76);
+      --purple: #b15cff;
+      --purple-soft: rgba(177, 92, 255, 0.24);
+      --green: #74ff8d;
+      --green-soft: rgba(116, 255, 141, 0.2);
+    }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: var(--text); background: radial-gradient(circle at 22% 16%, rgba(177, 92, 255, 0.3), transparent 36%), radial-gradient(circle at 76% 0%, rgba(116, 255, 141, 0.24), transparent 28%), linear-gradient(165deg, var(--bg-soft), var(--bg)); }
     h1 { margin: 0 0 10px; }
     .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-    .muted { opacity: 0.75; }
+    .muted { color: var(--muted); }
     .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
-    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.03); cursor: pointer; color: inherit; }
-    .clanButton--active { border-color: rgba(0, 212, 255, 0.6); box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background: linear-gradient(135deg, rgba(0,0,0,0.35), rgba(255,255,255,0.05)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
-    button:hover { border-color: rgba(255,255,255,0.3); background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(0,0,0,0.4)); }
-    .ctaLink { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; text-decoration: none; font-weight: 700; color: #e8ebf0; background: linear-gradient(135deg, rgba(86, 38, 153, 0.35), rgba(141, 66, 245, 0.18)); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 10px 28px rgba(0,0,0,0.28); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
-    .ctaLink:hover { border-color: rgba(255,255,255,0.34); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
+    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(20, 24, 36, 0.9); cursor: pointer; color: inherit; }
+    .clanButton--active { border-color: var(--green); box-shadow: 0 0 0 1px rgba(116, 255, 141, 0.4), 0 10px 24px rgba(0,0,0,0.36); }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: linear-gradient(145deg, rgba(177, 92, 255, 0.22), rgba(116, 255, 141, 0.08)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(116, 255, 141, 0.85); background: linear-gradient(145deg, rgba(177, 92, 255, 0.34), rgba(116, 255, 141, 0.18)); }
+    .ctaLink { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; text-decoration: none; font-weight: 700; color: var(--text); background: linear-gradient(135deg, rgba(177, 92, 255, 0.4), rgba(116, 255, 141, 0.15)); border: 1px solid rgba(177, 92, 255, 0.5); box-shadow: 0 10px 28px rgba(0,0,0,0.28); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+    .ctaLink:hover { border-color: rgba(116, 255, 141, 0.85); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
-    .card { border-radius: 16px; padding: 14px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
     .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
-    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
+    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(12, 16, 27, 0.85); border: 1px solid rgba(177, 92, 255, 0.35); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
     .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 8px; }
     .overviewTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
-    .overviewTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .overviewTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     .overviewTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     .overviewTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     .overviewTable .clanName { font-weight: 700; font-size: 15px; }
@@ -35,13 +47,13 @@
     .subtle { color: rgba(232,235,240,0.75); font-size: 13px; }
     .empty { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); text-align: center; }
     .playersTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
-    .playersTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(255, 140, 0, 0.16), rgba(255, 255, 255, 0.05)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .playersTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     .playersTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     .playersTable tbody tr:nth-child(odd) { background: rgba(255,255,255,0.02); }
     .playersTable .role { font-weight: 700; letter-spacing: 0.2px; }
-    .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: rgba(0, 170, 255, 0.15); font-size: 12px; margin-left: 6px; }
+    .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: var(--purple-soft); border: 1px solid rgba(177, 92, 255, 0.45); font-size: 12px; margin-left: 6px; }
     .simpleTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
-    .simpleTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(0, 255, 170, 0.18), rgba(0, 112, 243, 0.12)); border-bottom: 1px solid rgba(255,255,255,0.12); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .simpleTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
     .simpleTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
     .simpleTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
     .hiddenCopy { display: none; }
