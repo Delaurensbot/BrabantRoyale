@@ -149,7 +149,8 @@
         <div class="title">Battles left (today)</div>
         <button data-copy="battles">Copy</button>
       </div>
-      <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
+      <div id="battlesWrap" class="empty">(loading...)</div>
+      <pre id="battles" class="hiddenCopy" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="battlesToast"></div>
       <div class="muted" id="battlesLen"></div>
     </div>
@@ -786,6 +787,62 @@
     container.appendChild(table);
   }
 
+  function renderBattlesLeftTable(groups, text) {
+    const container = el("battlesWrap");
+    const hiddenPre = el("battles");
+    if (!container || !hiddenPre) return;
+
+    hiddenPre.textContent = text || "(geen data)";
+
+    const hasGroups = Array.isArray(groups) && groups.some((group) => Array.isArray(group.players) && group.players.length > 0);
+    if (!hasGroups) {
+      container.className = "empty";
+      container.textContent = text || "(geen data)";
+      return;
+    }
+
+    container.className = "tableWrap";
+    container.innerHTML = "";
+
+    const table = document.createElement("table");
+    table.className = "simpleTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["Open aanvallen", "Speler", "Last seen"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    groups.forEach((group) => {
+      const players = Array.isArray(group.players) ? group.players : [];
+      players.forEach((player, idx) => {
+        const tr = document.createElement("tr");
+
+        const attacksTd = document.createElement("td");
+        attacksTd.textContent = idx === 0 ? `${group.attacks_left} aanval${group.attacks_left === 1 ? "" : "len"} open` : "";
+        tr.appendChild(attacksTd);
+
+        const nameTd = document.createElement("td");
+        nameTd.textContent = player.name || "-";
+        tr.appendChild(nameTd);
+
+        const lastSeenTd = document.createElement("td");
+        lastSeenTd.textContent = player.last_seen || "-";
+        tr.appendChild(lastSeenTd);
+
+        tbody.appendChild(tr);
+      });
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
   function formatClanAvgProjection(text) {
     if (!text || !text.trim()) return "(geen data)";
 
@@ -881,7 +938,7 @@
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
     renderPlayersTable(data.players_text || "");
-    el("battles").textContent = data.battles_left_text || "(geen data)";
+    renderBattlesLeftTable(data.battles_left_groups, data.battles_left_text || "(geen data)");
     el("risk").textContent = data.risk_left_text || "(geen data)";
 
     const highFameText = (data.high_fame_text || "").trim();
@@ -934,11 +991,16 @@
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
   });
 
-  ["clanAvg","battles","risk","story","highFame","day1HighFame","day4"].forEach(id => {
+  ["clanAvg","risk","story","highFame","day1HighFame","day4"].forEach(id => {
     el(id).addEventListener("click", () => {
       copyText(id);
     });
   });
+
+  const battlesWrap = el("battlesWrap");
+  if (battlesWrap) {
+    battlesWrap.addEventListener("click", () => copyText("battles"));
+  }
 
   function init() {
     renderClanButtons();

@@ -13,7 +13,10 @@ from Royale_api import (
     build_short_story,
     collect_day1_high_famers,
     compute_total_players_participated,
+    bucket_open_players,
+    clean_text,
     dedupe_rows,
+    extract_player_tag_from_href,
     fetch_html,
     get_clan_config,
     fetch_clan_members,
@@ -86,6 +89,61 @@ def parse_clan_access_type_from_html(html: str):
 
     return None
 
+
+LAST_SEEN_PATTERN = re.compile(
+    r"^(?:\d+d(?:\s+\d+h)?(?:\s+\d+m)?|\d+h(?:\s+\d+m)?|\d+m)$",
+    flags=re.IGNORECASE,
+)
+
+
+def parse_last_seen_by_player_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+    by_tag = {}
+    by_name = {}
+
+    for tr in soup.select("tr"):
+        player_link = tr.select_one('a[href*="/player/"]')
+        if not player_link:
+            continue
+
+        tag = extract_player_tag_from_href(player_link.get("href", "") or "")
+        name = clean_text(player_link.get_text(" ", strip=True))
+        cells = [clean_text(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
+
+        last_seen = next((cell for cell in cells if LAST_SEEN_PATTERN.fullmatch(cell or "")), None)
+        if not last_seen:
+            continue
+
+        if tag:
+            by_tag[tag] = last_seen
+        if name:
+            by_name[name] = last_seen
+
+    return by_tag, by_name
+
+
+def build_battles_left_groups(rows, last_seen_by_tag, last_seen_by_name):
+    buckets = bucket_open_players(rows)
+    groups = []
+
+    for attacks_left in [4, 3, 2, 1]:
+        names = buckets.get(attacks_left, [])
+        if not names:
+            continue
+
+        players = []
+        for row in rows:
+            name = (row.get("name") or "").strip()
+            if not name or name not in names:
+                continue
+            tag = (row.get("tag") or "").strip().upper()
+            last_seen = last_seen_by_tag.get(tag) or last_seen_by_name.get(name) or "-"
+            players.append({"name": name, "last_seen": last_seen})
+
+        groups.append({"attacks_left": attacks_left, "players": players})
+
+    return groups
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -99,6 +157,7 @@ class handler(BaseHTTPRequestHandler):
             clan_html = fetch_html(clan_config["clan_url"])
             clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
             clan_access_type = parse_clan_access_type_from_html(clan_html)
+            last_seen_by_tag, last_seen_by_name = parse_last_seen_by_player_from_html(clan_html)
 
             race_html = fetch_html(clan_config["race_url"])
             race_soup = BeautifulSoup(race_html, "html.parser")
@@ -138,6 +197,11 @@ class handler(BaseHTTPRequestHandler):
             clan_avg_projection_text = render_clan_avg_projection(clans)
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
+            battles_left_groups = build_battles_left_groups(
+                filtered_players,
+                last_seen_by_tag,
+                last_seen_by_name,
+            )
             risk_left_text = render_risk_left_attacks(filtered_players)
             high_fame_text = render_high_fame_players(race_soup, filtered_players)
             day1_high_famers = collect_day1_high_famers(race_soup, filtered_players)
@@ -186,6 +250,7 @@ class handler(BaseHTTPRequestHandler):
                 "clan_avg_projection_text": clan_avg_projection_text,
                 "players_text": players_text,
                 "battles_left_text": battles_left_text,
+                "battles_left_groups": battles_left_groups,
                 "risk_left_text": risk_left_text,
                 "high_fame_text": high_fame_text,
                 "day1_high_famers": [
