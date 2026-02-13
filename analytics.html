@@ -47,6 +47,11 @@
     .pill--NEW { background: rgba(153, 102, 255, 0.16); border: 1px solid rgba(153, 102, 255, 0.35); }
     .tableWrap { overflow-x: auto; }
     .toggleWrap { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .recapGrid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .recapItem { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); }
+    .recapLabel { font-size: 12px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.08em; }
+    .recapValue { font-size: 18px; font-weight: 700; margin-top: 4px; }
+    .recapList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
     .infoOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 10; }
     .infoPanel { background: #111826; border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 18px; max-width: 720px; width: calc(100% - 32px); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
     .infoPanel h3 { margin-top: 0; margin-bottom: 10px; }
@@ -85,6 +90,17 @@
   <div class="error" id="errorBox"></div>
 
   <div class="grid">
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Recap</div>
+        <div class="actions">
+          <button class="iconBtn" id="copyRecap">⧉ Kopieer recap</button>
+        </div>
+      </div>
+      <div class="toast" id="toastRecap"></div>
+      <div id="recapBox">(laden...)</div>
+    </div>
+
     <div class="card">
       <div class="cardHead">
         <div class="title">Huidig seizoen MVP (Top 10)</div>
@@ -381,6 +397,110 @@
     target.appendChild(container);
   }
 
+  function formatMovement(movement, change) {
+    if (movement === 'up') return `Gestegen${change ? ` (+${Math.abs(change)})` : ''}`;
+    if (movement === 'down') return `Gezakt${change ? ` (${change})` : ''}`;
+    if (movement === 'same') return 'Gelijk gebleven';
+    return 'Onbekend';
+  }
+
+  function buildRecapText(recap) {
+    if (!recap || recap.error) {
+      return 'Recap data niet beschikbaar.';
+    }
+
+    const lines = [];
+    if (recap.rank) {
+      lines.push(`NL ranking: ${recap.rank}e (${formatMovement(recap.rank_movement, recap.rank_change)})`);
+    }
+    if (recap.rank_trophies) {
+      lines.push(`Clan trophies (NL): ${recap.rank_trophies}`);
+    }
+    if (recap.war_season && recap.war_week) {
+      const delta = recap.war_trophy_delta !== null && recap.war_trophy_delta !== undefined ? recap.war_trophy_delta : '';
+      const total = recap.war_trophy_total ? ` → ${recap.war_trophy_total}` : '';
+      const deltaText = delta !== '' ? ` (${delta >= 0 ? '+' : ''}${delta}${total})` : '';
+      lines.push(`Laatste war: seizoen ${recap.war_season} · W${recap.war_week} · rank ${recap.war_rank}${deltaText}`);
+    }
+    if (recap.best_player && recap.best_player.name) {
+      lines.push(`Beste speler: ${recap.best_player.name} 🏅 ${recap.best_player.score}`);
+    }
+    if (recap.total_score_16 !== null && recap.total_score_16 !== undefined) {
+      lines.push(`Som score (16/16 attacks): ${recap.total_score_16}`);
+    }
+    if (recap.missed_attacks_total !== null && recap.missed_attacks_total !== undefined) {
+      lines.push(`Gemiste aanvallen totaal: ${recap.missed_attacks_total}`);
+    }
+    if (recap.missed_players && recap.missed_players.length) {
+      lines.push('Missed attacks (nog in clan):');
+      recap.missed_players.forEach((row) => {
+        const scoreText = row.score !== null && row.score !== undefined ? ` · ${row.score}` : '';
+        lines.push(`- ${row.player} (${row.attacks}/16, gemist ${row.missed})${scoreText}`);
+      });
+    }
+
+    return lines.join('\n');
+  }
+
+  function renderRecap(recap) {
+    recapData = recap || null;
+    const box = el('recapBox');
+    if (!box) return;
+    if (!recap || recap.error) {
+      box.innerHTML = '<div class="muted">Geen recap data gevonden.</div>';
+      return;
+    }
+
+    const movementText = formatMovement(recap.rank_movement, recap.rank_change);
+    const warDelta =
+      recap.war_trophy_delta !== null && recap.war_trophy_delta !== undefined
+        ? `${recap.war_trophy_delta >= 0 ? '+' : ''}${recap.war_trophy_delta}`
+        : '-';
+
+    const summary = `
+      <div class="recapGrid">
+        <div class="recapItem">
+          <div class="recapLabel">NL ranking</div>
+          <div class="recapValue">${recap.rank ? `${recap.rank}e` : 'n.v.t.'}</div>
+          <div class="muted">${movementText}</div>
+        </div>
+        <div class="recapItem">
+          <div class="recapLabel">Laatste war</div>
+          <div class="recapValue">${recap.war_season ? `S${recap.war_season}` : 'n.v.t.'} ${recap.war_week ? `· W${recap.war_week}` : ''}</div>
+          <div class="muted">Rank ${recap.war_rank ?? '-'} · ${warDelta} → ${recap.war_trophy_total ?? '-'}</div>
+        </div>
+        <div class="recapItem">
+          <div class="recapLabel">Beste speler</div>
+          <div class="recapValue">${recap.best_player?.name ?? 'n.v.t.'}</div>
+          <div class="muted">${recap.best_player?.score ?? '-'}</div>
+        </div>
+        <div class="recapItem">
+          <div class="recapLabel">16/16 score</div>
+          <div class="recapValue">${recap.total_score_16 ?? '-'}</div>
+          <div class="muted">Som van alle spelers met 16 attacks</div>
+        </div>
+        <div class="recapItem">
+          <div class="recapLabel">Gemiste aanvallen</div>
+          <div class="recapValue">${recap.missed_attacks_total ?? '-'}</div>
+          <div class="muted">Alle huidige leden met gemiste attacks</div>
+        </div>
+      </div>
+    `;
+
+    const missedList = (recap.missed_players || [])
+      .map((row) => {
+        const score = row.score !== null && row.score !== undefined ? ` · ${row.score}` : '';
+        return `<li class="recapItem"><strong>${row.player}</strong><div class="muted">${row.attacks}/16 · gemist ${row.missed}${score}</div></li>`;
+      })
+      .join('');
+
+    const missedBlock = recap.missed_players && recap.missed_players.length
+      ? `<div style="margin-top:12px;"><div class="muted" style="margin-bottom:8px;">Missed attacks (nog in clan)</div><ul class="recapList">${missedList}</ul></div>`
+      : '<div class="muted" style="margin-top:12px;">Geen gemiste attacks gevonden.</div>';
+
+    box.innerHTML = summary + missedBlock;
+  }
+
   function createTableComponent(headers, rows) {
     const getCellValue = (cell) => {
       if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
@@ -561,6 +681,7 @@
   let promotionCandidates = [];
   let ratioExpanded = false;
   let openPlayerDetail = null;
+  let recapData = null;
 
   const infoContent = {
     current: {
@@ -936,6 +1057,7 @@
   }
 
   function renderAnalytics(data) {
+    renderRecap(data.recap || null);
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
     promotionCandidates = data.promotion_candidates || [];
@@ -1109,6 +1231,10 @@
     if (decksComponent) {
       copyTable(decksComponent.getHeaders(), decksComponent.getVisibleRows(), el('toastDecks'));
     }
+  });
+
+  el('copyRecap').addEventListener('click', () => {
+    copyText(buildRecapText(recapData), el('toastRecap'));
   });
 
   el('infoCurrent').addEventListener('click', () => showInfoOverlay('current'));
