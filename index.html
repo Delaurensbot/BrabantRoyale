@@ -169,6 +169,7 @@
         <div class="title">Spelers 800+</div>
         <button data-copy="day1HighFame">Copy</button>
       </div>
+      <div class="muted" id="day1HighFameUnique"></div>
       <div id="day1HighFameWrap" class="empty">Alleen zichtbaar op dag 1</div>
       <pre id="day1HighFame" class="hiddenCopy" title="Klik om te kopieren">(loading...)</pre>
       <div class="toast" id="day1HighFameToast"></div>
@@ -726,8 +727,9 @@
     const card = el("day1Card");
     const container = el("day1HighFameWrap");
     const hiddenPre = el("day1HighFame");
+    const uniqueCount = el("day1HighFameUnique");
 
-    if (!card || !container || !hiddenPre) return;
+    if (!card || !container || !hiddenPre || !uniqueCount) return;
 
     const hasPlayers = Array.isArray(players) && players.length > 0;
 
@@ -735,11 +737,19 @@
       card.style.display = "none";
       container.innerHTML = "";
       hiddenPre.textContent = "";
+      uniqueCount.textContent = "";
       return;
     }
 
     card.style.display = "";
     hiddenPre.textContent = text;
+
+    const uniquePlayers = new Set(
+      players
+        .map((player) => (player?.name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    uniqueCount.textContent = `Unieke spelers met 800+: ${uniquePlayers.size}`;
 
     container.className = "tableWrap";
     container.innerHTML = "";
