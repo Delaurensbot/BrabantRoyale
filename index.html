@@ -30,6 +30,7 @@
     .ctaLink:hover { border-color: rgba(116, 255, 141, 0.85); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .openClanWarning { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 70, 70, 0.75); background: rgba(255, 0, 0, 0.2); color: #ffdede; font-weight: 800; letter-spacing: 0.2px; display: none; }
+    .colosseumNotice { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 181, 71, 0.85); background: rgba(255, 181, 71, 0.14); color: #ffe6bd; font-weight: 700; letter-spacing: 0.15px; display: none; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
     .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
@@ -89,6 +90,7 @@
   <div class="clanSwitch" id="clanSwitch"></div>
   <div class="muted" id="clanLabel"></div>
   <div class="openClanWarning" id="openClanWarning">CLAN STAAT OP OPEN ZET TERUG NAAR INVITE ONLY</div>
+  <div class="colosseumNotice" id="colosseumNotice"></div>
   <div class="top">
     <div class="muted">Last updated: <span id="updated">-</span></div>
     <button id="refresh">Refresh</button>
@@ -853,6 +855,26 @@
     warningEl.style.display = isOpen && isOfficiallyStarted ? "block" : "none";
   }
 
+  function renderColosseumNotice(data) {
+    const noticeEl = el("colosseumNotice");
+    if (!noticeEl) return;
+
+    const isColosseum = Boolean(data.cwstats_colosseum_weekend);
+    if (!isColosseum) {
+      noticeEl.style.display = "none";
+      noticeEl.textContent = "";
+      return;
+    }
+
+    const activeDay = Number(data.cwstats_active_day);
+    const dayText = Number.isFinite(activeDay) && activeDay >= 1 && activeDay <= 4
+      ? `Actieve dag: Day ${activeDay}. `
+      : "";
+
+    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}Score telt op over Day 1 t/m Day 4 en avg/deck wordt nu geïmporteerd van cwstats.com.`;
+    noticeEl.style.display = "block";
+  }
+
   async function fetchData() {
     el("errorBox").style.display = "none";
     el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
@@ -869,6 +891,7 @@
 
     const data = await res.json();
     renderClanAccessWarning(data);
+    renderColosseumNotice(data);
     if (!data.ok) {
       el("status").textContent = "";
       el("errorBox").style.display = "block";

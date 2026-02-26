@@ -86,6 +86,60 @@ def parse_clan_access_type_from_html(html: str):
 
     return None
 
+
+def _normalize_clan_name(name: str):
+    cleaned = re.sub(r"\s+", " ", (name or "")).strip().lower()
+    return re.sub(r"[^\w]+", "", cleaned)
+
+
+def parse_cwstats_race_context_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+    text_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+    text_blob_lower = text_blob.lower()
+
+    is_colosseum_weekend = bool(re.search(r"\bcolosseum\b", text_blob_lower))
+
+    active_day = None
+    day_match = re.search(r"\bday\s*(\d)\b", text_blob_lower)
+    if day_match:
+        active_day = int(day_match.group(1))
+
+    rows = {}
+    row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
+
+    for link in soup.find_all("a", href=True):
+        href = (link.get("href") or "").strip()
+        if not re.fullmatch(r"/clan/[A-Z0-9]+/race", href):
+            continue
+
+        row_text = " ".join(link.stripped_strings)
+        if not row_text or not row_text[0].isdigit():
+            continue
+
+        match = row_regex.match(row_text)
+        if not match:
+            continue
+
+        rank = int(match.group(1))
+        name = re.sub(r"\s+", " ", match.group(2)).strip()
+        cw_trophy = int(match.group(4))
+        boat_movement = int(match.group(5))
+        fame_avg = float(match.group(6).replace(",", "."))
+
+        rows[_normalize_clan_name(name)] = {
+            "rank": rank,
+            "name": name,
+            "cw_trophy": cw_trophy,
+            "boat_movement": boat_movement,
+            "fame_avg": fame_avg,
+        }
+
+    return {
+        "is_colosseum_weekend": is_colosseum_weekend,
+        "active_day": active_day,
+        "rows_by_name": rows,
+    }
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -107,13 +161,28 @@ class handler(BaseHTTPRequestHandler):
 
             cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
             cwstats_finish_outlook = {}
+            cwstats_race_context = {}
             try:
                 cwstats_html = fetch_html(cwstats_race_url)
                 cwstats_finish_outlook = parse_cwstats_finish_outlook_from_html(cwstats_html)
+                cwstats_race_context = parse_cwstats_race_context_from_html(cwstats_html)
             except Exception:
                 cwstats_finish_outlook = {}
+                cwstats_race_context = {}
 
             clans = parse_clan_overview_from_race_soup(race_soup)
+            cwstats_rows = cwstats_race_context.get("rows_by_name") or {}
+            for clan in clans:
+                cw_row = cwstats_rows.get(_normalize_clan_name(clan.name))
+                if not cw_row:
+                    continue
+
+                clan.avg_medals_per_deck = cw_row.get("fame_avg")
+                if clan.boat_points in (None, 0):
+                    clan.boat_points = cw_row.get("boat_movement")
+                if clan.current_medals in (None, 0):
+                    clan.current_medals = cw_row.get("cw_trophy")
+
             players = parse_player_rows_from_race_soup(race_soup)
 
             filtered_players = []
@@ -200,6 +269,8 @@ class handler(BaseHTTPRequestHandler):
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
+                "cwstats_colosseum_weekend": bool(cwstats_race_context.get("is_colosseum_weekend")),
+                "cwstats_active_day": cwstats_race_context.get("active_day"),
                 "total_players_participated": total_players_participated,
                 "clan_access_type": clan_access_type,
                 "cw_official_started": cw_official_started,
