@@ -172,6 +172,7 @@ class handler(BaseHTTPRequestHandler):
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             cwstats_rows = cwstats_race_context.get("rows_by_name") or {}
+            is_colosseum_weekend = bool(cwstats_race_context.get("is_colosseum_weekend"))
             for clan in clans:
                 cw_row = cwstats_rows.get(_normalize_clan_name(clan.name))
                 if not cw_row:
@@ -182,6 +183,16 @@ class handler(BaseHTTPRequestHandler):
                     clan.boat_points = cw_row.get("boat_movement")
                 if clan.current_medals in (None, 0):
                     clan.current_medals = cw_row.get("cw_trophy")
+
+                if (
+                    is_colosseum_weekend
+                    and clan.current_medals in (None, 0)
+                    and clan.boat_points not in (None, 0)
+                ):
+                    # During colosseum weekend the running score can appear in the
+                    # Boat column on the official race page. Move that score to
+                    # Medals so the overview ranking stays correct.
+                    clan.current_medals = clan.boat_points
 
             players = parse_player_rows_from_race_soup(race_soup)
 
