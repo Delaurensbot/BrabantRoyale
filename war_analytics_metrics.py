@@ -22,6 +22,8 @@ from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
 DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
 ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["analytics_url"]
 CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["clan_url"]
+WAR_LOG_URL_DEFAULT = DEFAULT_CLAN_CONFIG["war_log_url"]
+WAR_RANKING_URL_DEFAULT = DEFAULT_CLAN_CONFIG["war_ranking_url"]
 
 KNOWN_ROLES = ["Leader", "Co-leader", "Elder", "Member"]
 ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil "Owner"
@@ -37,6 +39,10 @@ def clean_player_name(s: str) -> str:
     s = normalize_space(s)
     s = re.sub(r"<[^>]+>", "", s)
     return normalize_space(s).lower()
+
+
+def normalize_tag(tag: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", (tag or "")).upper()
 
 
 def is_number_like(s: str) -> bool:
@@ -125,6 +131,15 @@ def extract_player_tag_from_href(href: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+def extract_clan_tag_from_href(href: str) -> Optional[str]:
+    if not href:
+        return None
+    href_decoded = unquote(href)
+    href_u = href_decoded.upper()
+    m = re.search(r"/CLAN/(?:#)?([A-Z0-9]+)", href_u)
+    return m.group(1) if m else None
+
+
 def extract_role_from_row_text(row_text: str) -> str:
     t = normalize_space(row_text)
     for role in KNOWN_ROLES:
@@ -184,6 +199,315 @@ def find_table_by_headers(soup: BeautifulSoup, must_have: Set[str]) -> Optional[
         if must_have_lower.issubset(hset):
             return table
     return None
+
+
+def find_heading_tables(soup: BeautifulSoup, heading_pattern: str) -> List[Tuple[int, BeautifulSoup]]:
+    results: List[Tuple[int, BeautifulSoup]] = []
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        text = normalize_space(heading.get_text(" ", strip=True))
+        m = re.search(heading_pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        value = int(m.group(1))
+        table = heading.find_next("table")
+        if table is not None:
+            results.append((value, table))
+    return results
+
+
+def detect_table_header_index(headers: List[str], keywords: List[str]) -> Optional[int]:
+    lower = [h.lower() for h in headers]
+    for idx, h in enumerate(lower):
+        for kw in keywords:
+            if kw in h:
+                return idx
+    return None
+
+
+def parse_int_from_cell(cell_text: str) -> Optional[int]:
+    if cell_text is None:
+        return None
+    cell_text = normalize_space(cell_text)
+    if cell_text == "":
+        return None
+    m = re.search(r"-?\d+", cell_text)
+    if not m:
+        return None
+    return int(m.group(0))
+
+
+def parse_rank_direction(cell: BeautifulSoup, cell_text: str) -> str:
+    text = cell_text or ""
+    if any(symbol in text for symbol in ["▲", "↑", "+"]):
+        return "up"
+    if any(symbol in text for symbol in ["▼", "↓", "-"]):
+        return "down"
+    for icon in cell.find_all(["i", "span"]):
+        classes = " ".join(icon.get("class", []))
+        classes_lower = classes.lower()
+        if any(token in classes_lower for token in ["up", "caret-up", "arrow-up", "trend-up"]):
+            return "up"
+        if any(token in classes_lower for token in ["down", "caret-down", "arrow-down", "trend-down"]):
+            return "down"
+    return "same"
+
+
+def parse_country_war_rank(html: str, clan_tag: str) -> Dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    target_tag = normalize_tag(clan_tag)
+
+    for table in soup.find_all("table"):
+        headers = get_table_headers(table)
+        if not headers:
+            continue
+        headers_lower = [h.lower() for h in headers]
+        if not any("clan" in h or "name" in h for h in headers_lower):
+            continue
+
+        rank_idx = detect_table_header_index(headers, ["rank", "#"])
+        change_idx = detect_table_header_index(headers, ["change", "diff", "trend", "move", "Δ".lower()])
+        trophy_idx = detect_table_header_index(headers, ["trophy"])
+
+        for tr in table.find_all("tr"):
+            cells = tr.find_all("td")
+            if not cells:
+                continue
+            row_tag = None
+            for a in tr.find_all("a", href=True):
+                if "/clan/" in a.get("href", "").lower():
+                    row_tag = extract_clan_tag_from_href(a["href"])
+                    if row_tag:
+                        break
+            if row_tag != target_tag:
+                continue
+
+            rank = None
+            if rank_idx is not None and rank_idx < len(cells):
+                rank = parse_int_from_cell(cells[rank_idx].get_text(" ", strip=True))
+            if rank is None:
+                rank = parse_int_from_cell(cells[0].get_text(" ", strip=True))
+
+            rank_change = None
+            movement = "same"
+            if change_idx is not None and change_idx < len(cells):
+                change_cell = cells[change_idx]
+                change_text = change_cell.get_text(" ", strip=True)
+                rank_change = parse_int_from_cell(change_text)
+                movement = parse_rank_direction(change_cell, change_text)
+
+            trophies = None
+            if trophy_idx is not None and trophy_idx < len(cells):
+                trophies = parse_int_from_cell(cells[trophy_idx].get_text(" ", strip=True))
+
+            return {
+                "rank": rank,
+                "rank_change": rank_change,
+                "rank_movement": movement,
+                "trophies": trophies,
+            }
+
+    return {"rank": None, "rank_change": None, "rank_movement": "unknown", "trophies": None}
+
+
+def find_participants_table(soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        text = normalize_space(heading.get_text(" ", strip=True))
+        if "participants" in text.lower():
+            table = heading.find_next("table")
+            if table is not None:
+                return table
+
+    for table in soup.find_all("table"):
+        headers = get_table_headers(table)
+        if not headers:
+            continue
+        joined = " ".join(h.lower() for h in headers)
+        if "player" in joined and any(k in joined for k in ["battle", "deck", "attack", "medal", "fame", "point"]):
+            return table
+    return None
+
+
+def parse_participant_rows(table: BeautifulSoup) -> List[Dict[str, object]]:
+    headers = get_table_headers(table)
+    player_idx = detect_table_header_index(headers, ["player", "name"])
+    attacks_idx = detect_table_header_index(headers, ["battle", "deck", "attack"])
+    score_idx = detect_table_header_index(headers, ["medal", "fame", "point", "score", "trophy"])
+
+    rows: List[Dict[str, object]] = []
+
+    for tr in table.find_all("tr"):
+        cells = tr.find_all("td")
+        if not cells:
+            continue
+        values = [normalize_space(c.get_text(" ", strip=True)) for c in cells]
+        if not any(values):
+            continue
+
+        tag = None
+        a = tr.find("a", href=True)
+        if a:
+            tag = extract_player_tag_from_href(a["href"])
+
+        if player_idx is None:
+            player_idx = next((i for i, v in enumerate(values) if v and not re.fullmatch(r"-?\d+", v)), 1)
+        player = values[player_idx] if player_idx is not None and player_idx < len(values) else ""
+
+        attacks = None
+        if attacks_idx is not None and attacks_idx < len(values):
+            attacks = parse_int_from_cell(values[attacks_idx])
+        if attacks is None:
+            numeric_after = [parse_int_from_cell(v) for v in values[player_idx + 1:]] if player_idx is not None else []
+            numeric_after = [n for n in numeric_after if n is not None]
+            attacks = numeric_after[0] if numeric_after else None
+
+        score = None
+        if score_idx is not None and score_idx < len(values):
+            score = parse_int_from_cell(values[score_idx])
+        if score is None:
+            numeric_vals = [parse_int_from_cell(v) for v in values]
+            numeric_vals = [n for n in numeric_vals if n is not None]
+            score = numeric_vals[-1] if numeric_vals else None
+
+        if player:
+            rows.append(
+                {
+                    "player": player,
+                    "player_clean": clean_player_name(player),
+                    "tag": tag,
+                    "attacks": attacks,
+                    "score": score,
+                }
+            )
+    return rows
+
+
+def parse_latest_war_week(html: str) -> Dict[str, object]:
+    soup = BeautifulSoup(html, "html.parser")
+    season_tables = find_heading_tables(soup, r"Clan War Season\s*(\d+)")
+
+    if not season_tables:
+        return {"season": None, "week": None, "rank": None, "trophy_delta": None, "trophy_total": None}
+
+    latest_season, table = max(season_tables, key=lambda t: t[0])
+    headers = get_table_headers(table)
+    week_idx = detect_table_header_index(headers, ["week"])
+    rank_idx = detect_table_header_index(headers, ["rank"])
+    trophy_idx = detect_table_header_index(headers, ["trophy"])
+
+    best_week = None
+    best_row = None
+    for tr in table.find_all("tr"):
+        cells = tr.find_all("td")
+        if not cells:
+            continue
+        if week_idx is None or week_idx >= len(cells):
+            continue
+        week_text = cells[week_idx].get_text(" ", strip=True)
+        m = re.search(r"W\s*(\d+)", week_text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        week_num = int(m.group(1))
+        if best_week is None or week_num > best_week:
+            best_week = week_num
+            best_row = cells
+
+    if best_row is None:
+        return {"season": latest_season, "week": None, "rank": None, "trophy_delta": None, "trophy_total": None}
+
+    rank = None
+    if rank_idx is not None and rank_idx < len(best_row):
+        rank = parse_int_from_cell(best_row[rank_idx].get_text(" ", strip=True))
+
+    trophy_delta = None
+    trophy_total = None
+    if trophy_idx is not None and trophy_idx < len(best_row):
+        trophy_text = best_row[trophy_idx].get_text(" ", strip=True)
+        numbers = re.findall(r"[+-]?\d+", trophy_text)
+        if numbers:
+            if any(n.startswith(("+", "-")) for n in numbers):
+                trophy_delta = int(numbers[0])
+            trophy_total = int(numbers[-1])
+
+    return {
+        "season": latest_season,
+        "week": best_week,
+        "rank": rank,
+        "trophy_delta": trophy_delta,
+        "trophy_total": trophy_total,
+    }
+
+
+def build_recap_summary(
+    war_log_html: str,
+    rank_html: str,
+    clan_tag: str,
+    current_tags: Set[str],
+    name_clean_to_tag: Dict[str, str],
+) -> Dict[str, object]:
+    rank_info = parse_country_war_rank(rank_html, clan_tag)
+    war_week_info = parse_latest_war_week(war_log_html)
+
+    soup = BeautifulSoup(war_log_html, "html.parser")
+    participants_table = find_participants_table(soup)
+    participant_rows = parse_participant_rows(participants_table) if participants_table else []
+
+    def is_current_member(row) -> bool:
+        tag = row.get("tag")
+        if tag and normalize_tag(tag) in current_tags:
+            return True
+        name_clean = row.get("player_clean")
+        return name_clean in name_clean_to_tag
+
+    current_rows = [row for row in participant_rows if is_current_member(row)]
+    scored_rows = [row for row in current_rows if isinstance(row.get("score"), int)]
+
+    best_player = None
+    if scored_rows:
+        best_row = max(scored_rows, key=lambda r: (r.get("score") or 0))
+        best_player = {"name": best_row.get("player"), "score": best_row.get("score")}
+
+    total_score_16 = sum(
+        row.get("score") or 0
+        for row in current_rows
+        if row.get("attacks") == 16 and isinstance(row.get("score"), int)
+    )
+
+    missed_rows = [
+        row
+        for row in current_rows
+        if row.get("attacks") is not None
+        and row.get("attacks") < 16
+        and ((row.get("attacks") or 0) > 0 or (row.get("score") or 0) > 0)
+    ]
+    missed_rows_sorted = sorted(missed_rows, key=lambda r: (r.get("attacks") or 0, r.get("score") or 0), reverse=True)
+
+    missed_total = sum(16 - (row.get("attacks") or 0) for row in missed_rows_sorted if row.get("attacks") is not None)
+
+    missed_players = [
+        {
+            "player": row.get("player"),
+            "attacks": row.get("attacks"),
+            "missed": 16 - (row.get("attacks") or 0),
+            "score": row.get("score"),
+        }
+        for row in missed_rows_sorted
+    ]
+
+    return {
+        "rank": rank_info.get("rank"),
+        "rank_change": rank_info.get("rank_change"),
+        "rank_movement": rank_info.get("rank_movement"),
+        "rank_trophies": rank_info.get("trophies"),
+        "war_season": war_week_info.get("season"),
+        "war_week": war_week_info.get("week"),
+        "war_rank": war_week_info.get("rank"),
+        "war_trophy_delta": war_week_info.get("trophy_delta"),
+        "war_trophy_total": war_week_info.get("trophy_total"),
+        "best_player": best_player,
+        "total_score_16": total_score_16,
+        "missed_attacks_total": missed_total,
+        "missed_players": missed_players,
+    }
 
 
 def parse_table_with_tag_or_name(table: BeautifulSoup) -> Tuple[List[str], List[List[str]], List[Optional[str]], List[str]]:
@@ -619,6 +943,9 @@ def print_mvp_explanations_simple(prev_season: Optional[int], current_season: Op
 def collect_analytics_data(
     analytics_url: str = ANALYTICS_URL_DEFAULT,
     members_url: str = CLAN_MEMBERS_URL_DEFAULT,
+    war_log_url: str = WAR_LOG_URL_DEFAULT,
+    war_ranking_url: str = WAR_RANKING_URL_DEFAULT,
+    clan_tag: str = DEFAULT_CLAN_TAG,
     top_n: int = 10,
 ) -> Dict[str, object]:
     tag_to_name_clean, name_clean_to_tag, tag_to_role = get_current_members_with_roles(members_url)
@@ -674,6 +1001,14 @@ def collect_analytics_data(
     ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
     promotion_candidates = build_promotion_candidates(contrib_map, decks_map, role_map, player_print_map)
 
+    recap = {}
+    try:
+        war_log_html = fetch(war_log_url)
+        rank_html = fetch(war_ranking_url)
+        recap = build_recap_summary(war_log_html, rank_html, clan_tag, current_tags, name_clean_to_tag)
+    except Exception as exc:
+        recap = {"error": str(exc)}
+
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
@@ -681,6 +1016,7 @@ def collect_analytics_data(
         "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+        "recap": recap,
     }
 
 
