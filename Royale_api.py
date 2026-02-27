@@ -343,16 +343,16 @@ def compute_duels_left(rows: List[Dict]) -> int:
 
 def compute_total_players_participated(rows: List[Dict]) -> int:
     """
-    Aantal unieke spelers uit de huidige clan die minimaal 1 aanval hebben gedaan.
-    Gebaseerd op decks_total_so_far uit de players tabel.
+    Aantal unieke spelers uit de huidige clan die vandaag minimaal 1 deck gebruikten.
+    Gebaseerd op decks_used_today uit de players tabel.
     """
     count = 0
     for r in rows:
         try:
-            total_so_far = int(r.get("decks_total_so_far", 0) or 0)
+            used_today = int(r.get("decks_used_today", 0) or 0)
         except Exception:
             continue
-        if total_so_far >= 1:
+        if used_today >= 1:
             count += 1
     return count
 
