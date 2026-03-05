@@ -11,6 +11,7 @@ from Royale_api import (
     RACE_URL_DEFAULT,
     CLAN_URL_DEFAULT,
     build_short_story,
+    ClanOverview,
     collect_day1_high_famers,
     compute_total_players_participated,
     dedupe_rows,
@@ -122,6 +123,7 @@ def parse_cwstats_race_context_from_html(html: str):
 
         rank = int(match.group(1))
         name = re.sub(r"\s+", " ", match.group(2)).strip()
+        trophy = int(match.group(3))
         cw_trophy = int(match.group(4))
         boat_movement = int(match.group(5))
         fame_avg = float(match.group(6).replace(",", "."))
@@ -129,6 +131,7 @@ def parse_cwstats_race_context_from_html(html: str):
         rows[_normalize_clan_name(name)] = {
             "rank": rank,
             "name": name,
+            "trophy": trophy,
             "cw_trophy": cw_trophy,
             "boat_movement": boat_movement,
             "fame_avg": fame_avg,
@@ -140,6 +143,48 @@ def parse_cwstats_race_context_from_html(html: str):
         "rows_by_name": rows,
     }
 
+def parse_cwstats_players_from_html(html: str):
+    soup = BeautifulSoup(html or "", "html.parser")
+    players = []
+
+    for tr in soup.find_all("tr"):
+        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+        if len(cells) < 6:
+            continue
+
+        rank_raw = (cells[0] or "").strip()
+        if not re.fullmatch(r"\d+", rank_raw):
+            continue
+
+        name = (cells[1] or "").strip()
+        if not name:
+            continue
+
+        players.append({
+            "rank": int(rank_raw),
+            "tag": "",
+            "name": name,
+            "role": "",
+            "boat_attacks": _compact_number(cells[2]) or 0,
+            "decks_total_so_far": _compact_number(cells[3]) or 0,
+            "decks_used_today": _compact_number(cells[4]) or 0,
+            "fame": _compact_number(cells[5]) or 0,
+        })
+
+    return players
+
+
+def pick_reporting_soup(race_soup: BeautifulSoup, cwstats_active_day):
+    day_num = parse_day_number(race_soup)
+    if day_num in {1, 2, 3, 4}:
+        return race_soup
+
+    if cwstats_active_day in {1, 2, 3, 4}:
+        return BeautifulSoup(f"Day {cwstats_active_day}", "html.parser")
+
+    return race_soup
+
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -150,28 +195,66 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             clan_config = pick_clan_config(self.path)
-            clan_html = fetch_html(clan_config["clan_url"])
-            clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
-            clan_access_type = parse_clan_access_type_from_html(clan_html)
+            warnings = []
 
-            race_html = fetch_html(clan_config["race_url"])
-            race_soup = BeautifulSoup(race_html, "html.parser")
-            day_num = parse_day_number(race_soup)
-            cw_official_started = day_num in {1, 2, 3, 4}
+            clan_html = ""
+            clan_tags, clan_names = set(), set()
+            clan_access_type = None
+            try:
+                clan_html = fetch_html(clan_config["clan_url"])
+                clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"], clan_html=clan_html)
+                clan_access_type = parse_clan_access_type_from_html(clan_html)
+            except Exception as clan_error:
+                warnings.append(f"Kon clan pagina niet ophalen: {clan_error}")
+
+            race_html = ""
+            race_soup = BeautifulSoup("", "html.parser")
+            day_num = None
+            cw_official_started = False
+            try:
+                race_html = fetch_html(clan_config["race_url"])
+                race_soup = BeautifulSoup(race_html, "html.parser")
+                day_num = parse_day_number(race_soup)
+                cw_official_started = day_num in {1, 2, 3, 4}
+            except Exception as race_error:
+                warnings.append(
+                    "Kon race pagina niet ophalen. Dit kan een tijdelijke block/rate-limit of netwerkprobleem zijn: "
+                    f"{race_error}"
+                )
 
             cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
             cwstats_finish_outlook = {}
             cwstats_race_context = {}
+            cwstats_players = []
             try:
                 cwstats_html = fetch_html(cwstats_race_url)
                 cwstats_finish_outlook = parse_cwstats_finish_outlook_from_html(cwstats_html)
                 cwstats_race_context = parse_cwstats_race_context_from_html(cwstats_html)
+                cwstats_players = parse_cwstats_players_from_html(cwstats_html)
             except Exception:
                 cwstats_finish_outlook = {}
                 cwstats_race_context = {}
+                cwstats_players = []
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             cwstats_rows = cwstats_race_context.get("rows_by_name") or {}
+
+            if not clans and cwstats_rows:
+                clans = [
+                    ClanOverview(
+                        name=str(row.get("name") or ""),
+                        decks_used_today=None,
+                        decks_total_today=None,
+                        avg_medals_per_deck=row.get("fame_avg"),
+                        projected_medals=int(float(row.get("fame_avg")) * 200) if row.get("fame_avg") is not None else None,
+                        boat_points=row.get("boat_movement"),
+                        current_medals=row.get("cw_trophy"),
+                        trophies=row.get("trophy"),
+                    )
+                    for row in cwstats_rows.values()
+                    if row.get("name")
+                ]
+
             is_colosseum_weekend = bool(cwstats_race_context.get("is_colosseum_weekend"))
             for clan in clans:
                 cw_row = cwstats_rows.get(_normalize_clan_name(clan.name))
@@ -183,6 +266,8 @@ class handler(BaseHTTPRequestHandler):
                     clan.boat_points = cw_row.get("boat_movement")
                 if clan.current_medals in (None, 0):
                     clan.current_medals = cw_row.get("cw_trophy")
+                if clan.trophies in (None, 0):
+                    clan.trophies = cw_row.get("trophy")
 
                 if (
                     is_colosseum_weekend
@@ -197,11 +282,17 @@ class handler(BaseHTTPRequestHandler):
             players = parse_player_rows_from_race_soup(race_soup)
 
             filtered_players = []
-            for row in players:
-                tag = (row.get("tag") or "").strip().upper()
-                name = (row.get("name") or "").strip()
-                if (tag and tag in clan_tags) or (name and name in clan_names):
-                    filtered_players.append(row)
+            if clan_tags or clan_names:
+                for row in players:
+                    tag = (row.get("tag") or "").strip().upper()
+                    name = (row.get("name") or "").strip()
+                    if (tag and tag in clan_tags) or (name and name in clan_names):
+                        filtered_players.append(row)
+            else:
+                filtered_players = list(players)
+
+            if not filtered_players and cwstats_players:
+                filtered_players = list(cwstats_players)
 
             filtered_players = sorted(filtered_players, key=lambda r: int(r.get("rank", 0) or 0))
             filtered_players = dedupe_rows(filtered_players)
@@ -219,13 +310,18 @@ class handler(BaseHTTPRequestHandler):
             players_text = render_player_table(filtered_players)
             battles_left_text = render_battles_left_today(filtered_players)
             risk_left_text = render_risk_left_attacks(filtered_players)
-            high_fame_text = render_high_fame_players(race_soup, filtered_players)
-            day1_high_famers = collect_day1_high_famers(race_soup, filtered_players)
+            reporting_soup = pick_reporting_soup(
+                race_soup,
+                cwstats_race_context.get("active_day"),
+            )
+
+            high_fame_text = render_high_fame_players(reporting_soup, filtered_players)
+            day1_high_famers = collect_day1_high_famers(reporting_soup, filtered_players)
             day1_high_fame_text = render_day1_high_fame_players(
-                race_soup, filtered_players
+                reporting_soup, filtered_players
             )
             day4_last_chance_text = render_day4_last_chance_players(
-                race_soup, filtered_players
+                reporting_soup, filtered_players
             )
             short_story_limit = 220
             short_story_text = build_short_story(
@@ -235,6 +331,13 @@ class handler(BaseHTTPRequestHandler):
                 filtered_players,
                 max_chars=short_story_limit,
             )
+
+            if not clans and warnings and not cwstats_rows:
+                race_overview_text = (
+                    "Clan overview: race data nu niet beschikbaar via backend fetch. "
+                    "Controleer netwerk/proxy/rate-limit en probeer opnieuw."
+                )
+                clan_stats_text = "\n".join(warnings)
 
             sections = [
                 ("Race overview", race_overview_text),
@@ -285,6 +388,7 @@ class handler(BaseHTTPRequestHandler):
                 "total_players_participated": total_players_participated,
                 "clan_access_type": clan_access_type,
                 "cw_official_started": cw_official_started,
+                "warnings": warnings,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
