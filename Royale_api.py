@@ -8,6 +8,7 @@
 import argparse
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
@@ -27,21 +28,56 @@ CLAN_CONFIGS = {
 # Networking
 # -----------------------------
 def fetch_html(url: str, timeout: int = 25) -> str:
-    headers = {
-        "User-Agent": (
+    user_agents = [
+        (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "nl,en-US;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-    }
-    r = requests.get(url, headers=headers, timeout=timeout)
-    if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code} bij ophalen van {url}")
-    return r.text
+        (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+    ]
+
+    errors = []
+    for trust_env in (True, False):
+        session = requests.Session()
+        session.trust_env = trust_env
+
+        for attempt in range(1, 4):
+            headers = {
+                "User-Agent": user_agents[(attempt - 1) % len(user_agents)],
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "nl,en-US;q=0.9,en;q=0.8",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            }
+
+            try:
+                r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+                if r.status_code < 400:
+                    return r.text
+
+                errors.append(
+                    f"HTTP {r.status_code} via {'env-proxy' if trust_env else 'direct'} (attempt {attempt})"
+                )
+
+                if r.status_code in {403, 429, 503} and attempt < 3:
+                    time.sleep(0.35 * attempt)
+                    continue
+                break
+
+            except Exception as exc:
+                errors.append(
+                    f"{type(exc).__name__} via {'env-proxy' if trust_env else 'direct'} (attempt {attempt}): {exc}"
+                )
+                if attempt < 3:
+                    time.sleep(0.35 * attempt)
+
+    joined = " | ".join(errors)
+    raise RuntimeError(f"Kon {url} niet ophalen: {joined}")
 
 
 def clean_text(s: str) -> str:
@@ -89,13 +125,13 @@ def extract_player_tag_from_href(href: str) -> Optional[str]:
     return normalize_tag(m.group(1))
 
 
-def fetch_clan_members(clan_url: str) -> Tuple[Set[str], Set[str]]:
+def fetch_clan_members(clan_url: str, clan_html: Optional[str] = None) -> Tuple[Set[str], Set[str]]:
     """
     Returns:
       tags: set of player tags (best signal)
       names: set of player names (fallback)
     """
-    html = fetch_html(clan_url)
+    html = clan_html if clan_html is not None else fetch_html(clan_url)
     soup = BeautifulSoup(html, "html.parser")
 
     tags: Set[str] = set()
