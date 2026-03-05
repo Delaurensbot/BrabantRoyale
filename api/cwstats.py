@@ -150,14 +150,32 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             clan_config = pick_clan_config(self.path)
-            clan_html = fetch_html(clan_config["clan_url"])
-            clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
-            clan_access_type = parse_clan_access_type_from_html(clan_html)
+            warnings = []
 
-            race_html = fetch_html(clan_config["race_url"])
-            race_soup = BeautifulSoup(race_html, "html.parser")
-            day_num = parse_day_number(race_soup)
-            cw_official_started = day_num in {1, 2, 3, 4}
+            clan_html = ""
+            clan_tags, clan_names = set(), set()
+            clan_access_type = None
+            try:
+                clan_html = fetch_html(clan_config["clan_url"])
+                clan_tags, clan_names = fetch_clan_members(clan_config["clan_url"])
+                clan_access_type = parse_clan_access_type_from_html(clan_html)
+            except Exception as clan_error:
+                warnings.append(f"Kon clan pagina niet ophalen: {clan_error}")
+
+            race_html = ""
+            race_soup = BeautifulSoup("", "html.parser")
+            day_num = None
+            cw_official_started = False
+            try:
+                race_html = fetch_html(clan_config["race_url"])
+                race_soup = BeautifulSoup(race_html, "html.parser")
+                day_num = parse_day_number(race_soup)
+                cw_official_started = day_num in {1, 2, 3, 4}
+            except Exception as race_error:
+                warnings.append(
+                    "Kon race pagina niet ophalen. Waarschijnlijk is er nog geen actieve race voor dit seizoen: "
+                    f"{race_error}"
+                )
 
             cwstats_race_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
             cwstats_finish_outlook = {}
@@ -236,6 +254,13 @@ class handler(BaseHTTPRequestHandler):
                 max_chars=short_story_limit,
             )
 
+            if not clans and warnings:
+                race_overview_text = (
+                    "Clan overview: nog geen actieve River Race gevonden op RoyaleAPI. "
+                    "Probeer later opnieuw wanneer het nieuwe seizoen live staat."
+                )
+                clan_stats_text = "\n".join(warnings)
+
             sections = [
                 ("Race overview", race_overview_text),
                 ("Insights", insights_text),
@@ -285,6 +310,7 @@ class handler(BaseHTTPRequestHandler):
                 "total_players_participated": total_players_participated,
                 "clan_access_type": clan_access_type,
                 "cw_official_started": cw_official_started,
+                "warnings": warnings,
             }
 
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
