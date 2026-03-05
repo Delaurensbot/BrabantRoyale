@@ -38,10 +38,21 @@ def fetch_html(url: str, timeout: int = 25) -> str:
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    r = requests.get(url, headers=headers, timeout=timeout)
-    if r.status_code >= 400:
-        raise RuntimeError(f"HTTP {r.status_code} bij ophalen van {url}")
-    return r.text
+
+    errors = []
+    for trust_env in (True, False):
+        session = requests.Session()
+        session.trust_env = trust_env
+        try:
+            r = session.get(url, headers=headers, timeout=timeout)
+            if r.status_code < 400:
+                return r.text
+            errors.append(f"HTTP {r.status_code} via {'env-proxy' if trust_env else 'direct'}")
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__} via {'env-proxy' if trust_env else 'direct'}: {exc}")
+
+    joined = " | ".join(errors)
+    raise RuntimeError(f"Kon {url} niet ophalen: {joined}")
 
 
 def clean_text(s: str) -> str:
