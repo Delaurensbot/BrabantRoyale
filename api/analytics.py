@@ -16,7 +16,7 @@ class handler(BaseHTTPRequestHandler):
             clan_config = get_clan_config(clan_tag)
             payload = collect_analytics_data(
                 analytics_url=clan_config.get("analytics_url", ANALYTICS_URL_DEFAULT),
-                members_url=clan_config.get("clan_url", CLAN_MEMBERS_URL_DEFAULT),
+                members_url=clan_config.get("members_url", clan_config.get("clan_url", CLAN_MEMBERS_URL_DEFAULT)),
                 top_n=10,
             )
             payload["ok"] = True

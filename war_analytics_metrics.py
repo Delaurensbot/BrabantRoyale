@@ -101,19 +101,54 @@ def format_table(title: str, headers: List[str], rows: List[List[str]], limit: O
 
 
 def fetch(url: str, timeout: int = 25) -> str:
-    headers = {
-        "User-Agent": (
+    user_agents = [
+        (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-        "Connection": "close",
-    }
-    r = requests.get(url, headers=headers, timeout=timeout)
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code} while fetching {url}")
-    return r.text
+        (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+    ]
+
+    errors = []
+    for trust_env in (True, False):
+        session = requests.Session()
+        session.trust_env = trust_env
+
+        for attempt in range(1, 4):
+            headers = {
+                "User-Agent": user_agents[(attempt - 1) % len(user_agents)],
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "nl,en-US;q=0.9,en;q=0.8",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Connection": "close",
+            }
+
+            try:
+                r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+                if r.status_code == 200:
+                    return r.text
+
+                errors.append(
+                    f"HTTP {r.status_code} via {'env-proxy' if trust_env else 'direct'} (attempt {attempt})"
+                )
+
+                if r.status_code in {403, 429, 503} and attempt < 3:
+                    continue
+                break
+
+            except Exception as exc:
+                errors.append(
+                    f"{type(exc).__name__} via {'env-proxy' if trust_env else 'direct'} (attempt {attempt}): {exc}"
+                )
+
+    joined = " | ".join(errors)
+    raise RuntimeError(f"Kon {url} niet ophalen: {joined}")
 
 
 def extract_player_tag_from_href(href: str) -> Optional[str]:
