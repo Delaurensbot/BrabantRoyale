@@ -105,6 +105,7 @@ def get_clan_config(tag: Optional[str] = None) -> Dict[str, str]:
         "name": config.get("name", ""),
         "race_url": f"https://royaleapi.com/clan/{normalized}/war/race",
         "clan_url": f"https://royaleapi.com/clan/{normalized}",
+        "members_url": f"https://royaleapi.com/clan/{normalized}/war/analytics",
         "analytics_url": f"https://royaleapi.com/clan/{normalized}/war/analytics",
         "join_history_url": f"https://royaleapi.com/clan/{normalized}/history/join-leave",
     }
