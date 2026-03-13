@@ -1,47 +1,213 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Temporary Clan Member Test</title>
-  </head>
-  <body>
-    <h1>Temporary test: Clan #9YP8UY members</h1>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Temp Landing Prototype (Direct API)</title>
+  <style>
+    :root {
+      --bg: #0c0e16;
+      --bg-soft: #141829;
+      --card: rgba(22, 26, 40, 0.9);
+      --card-border: rgba(177, 92, 255, 0.3);
+      --text: #eef2ff;
+      --muted: rgba(238, 242, 255, 0.76);
+      --green: #74ff8d;
+    }
+    body { font-family: system-ui, Arial; max-width: 1120px; margin: 22px auto; padding: 0 14px; color: var(--text); background: radial-gradient(circle at 22% 16%, rgba(177, 92, 255, 0.3), transparent 36%), radial-gradient(circle at 76% 0%, rgba(116, 255, 141, 0.24), transparent 28%), linear-gradient(165deg, var(--bg-soft), var(--bg)); }
+    h1 { margin: 0 0 10px; }
+    .muted { color: var(--muted); }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .ctaLink, button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); text-decoration: none; color: inherit; background: linear-gradient(145deg, rgba(177, 92, 255, 0.22), rgba(116, 255, 141, 0.08)); cursor: pointer; }
+    .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+    .clanButton--active { border-color: var(--green); box-shadow: 0 0 0 1px rgba(116, 255, 141, 0.4); }
+    .warning { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 70, 70, 0.75); background: rgba(255, 0, 0, 0.2); color: #ffdede; font-weight: 800; display: none; }
 
-    <!-- Simple status element for loading and error messages. -->
-    <p id="status">Loading member names...</p>
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .fullRow { grid-column: 1 / -1; }
+    .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .title { font-size: 30px; font-weight: 900; margin: 4px 0 6px; }
 
-    <!-- Plain list where we render only the player names. -->
-    <ul id="member-list"></ul>
+    .overviewCard { background: linear-gradient(180deg, rgba(18,23,43,0.98), rgba(13,17,35,0.95)); border-color: rgba(169, 92, 255, 0.44); }
+    .overviewTitle { font-size: 32px; font-weight: 900; margin: 0 0 12px; }
+    .tableWrap { border-radius: 12px; overflow: hidden; border: 1px solid rgba(177, 92, 255, 0.25); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 12px; font-size: 28px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    thead th { font-weight: 800; background: linear-gradient(90deg, rgba(119,93,204,0.44), rgba(84,166,119,0.36)); }
+    tbody tr:nth-child(odd) { background: rgba(255,255,255,0.02); }
+    .clanCell { font-weight: 800; }
+    .deckPill { display:inline-block; min-width:40px; text-align:center; padding: 3px 9px; border-radius: 999px; background: rgba(151, 160, 203, 0.2); }
 
-    <script>
-      // Fetch from our own internal API route so the key never reaches the browser.
-      async function loadMembers() {
-        const statusEl = document.getElementById('status');
-        const listEl = document.getElementById('member-list');
+    .empty { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); text-align: center; }
+    .small pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(12, 16, 27, 0.85); border: 1px solid rgba(177, 92, 255, 0.35); white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Clan War Stats — Temp API Prototype</h1>
+  <div class="clanSwitch" id="clanSwitch"></div>
+  <div class="muted" id="clanLabel"></div>
+  <div class="warning" id="openClanWarning">CLAN STAAT OP OPEN ZET TERUG NAAR INVITE ONLY</div>
 
-        try {
-          const res = await fetch('/api/test-clan');
-          const data = await res.json();
+  <div class="top">
+    <div class="muted">Last updated: <span id="updated">-</span></div>
+    <div class="muted" id="dayLabel">Day: -</div>
+    <button id="refresh">Refresh</button>
+    <div class="muted" id="status"></div>
+    <a class="ctaLink" href="/">Terug naar huidige landing page</a>
+  </div>
 
-          if (!res.ok || !data.ok) {
-            throw new Error(data.error || 'Failed to load clan members.');
-          }
+  <div class="grid">
+    <div class="card fullRow overviewCard">
+      <div class="overviewTitle">Race Overview</div>
+      <div id="overview" class="empty">(loading...)</div>
+    </div>
 
-          statusEl.textContent = '';
+    <div class="card small">
+      <div class="title">Clan avg/projection</div>
+      <pre id="clanAvg">(loading...)</pre>
+    </div>
 
-          // Render only names as requested.
-          data.names.forEach((name) => {
-            const li = document.createElement('li');
-            li.textContent = name;
-            listEl.appendChild(li);
-          });
-        } catch (error) {
-          statusEl.textContent = `Error: ${error.message}`;
-        }
-      }
+    <div class="card small">
+      <div class="title">Battles left (today)</div>
+      <pre id="battles">(loading...)</pre>
+    </div>
 
-      loadMembers();
-    </script>
-  </body>
+    <div class="card small">
+      <div class="title">Short story</div>
+      <pre id="story">(loading...)</pre>
+    </div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  const CLANS = {
+    "9YP8UY": { name: "Brabant Royale" },
+    "GPCLVLPP": { name: "Brabant Royale 2" },
+  };
+  const DEFAULT_CLAN = "9YP8UY";
+  let currentClanTag = DEFAULT_CLAN;
+
+  function normalizeClanTag(tag) {
+    return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  }
+
+  function formatLocalDateForLabel(date) {
+    const dd = String(date.getDate()).padStart(2, "0");
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const yyyy = date.getFullYear();
+    const hh = String(date.getHours()).padStart(2, "0");
+    const min = String(date.getMinutes()).padStart(2, "0");
+    const sec = String(date.getSeconds()).padStart(2, "0");
+    return `${dd}-${mm}-${yyyy}, ${hh}:${min}:${sec}`;
+  }
+
+  function raceDayFromTimestamp(date) {
+    const weekday = date.getDay(); // Sun=0 ... Thu=4
+    if (weekday === 4) return 1; // Thursday
+    if (weekday === 5) return 2; // Friday
+    if (weekday === 6) return 3; // Saturday
+    if (weekday === 0) return 4; // Sunday
+    return null;
+  }
+
+  function renderClanButtons() {
+    const switchEl = el("clanSwitch");
+    switchEl.innerHTML = "";
+    Object.entries(CLANS).forEach(([tag, info]) => {
+      const btn = document.createElement("button");
+      btn.className = "clanButton";
+      btn.dataset.clan = tag;
+      btn.textContent = `${info.name} (${tag})`;
+      btn.addEventListener("click", () => setClan(tag));
+      switchEl.appendChild(btn);
+    });
+  }
+
+  function setClan(tag, skipFetch = false) {
+    const normalized = normalizeClanTag(tag);
+    currentClanTag = CLANS[normalized] ? normalized : DEFAULT_CLAN;
+    document.querySelectorAll(".clanButton").forEach((btn) => {
+      btn.classList.toggle("clanButton--active", btn.dataset.clan === currentClanTag);
+    });
+    el("clanLabel").textContent = `Sandbox data voor ${CLANS[currentClanTag].name} (${currentClanTag})`;
+    if (!skipFetch) fetchData().catch(() => {});
+  }
+
+  function renderOverview(rows) {
+    if (!rows || !rows.length) {
+      el("overview").className = "empty";
+      el("overview").textContent = "(geen data)";
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.innerHTML = `<thead><tr><th>Clan</th><th>Decks</th><th>Avg/deck</th><th>Projected</th><th>Boat</th><th>Medals</th></tr></thead>`;
+    const tbody = document.createElement("tbody");
+
+    rows.forEach((row, index) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="clanCell">${index + 1} ${row.name}</td>
+        <td><span class="deckPill">${row.decks_today}</span></td>
+        <td>${row.avg_per_deck.toFixed(2)}</td>
+        <td>${row.projected_total}</td>
+        <td>${row.boat_points}</td>
+        <td>${row.medals}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    const wrap = el("overview");
+    wrap.innerHTML = "";
+    wrap.className = "tableWrap";
+    wrap.appendChild(table);
+  }
+
+  async function fetchData() {
+    el("status").textContent = "Loading sandbox prototype...";
+    const res = await fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      el("status").textContent = `Error: ${data.error || "API failure"}`;
+      return;
+    }
+
+    renderOverview(data.overview_rows || []);
+
+    const now = new Date();
+    const day = raceDayFromTimestamp(now);
+    el("updated").textContent = formatLocalDateForLabel(now);
+    el("dayLabel").textContent = day ? `Day ${day}` : "Outside race days (Thu-Sun)";
+
+    // Placeholder: More advanced finish outlook logic from the current landing page is still pending.
+    el("clanAvg").textContent = [
+      `Clan: ${data.clan.name} (${data.clan.tag})`,
+      `Current total score: ${data.race_state.total_score}`,
+      `Decks today: ${data.race_state.decks_used_today}`,
+      `Avg/deck: ${data.race_state.avg_per_deck.toFixed(2)} (calculated as total score / decks today)`,
+      `Projected: ${data.race_state.projected_total}`,
+    ].join("\n");
+
+    const battlesLeft = Math.max(0, ((data.race_state.participants || 0) * 4) - (data.race_state.decks_used_today || 0));
+    el("battles").textContent = `Estimated decks left today: ${battlesLeft}`;
+    el("story").textContent = `${data.clan.name} heeft ${data.race_state.medals} medals + ${data.race_state.boat_points} boat = ${data.race_state.total_score} total score.`;
+
+    el("openClanWarning").style.display = data.is_open_clan ? "block" : "none";
+    el("status").textContent = "";
+  }
+
+  el("refresh").addEventListener("click", () => fetchData());
+
+  function init() {
+    renderClanButtons();
+    const params = new URLSearchParams(window.location.search);
+    setClan(params.get("clan") || DEFAULT_CLAN, true);
+    fetchData().catch(() => {});
+  }
+
+  init();
+</script>
+</body>
 </html>
