@@ -9,6 +9,7 @@ import requests
 ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 DEFAULT_CLAN_TAG = "9YP8UY"
 ALLOWED_CLANS = {"9YP8UY", "GPCLVLPP"}
+MAX_DECKS_PER_PLAYER = 4
 
 
 def normalize_tag(raw_tag: str) -> str:
@@ -26,6 +27,154 @@ def request_json(endpoint: str, api_key: str):
     )
     response.raise_for_status()
     return response.json() if response.content else {}
+
+
+def int_value(value, default=0):
+    try:
+        return int(value or 0)
+    except Exception:
+        return default
+
+
+def build_overview_rows(clans):
+    rows = []
+    for row in clans:
+        participants = row.get("participants", []) or []
+
+        # currentriverrace can contain duplicate participant rows for the same
+        # player in some race states. Deduplicate by tag so deck totals remain
+        # in the expected 0..200 range per clan.
+        participants_by_tag = {}
+        for participant in participants:
+            tag = str(participant.get("tag", "")).replace("#", "").strip()
+            if not tag:
+                continue
+
+            existing = participants_by_tag.get(tag)
+            if not existing:
+                participants_by_tag[tag] = participant
+                continue
+
+            if int_value(participant.get("decksUsed")) > int_value(existing.get("decksUsed")):
+                participants_by_tag[tag] = participant
+
+        unique_participants = list(participants_by_tag.values())
+
+        decks_used_today = sum(int_value(p.get("decksUsedToday")) for p in unique_participants)
+        decks_used_total = sum(int_value(p.get("decksUsed")) for p in unique_participants)
+        participant_count = len(unique_participants)
+        decks_total = participant_count * MAX_DECKS_PER_PLAYER
+        decks_remaining = max(0, decks_total - decks_used_today)
+
+        fame = int_value(row.get("fame"))
+        repair = int_value(row.get("repairPoints"))
+        # Match the main landing page semantics:
+        # - Boat column maps to repair points
+        # - Medals column maps to fame score
+        medals = fame
+
+        # Fame is cumulative for the active race period, so using total decks used
+        # gives a realistic avg/deck range (instead of only today's decks).
+        avg_source_decks = decks_used_total if decks_used_total > 0 else decks_used_today
+        avg_per_deck = round((medals / avg_source_decks), 2) if avg_source_decks > 0 else None
+        projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
+
+        rows.append(
+            {
+                "name": row.get("name", "-"),
+                "tag": row.get("tag", "-"),
+                "fame": fame,
+                "repair_points": repair,
+                "medals": medals,
+                "decks_used_today": decks_used_today,
+                "decks_used_total": decks_used_total,
+                "decks_total_today": decks_total,
+                "decks_remaining_today": decks_remaining,
+                "avg_medals_per_deck": avg_per_deck,
+                "projected_medals": projected,
+            }
+        )
+
+    rows.sort(key=lambda r: (r.get("medals", 0), r.get("projected_medals", 0)), reverse=True)
+    return rows
+
+
+def build_players(member_items, participant_rows):
+    participant_by_tag = {
+        str(item.get("tag", "")).replace("#", ""): item
+        for item in participant_rows
+        if item.get("tag")
+    }
+
+    players = []
+    for member in member_items:
+        clean_tag = str(member.get("tag", "")).replace("#", "")
+        participant = participant_by_tag.get(clean_tag, {})
+
+        decks_used_today = int_value(participant.get("decksUsedToday"))
+        decks_total_so_far = int_value(participant.get("decksUsed"))
+        fame = int_value(participant.get("fame"))
+        boat_attacks = int_value(participant.get("boatAttacks"))
+        attacks_left = max(0, MAX_DECKS_PER_PLAYER - decks_used_today)
+
+        players.append(
+            {
+                "name": member.get("name", ""),
+                "tag": member.get("tag", ""),
+                "role": member.get("role", ""),
+                "trophies": int_value(member.get("trophies")),
+                "fame": fame,
+                "boat_attacks": boat_attacks,
+                "decks_used_today": decks_used_today,
+                "decks_total_so_far": decks_total_so_far,
+                "attacks_left_today": attacks_left,
+            }
+        )
+
+    players.sort(key=lambda p: (p.get("fame", 0), p.get("decks_used_today", 0)), reverse=True)
+    return players
+
+
+def build_finish_outlook(clan_tag, overview_rows, players):
+    ours = None
+    for row in overview_rows:
+        if str(row.get("tag", "")).replace("#", "") == clan_tag:
+            ours = row
+            break
+
+    if not ours:
+        return {}
+
+    avg_values = [row.get("avg_medals_per_deck") for row in overview_rows if row.get("avg_medals_per_deck") is not None]
+    min_avg = min(avg_values) if avg_values else 0
+    max_avg = max(avg_values) if avg_values else 0
+
+    current_medals = int_value(ours.get("medals"))
+    remaining_decks = int_value(ours.get("decks_remaining_today"))
+    projected_finish = int_value(ours.get("projected_medals"))
+    best_finish = int(round(current_medals + (remaining_decks * max_avg)))
+    worst_finish = int(round(current_medals + (remaining_decks * min_avg)))
+
+    def rank_for(score: int):
+        better = sum(1 for row in overview_rows if int_value(row.get("projected_medals")) > score)
+        return better + 1
+
+    battles_left = sum(int_value(p.get("attacks_left_today")) for p in players)
+    duels_left = sum(1 for p in players if int_value(p.get("attacks_left_today")) >= 3)
+    total_players_participated = sum(1 for p in players if int_value(p.get("decks_used_today")) >= 1)
+
+    return {
+        "battles_left": battles_left,
+        "duels_left": duels_left,
+        "total_players_participated": total_players_participated,
+        "projected_rank": rank_for(projected_finish),
+        "projected_finish": projected_finish,
+        "best_rank": rank_for(best_finish),
+        "best_finish": best_finish,
+        "worst_rank": rank_for(worst_finish),
+        "worst_finish": worst_finish,
+        "model": "official_api_derived",
+    }
 
 
 class handler(BaseHTTPRequestHandler):
@@ -48,54 +197,13 @@ class handler(BaseHTTPRequestHandler):
             race_data = request_json(f"{ROYAL_API_BASE_URL}/clans/{encoded_tag}/currentriverrace", api_key)
 
             members = member_data.get("items", []) if isinstance(member_data, dict) else []
-            participant_rows = race_data.get("clan", {}).get("participants", []) if isinstance(race_data, dict) else []
-            participant_by_tag = {
-                str(item.get("tag", "")).replace("#", ""): item
-                for item in participant_rows
-                if item.get("tag")
-            }
+            race_clans = race_data.get("clans", []) if isinstance(race_data, dict) else []
+            own_clan = race_data.get("clan", {}) if isinstance(race_data, dict) else {}
+            participant_rows = own_clan.get("participants", []) if isinstance(own_clan, dict) else []
 
-            players = []
-            for member in members:
-                clean_tag = str(member.get("tag", "")).replace("#", "")
-                participant = participant_by_tag.get(clean_tag, {})
-                players.append(
-                    {
-                        "name": member.get("name", ""),
-                        "tag": member.get("tag", ""),
-                        "role": member.get("role", ""),
-                        "trophies": member.get("trophies", 0),
-                        "fame": participant.get("fame", 0),
-                        "repair_points": participant.get("repairPoints", 0),
-                        "boat_attacks": participant.get("boatAttacks", 0),
-                        "decks_used_today": participant.get("decksUsedToday", 0),
-                    }
-                )
-
-            players.sort(key=lambda p: (p.get("fame", 0), p.get("decks_used_today", 0)), reverse=True)
-
-            clan_war = race_data.get("clan", {}) if isinstance(race_data, dict) else {}
-            opponents = race_data.get("clans", []) if isinstance(race_data, dict) else []
-
-            overview_rows = []
-            for row in opponents:
-                participants = row.get("participants", []) or []
-                decks_used_today = sum(int(p.get("decksUsedToday") or 0) for p in participants)
-                participant_count = len(participants)
-                average_decks = round(decks_used_today / participant_count, 2) if participant_count else 0
-
-                overview_rows.append(
-                    {
-                        "name": row.get("name", "-"),
-                        "tag": row.get("tag", "-"),
-                        "fame": row.get("fame", 0),
-                        "repair_points": row.get("repairPoints", 0),
-                        "decks_used_today": decks_used_today,
-                        "average_decks": average_decks,
-                    }
-                )
-
-            overview_rows.sort(key=lambda r: (r.get("fame", 0), r.get("repair_points", 0)), reverse=True)
+            overview_rows = build_overview_rows(race_clans)
+            players = build_players(members, participant_rows)
+            finish_outlook = build_finish_outlook(clan_tag, overview_rows, players)
 
             is_open = str(clan_data.get("type", "")).lower() == "open"
 
@@ -108,22 +216,28 @@ class handler(BaseHTTPRequestHandler):
                         "name": clan_data.get("name", ""),
                         "tag": clan_data.get("tag", ""),
                         "type": clan_data.get("type", ""),
-                        "members": clan_data.get("members", 0),
-                        "clan_score": clan_data.get("clanScore", 0),
-                        "war_trophies": clan_data.get("clanWarTrophies", 0),
+                        "members": int_value(clan_data.get("members")),
+                        "clan_score": int_value(clan_data.get("clanScore")),
+                        "war_trophies": int_value(clan_data.get("clanWarTrophies")),
                         "description": clan_data.get("description", ""),
                     },
                     "race_state": {
                         "section_index": race_data.get("sectionIndex"),
                         "period_index": race_data.get("periodIndex"),
-                        "fame": clan_war.get("fame", 0),
-                        "repair_points": clan_war.get("repairPoints", 0),
+                        "fame": int_value(own_clan.get("fame")),
+                        "repair_points": int_value(own_clan.get("repairPoints")),
                         "participants": len(participant_rows),
-                        "decks_used_today": sum(int(p.get("decksUsedToday") or 0) for p in participant_rows),
+                        "decks_used_today": sum(int_value(p.get("decksUsedToday")) for p in participant_rows),
                     },
                     "overview_rows": overview_rows,
                     "players": players,
+                    "finish_outlook": finish_outlook,
                     "is_open_clan": is_open,
+                    "gaps": {
+                        "high_fame_day_cards": "not_directly_available",
+                        "cwstats_finish_model": "replaced_with_local_estimate",
+                        "colosseum_context": "not_directly_available",
+                    },
                 },
             )
         except requests.HTTPError as http_err:
