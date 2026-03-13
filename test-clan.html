@@ -160,7 +160,7 @@
         <td><span class="pill">${row.decks_used_today}/${row.decks_total_today}</span></td>
         <td>${row.avg_medals_per_deck != null ? row.avg_medals_per_deck.toFixed(2) : "-"}</td>
         <td>${row.projected_medals || "-"}</td>
-        <td>${row.repair_points || 0}</td>
+        <td>${row.boat_attacks || 0}</td>
         <td>${row.medals || 0}</td>`;
       tbody.appendChild(tr);
     });
