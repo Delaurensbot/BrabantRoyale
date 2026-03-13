@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Temporary Clan Member Test</title>
+  </head>
+  <body>
+    <h1>Temporary test: Clan #9YP8UY members</h1>
+
+    <!-- Simple status element for loading and error messages. -->
+    <p id="status">Loading member names...</p>
+
+    <!-- Plain list where we render only the player names. -->
+    <ul id="member-list"></ul>
+
+    <script>
+      // Fetch from our own internal API route so the key never reaches the browser.
+      async function loadMembers() {
+        const statusEl = document.getElementById('status');
+        const listEl = document.getElementById('member-list');
+
+        try {
+          const res = await fetch('/api/test-clan');
+          const data = await res.json();
+
+          if (!res.ok || !data.ok) {
+            throw new Error(data.error || 'Failed to load clan members.');
+          }
+
+          statusEl.textContent = '';
+
+          // Render only names as requested.
+          data.names.forEach((name) => {
+            const li = document.createElement('li');
+            li.textContent = name;
+            listEl.appendChild(li);
+          });
+        } catch (error) {
+          statusEl.textContent = `Error: ${error.message}`;
+        }
+      }
+
+      loadMembers();
+    </script>
+  </body>
+</html>
