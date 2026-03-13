@@ -8,6 +8,7 @@
 
 import argparse
 import math
+import os
 import re
 import sys
 from typing import List, Optional, Tuple, Dict, Set
@@ -27,6 +28,7 @@ KNOWN_ROLES = ["Leader", "Co-leader", "Elder", "Member"]
 ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil "Owner"
 
 UNREPLACEABLE_PENALTY = {0: 0, 1: 2, 2: 4, 3: 12}
+ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 
 
 def normalize_space(s: str) -> str:
@@ -620,59 +622,142 @@ def collect_analytics_data(
     analytics_url: str = ANALYTICS_URL_DEFAULT,
     members_url: str = CLAN_MEMBERS_URL_DEFAULT,
     top_n: int = 10,
+    clan_tag: str = DEFAULT_CLAN_TAG,
 ) -> Dict[str, object]:
-    tag_to_name_clean, name_clean_to_tag, tag_to_role = get_current_members_with_roles(members_url)
-    current_tags = set(tag_to_name_clean.keys())
-    if not current_tags:
-        raise RuntimeError("Could not extract current members from the clan page.")
+    del analytics_url, members_url  # Legacy args; analytics now uses official Clash Royale API.
 
-    html = fetch(analytics_url)
-    soup = BeautifulSoup(html, "html.parser")
+    api_key = os.environ.get("CLASH_ROYALE_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
 
-    contribution_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "C"})
-    decks_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "D"})
+    def api_get(path: str) -> Dict[str, object]:
+        url = f"{ROYAL_API_BASE_URL}{path}"
+        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Clash API error {resp.status_code} for {path}")
+        return resp.json() if resp.content else {}
 
-    if not contribution_table or not decks_table:
-        raise RuntimeError("Required tables not found on analytics page.")
+    norm_tag = clan_tag.strip().replace("#", "").upper()
+    encoded = f"%23{norm_tag}"
 
-    headers_c, rows_c, tags_c, names_c = parse_table_with_tag_or_name(contribution_table)
-    f_rows_c, f_tags_c, f_names_c = filter_rows_keep_alignment(
-        rows_c, tags_c, names_c, current_tags, name_clean_to_tag
-    )
-    contrib_headers, contrib_rows = add_role_column(
-        headers_c, f_rows_c, f_tags_c, f_names_c, name_clean_to_tag, tag_to_role
-    )
+    members_payload = api_get(f"/clans/{encoded}/members")
+    members = members_payload.get("items", [])
 
-    headers_d, rows_d, tags_d, names_d = parse_table_with_tag_or_name(decks_table)
-    f_rows_d, f_tags_d, f_names_d = filter_rows_keep_alignment(
-        rows_d, tags_d, names_d, current_tags, name_clean_to_tag
-    )
-    decks_headers, decks_rows = add_role_column(
-        headers_d, f_rows_d, f_tags_d, f_names_d, name_clean_to_tag, tag_to_role
-    )
+    role_map: Dict[str, str] = {}
+    player_print_map: Dict[str, str] = {}
+    known_players: Set[str] = set()
+    for item in members:
+        tag = (item.get("tag") or "").replace("#", "").upper()
+        if not tag:
+            continue
+        known_players.add(tag)
+        player_print_map[tag] = item.get("name") or tag
+        role_map[tag] = item.get("role") or ""
 
-    contrib_week_headers, _, contrib_map, decks_map, role_map, player_print_map = build_maps(
-        contrib_headers, contrib_rows, decks_headers, decks_rows
-    )
+    if not known_players:
+        raise RuntimeError("No clan members returned by Clash API.")
 
-    current_season, prev_season = detect_current_and_previous_season(contrib_week_headers)
+    # Collect weekly race snapshots: historic races + current race when available.
+    race_items: List[Dict[str, object]] = []
+    river_log = api_get(f"/clans/{encoded}/riverracelog")
+    race_items.extend(river_log.get("items", []))
+
+    try:
+        current_race = api_get(f"/clans/{encoded}/currentriverrace")
+        if current_race:
+            current_race["is_current"] = True
+            race_items.append(current_race)
+    except Exception:
+        pass
+
+    if not race_items:
+        raise RuntimeError("No river race data returned by Clash API.")
+
+    def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
+        created = str(race.get("createdDate") or "")
+        season = int(race.get("seasonId") or 0)
+        return (season, int(created[:8]) if created[:8].isdigit() else 0)
+
+    race_items.sort(key=race_sort_key)
+    last_10 = race_items[-10:]
+    week_headers: List[str] = []
+    contrib_map: Dict[str, Dict[str, int]] = {}
+    decks_map: Dict[str, Dict[str, int]] = {}
+
+    for idx, race in enumerate(last_10, 1):
+        season = race.get("seasonId") or "0"
+        section = race.get("sectionIndex") or idx
+        week_key = f"{season}-{section}"
+        week_headers.append(week_key)
+
+        standings = race.get("standings") or []
+        clans_blob = race.get("clans") or []
+        source_rows = []
+        if standings:
+            for s in standings:
+                clan = s.get("clan") or {}
+                if (clan.get("tag") or "").replace("#", "").upper() == norm_tag:
+                    # River race log usually nests participants under standing.clan.participants
+                    # (not directly under standing.participants).
+                    source_rows = clan.get("participants") or s.get("participants") or []
+                    break
+        elif clans_blob:
+            for c in clans_blob:
+                if (c.get("tag") or "").replace("#", "").upper() == norm_tag:
+                    source_rows = c.get("participants") or []
+                    break
+
+        for p in source_rows:
+            ptag = (p.get("tag") or "").replace("#", "").upper()
+            if not ptag or ptag not in known_players:
+                continue
+
+            player_print_map.setdefault(ptag, p.get("name") or ptag)
+            role_map.setdefault(ptag, "")
+            fame = int(p.get("fame") or 0)
+            repair = int(p.get("repairPoints") or 0)
+            contrib = fame + repair
+            decks = int(p.get("decksUsed") or 0)
+
+            contrib_map.setdefault(ptag, {})[week_key] = contrib
+            decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
+
+    # Ensure all known players exist in maps for frontend stability.
+    for ptag in known_players:
+        contrib_map.setdefault(ptag, {})
+        decks_map.setdefault(ptag, {})
+        player_print_map.setdefault(ptag, ptag)
+        role_map.setdefault(ptag, "")
+
+    current_season, prev_season = detect_current_and_previous_season(week_headers)
 
     mvp_current: List[Dict[str, str]] = []
     if current_season is not None:
-        weeks_current = [wh for wh in contrib_week_headers if season_of_week_header(wh) == current_season]
+        weeks_current = [wh for wh in week_headers if season_of_week_header(wh) == current_season]
         mvp_current = compute_mvp_list(
             weeks_current, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=False
         )
 
     mvp_previous: List[Dict[str, str]] = []
     if prev_season is not None:
-        weeks_prev = [wh for wh in contrib_week_headers if season_of_week_header(wh) == prev_season]
+        weeks_prev = [wh for wh in week_headers if season_of_week_header(wh) == prev_season]
         mvp_previous = compute_mvp_list(
             weeks_prev, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=True
         )
 
     ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
     promotion_candidates = build_promotion_candidates(contrib_map, decks_map, role_map, player_print_map)
+
+    contrib_headers = ["Player", "Role", "C", *week_headers]
+    decks_headers = ["Player", "Role", "D", *week_headers]
+    ordered_players = sorted(player_print_map.items(), key=lambda item: item[1].lower())
+
+    contrib_rows: List[List[str]] = []
+    decks_rows: List[List[str]] = []
+    for ptag, pname in ordered_players:
+        role = role_map.get(ptag, "")
+        contrib_rows.append([pname, role, "", *[str(contrib_map.get(ptag, {}).get(wh, "")) for wh in week_headers]])
+        decks_rows.append([pname, role, "", *[str(decks_map.get(ptag, {}).get(wh, "")) for wh in week_headers]])
 
     return {
         "mvp_current": mvp_current,
