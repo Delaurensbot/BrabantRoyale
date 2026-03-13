@@ -24,6 +24,24 @@ def parse_clan_from_query(path: str) -> str:
     return ""
 
 
+def classify_error(exc: Exception) -> tuple[int, str]:
+    message = str(exc)
+    lower = message.lower()
+
+    if "blocked by anti-bot" in lower or "cloudflare" in lower or "captcha" in lower:
+        return 502, "RoyaleAPI blocked this request (Cloudflare/anti-bot). Try again shortly."
+
+    if "network failure while fetching" in lower or "httpsconnectionpool" in lower or "proxy" in lower:
+        return 502, "Network/proxy error while contacting RoyaleAPI. Retry in a moment."
+
+    if "failed to fetch join-leave page" in lower:
+        if "http 403" in lower or "http 429" in lower:
+            return 502, "RoyaleAPI denied access to join history (HTTP 403/429). Try again later."
+        return 502, message
+
+    return 500, message
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -50,10 +68,15 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         except Exception as exc:
-            payload = {"ok": False, "error": str(exc)}
+            status_code, friendly_message = classify_error(exc)
+            payload = {
+                "ok": False,
+                "error": friendly_message,
+                "details": str(exc),
+            }
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-            self.send_response(500)
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
