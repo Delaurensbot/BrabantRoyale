@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from Royale_api import get_clan_config
-from war_analytics_metrics import collect_analytics_data, ANALYTICS_URL_DEFAULT, CLAN_MEMBERS_URL_DEFAULT
+from war_analytics_metrics import collect_analytics_data
 
 
 class handler(BaseHTTPRequestHandler):
@@ -15,9 +15,8 @@ class handler(BaseHTTPRequestHandler):
             clan_tag = params.get("clan", [""])[0]
             clan_config = get_clan_config(clan_tag)
             payload = collect_analytics_data(
-                analytics_url=clan_config.get("analytics_url", ANALYTICS_URL_DEFAULT),
-                members_url=clan_config.get("clan_url", CLAN_MEMBERS_URL_DEFAULT),
                 top_n=10,
+                clan_tag=clan_config.get("tag"),
             )
             payload["ok"] = True
             payload["generated_at"] = datetime.now(timezone.utc).isoformat()

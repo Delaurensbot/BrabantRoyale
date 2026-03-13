@@ -1,0 +1,112 @@
+# Analytics tables (official Clash Royale API version)
+
+This page now uses the **official Clash Royale API** (`proxy.royaleapi.dev/v1`) with server-side `CLASH_ROYALE_API_KEY`.
+
+## What we can retrieve directly
+
+- Clan members + roles: `GET /clans/%23{tag}/members`
+- Historic river races: `GET /clans/%23{tag}/riverracelog`
+- Current river race (if active/available): `GET /clans/%23{tag}/currentriverrace`
+
+For each participant per race we use:
+- `fame`
+- `repairPoints`
+- `decksUsed`
+- `tag`
+- `name`
+
+## Derived weekly model
+
+The official API does not expose the same RoyaleAPI analytics table format. We therefore build our own weekly dataset:
+
+- `week_key = "{seasonId}-{sectionIndex}"`
+- `contribution = fame + repairPoints`
+- `decks_used = clamp(decksUsed, 0..16)`
+- include only players that are in current clan members list
+- use latest 10 race snapshots (river race log + current race when available)
+
+## Table logic
+
+## 1) Huidig seizoen MVP (Top 10)
+- Current season = highest `seasonId` in available race snapshots.
+- For each player, only races in that season.
+- Played weekend if `Contribution > 0`.
+- If played, must have `Decks Used = 16`.
+- Score = sum of contribution over played races.
+- Top 10 descending by score.
+
+## 2) Vorig seizoen MVP (Top 10)
+- Previous season = second-highest `seasonId`.
+- Player must have, for every race in that season:
+  - `Contribution > 0`
+  - `Decks Used = 16`
+- Score = season contribution sum.
+- Top 10 descending by score.
+
+## 3) Promotie naar Elder
+- Role must be `member`.
+- Perfect streak >= 6 races (`D=16`).
+- Last 6 races all perfect.
+- Average contribution over played races >= 2500.
+- Sorted by streak desc, then avg contribution desc.
+
+## 4) Reliability / Ratio Score
+For each player over all available races:
+- Played race if `Contribution > 0`
+- Expected attacks = 16 per played race
+- `missing = 16 - decks_used`
+- `attacks_done += decks_used`
+- `missed_attacks += missing`
+- `avg_points = total_contribution / weeks_played`
+- `reliability = attacks_done / (weeks_played * 16) * 100`
+
+Penalty points:
+- miss 0 => +0
+- miss 1 => +2
+- miss 2 => +4
+- miss 3 => +12
+- miss >=4 => `missing * 4`
+
+## 5) Underperformers
+From ratio table:
+- `avg_points < 2400`
+- `reliability < 95`
+- meaningful stats required
+- `URGENT` badge if `missed_attacks >= 8` or `penalty_points >= 24`
+
+## 6) Watchlist A
+- `avg_points >= 2800`
+- `reliability < 95`
+- meaningful stats required
+
+## 7) Watchlist B/C
+Watchlist B:
+- `weeks_played >= 5`
+- `reliability >= 95`
+- `avg_points < 2400`
+- exclude protected player: `weeks_played == 10 && missed_attacks == 0 && avg_points >= 2200`
+
+Watchlist C (NEW):
+- `weeks_played < 5`
+- and (`reliability < 95` or `avg_points < 2400`)
+
+## 8) Overperformers
+- `avg_points >= 2800`
+- `reliability >= 95`
+- `missed_attacks <= 2`
+- `weeks_played >= 5`
+- sort: avg desc, reliability desc, missed asc
+
+## 9) Contribution table
+- Generated raw table from official API snapshots.
+- Columns: `Player, Role, C, <week_keys...>`
+- Cell value per week = `fame + repairPoints`.
+
+## 10) Decks Used table
+- Generated raw table from official API snapshots.
+- Columns: `Player, Role, D, <week_keys...>`
+- Cell value per week = clamped `decksUsed`.
+
+## Known limitation
+- The official endpoints do not provide the same RoyaleAPI war/analytics HTML history layout.
+- We can still build all 10 tables, but week columns now come from available race snapshots (`seasonId-sectionIndex`) and depend on how many races the API returns.
