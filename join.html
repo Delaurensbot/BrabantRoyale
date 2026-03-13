@@ -196,27 +196,29 @@
       el("errorBox").style.display = "none";
       el("status").textContent = `Bezig met laden voor ${clanName(currentClanTag)}...`;
 
-      const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) {
+      try {
+        const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&limit=10&t=${Date.now()}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.ok) {
+          const apiError = data.error || `API fout (${res.status})`;
+          const details = data.details ? ` Details: ${data.details}` : "";
+          el("status").textContent = "";
+          el("errorBox").style.display = "block";
+          el("errorBox").textContent = `${apiError}${details}`;
+          return;
+        }
+
+        joinData = (data.joins || []).slice(0, 10);
+        el("updated").textContent = new Date().toLocaleString();
+        el("countLabel").textContent = `${joinData.length} resultaten`;
+        el("status").textContent = "";
+        renderTable();
+      } catch (error) {
         el("status").textContent = "";
         el("errorBox").style.display = "block";
-        el("errorBox").textContent = `API fout (${res.status})`;
-        return;
+        el("errorBox").textContent = `Netwerkfout tijdens ophalen joins: ${error?.message || "onbekend"}`;
       }
-
-      const data = await res.json();
-      if (!data.ok) {
-        el("status").textContent = "";
-        el("errorBox").style.display = "block";
-        el("errorBox").textContent = data.error || "Onbekende fout";
-        return;
-      }
-
-      joinData = data.joins || [];
-      el("updated").textContent = new Date().toLocaleString();
-      el("countLabel").textContent = `${joinData.length} resultaten`;
-      el("status").textContent = "";
-      renderTable();
     }
 
     el("refresh").addEventListener("click", fetchData);
