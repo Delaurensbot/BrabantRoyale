@@ -15,3 +15,9 @@ Deze repo draait een simpele statische pagina met een Python Serverless Function
 5. Test in de browser:
    - `https://<project>.vercel.app/api/cwstats` moet JSON tonen.
    - `https://<project>.vercel.app` moet de pagina tonen en data ophalen.
+
+
+## Temporary clan member test route
+- API route: `/api/test-clan` (server-side Vercel Python function).
+- Temporary page: `/test-clan.html`.
+- Required environment variable: `CLASH_ROYALE_API_KEY` (set in Vercel project settings).
