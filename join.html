@@ -196,7 +196,7 @@
       el("errorBox").style.display = "none";
       el("status").textContent = `Bezig met laden voor ${clanName(currentClanTag)}...`;
 
-      const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
+      const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&limit=10&t=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) {
         el("status").textContent = "";
         el("errorBox").style.display = "block";
@@ -212,7 +212,7 @@
         return;
       }
 
-      joinData = data.joins || [];
+      joinData = (data.joins || []).slice(0, 10);
       el("updated").textContent = new Date().toLocaleString();
       el("countLabel").textContent = `${joinData.length} resultaten`;
       el("status").textContent = "";
