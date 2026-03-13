@@ -229,8 +229,10 @@
     const query = `?clan=${encodeURIComponent(currentClanTag)}`;
     const analyticsLink = el("analyticsLink");
     const joinLink = el("joinLink");
+    const testClanLink = el("testClanLink");
     if (analyticsLink) analyticsLink.href = `/analytics.html${query}`;
     if (joinLink) joinLink.href = `/join.html${query}`;
+    if (testClanLink) testClanLink.href = `/test-clan.html${query}`;
   }
 
   function updateClanLabel() {
