@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -25,8 +26,26 @@ HEADERS = {
 
 
 def fetch_html(session: requests.Session, url: str, timeout: int = 25) -> Tuple[int, str]:
-    r = session.get(url, headers=HEADERS, timeout=timeout)
-    return r.status_code, r.text
+    last_error: Optional[Exception] = None
+
+    for trust_env in (True, False):
+        session.trust_env = trust_env
+
+        for attempt in range(1, 4):
+            try:
+                r = session.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+                if r.status_code in {403, 429, 503} and attempt < 3:
+                    time.sleep(0.35 * attempt)
+                    continue
+                return r.status_code, r.text
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt < 3:
+                    time.sleep(0.35 * attempt)
+
+    if last_error is not None:
+        raise RuntimeError(f"Network failure while fetching {url}: {last_error}")
+    raise RuntimeError(f"Network failure while fetching {url}")
 
 
 def looks_blocked(html: str) -> bool:
