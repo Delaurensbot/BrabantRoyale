@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -25,8 +26,26 @@ HEADERS = {
 
 
 def fetch_html(session: requests.Session, url: str, timeout: int = 25) -> Tuple[int, str]:
-    r = session.get(url, headers=HEADERS, timeout=timeout)
-    return r.status_code, r.text
+    last_error: Optional[Exception] = None
+
+    for trust_env in (True, False):
+        session.trust_env = trust_env
+
+        for attempt in range(1, 4):
+            try:
+                r = session.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+                if r.status_code in {403, 429, 503} and attempt < 3:
+                    time.sleep(0.35 * attempt)
+                    continue
+                return r.status_code, r.text
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt < 3:
+                    time.sleep(0.35 * attempt)
+
+    if last_error is not None:
+        raise RuntimeError(f"Network failure while fetching {url}: {last_error}")
+    raise RuntimeError(f"Network failure while fetching {url}")
 
 
 def looks_blocked(html: str) -> bool:
@@ -115,6 +134,40 @@ def get_player_acc_level(
     return acc
 
 
+
+
+def parse_cw2_wins(page_text: str) -> Optional[str]:
+    patterns = [
+        r"\bClan\s*Wars?\s*2\s*Wins\s*(\d+)\b",
+        r"\bCW2\s*Wins\s*(\d+)\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, page_text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return None
+
+
+def collect_player_summary(pid: str) -> Dict[str, str]:
+    clean_pid = re.sub(r"[^A-Za-z0-9]", "", (pid or "").upper())
+    if not clean_pid:
+        raise RuntimeError("Missing or invalid player tag.")
+
+    with requests.Session() as session:
+        status, html = fetch_html(session, PLAYER_URL_TEMPLATE.format(pid=clean_pid))
+        if status != 200:
+            raise RuntimeError(f"Failed to fetch player page: HTTP {status}")
+        if looks_blocked(html):
+            raise RuntimeError("Blocked by anti-bot (Cloudflare/JS challenge).")
+
+        text = normalize_text(html)
+        return {
+            "pid": clean_pid,
+            "acc_lvl": parse_experience_level(text) or "-",
+            "cw2_wins": parse_cw2_wins(text) or "-",
+            "url": PLAYER_URL_TEMPLATE.format(pid=clean_pid),
+        }
+
 def print_table(rows: List[Dict[str, str]]) -> None:
     idx_w = 2
     name_w = max(4, min(22, max(len(r["name"]) for r in rows) if rows else 4))
@@ -150,6 +203,9 @@ def collect_join_data(limit: int = 10, clan_tag: str = DEFAULT_CLAN_TAG) -> Dict
 
     with requests.Session() as session:
         status, html = fetch_html(session, join_url)
+        if status in {403, 429}:
+            raise RuntimeError(f"Blocked by anti-bot (Cloudflare/HTTP {status}).")
+
         if status != 200:
             raise RuntimeError(f"Failed to fetch join-leave page: HTTP {status}")
 
@@ -157,10 +213,6 @@ def collect_join_data(limit: int = 10, clan_tag: str = DEFAULT_CLAN_TAG) -> Dict
             raise RuntimeError("Blocked by anti-bot (Cloudflare/JS challenge).")
 
         joins = parse_last_joins(html, limit=limit)
-
-        acc_cache: Dict[str, str] = {}
-        for r in joins:
-            r["acc_lvl"] = get_player_acc_level(session, r["pid"], acc_cache)
 
     return {
         "fetched_at": fetched_at,
