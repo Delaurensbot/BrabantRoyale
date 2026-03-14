@@ -37,6 +37,8 @@
     .status { margin-left: 4px; }
     .error { margin: 12px 0; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; }
+    .playerBtn { background:none; border:none; color:#bfffc8; padding:0; margin:0; box-shadow:none; text-decoration:underline; cursor:pointer; font:inherit; }
+    .detailsBox { margin-top: 12px; padding: 12px; border-radius: 12px; border: 1px solid rgba(116,255,141,0.35); background: rgba(116,255,141,0.08); display:none; }
   </style>
 </head>
 <body>
@@ -47,6 +49,7 @@
   <div class="muted">Laatste refresh: <span id="updated">-</span></div>
   <div class="clanSwitch" id="clanSwitch"></div>
   <div class="muted" id="clanLabel"></div>
+  <div class="muted" id="trackerNote">Join history now uses official API member snapshots. New joins appear after they are observed.</div>
   <div class="top" style="margin-top: 10px;">
     <button id="refresh">Refresh</button>
     <div class="muted status" id="status"></div>
@@ -59,8 +62,7 @@
       <div class="muted" id="countLabel"></div>
     </div>
     <div class="filters">
-      <input id="search" type="search" placeholder="Filter op naam, tag of level..." />
-      <input id="minLevel" type="number" min="1" max="100" placeholder="Min. level" />
+      <input id="search" type="search" placeholder="Filter op naam of tag..." />
     </div>
     <div class="tableWrap">
       <table id="joinTable">
@@ -70,15 +72,15 @@
             <th>Speler</th>
             <th>Player ID</th>
             <th>Gejoind</th>
-            <th>Account level</th>
-            <th>Link</th>
+            <th>Details</th>
           </tr>
         </thead>
         <tbody id="joinRows">
-          <tr><td colspan="6" style="text-align:center; padding: 16px;">(laden...)</td></tr>
+          <tr><td colspan="5" style="text-align:center; padding: 16px;">(laden...)</td></tr>
         </tbody>
       </table>
     </div>
+    <div class="detailsBox" id="playerDetails"></div>
   </div>
 
   <script>
@@ -150,15 +152,10 @@
     function renderTable() {
       const tbody = el("joinRows");
       const search = (el("search").value || "").toLowerCase();
-      const minLevelRaw = el("minLevel").value;
-      const minLevel = minLevelRaw ? parseInt(minLevelRaw, 10) : null;
 
       const filtered = joinData.filter((row) => {
-        const haystack = `${row.name} ${row.pid} ${row.acc_lvl || ''}`.toLowerCase();
-        const passSearch = !search || haystack.includes(search);
-        const lvl = parseInt(row.acc_lvl || "0", 10);
-        const passLevel = minLevel ? lvl >= minLevel : true;
-        return passSearch && passLevel;
+        const haystack = `${row.name} ${row.pid}`.toLowerCase();
+        return !search || haystack.includes(search);
       });
 
       tbody.innerHTML = "";
@@ -166,7 +163,7 @@
       if (!filtered.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 6;
+        td.colSpan = 5;
         td.style.textAlign = "center";
         td.style.padding = "16px";
         td.textContent = "Geen resultaten";
@@ -180,49 +177,85 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${idx + 1}</td>
-          <td>${row.name}</td>
+          <td><button class="playerBtn" data-pid="${row.pid}">${row.name}</button></td>
           <td><span class="pill">${row.pid}</span></td>
           <td>${row.ago}</td>
-          <td>${row.acc_lvl || "-"}</td>
-          <td><a href="${row.url}" target="_blank" rel="noreferrer noopener">Open</a></td>
+          <td><button class="playerBtn" data-pid="${row.pid}">Bekijk</button></td>
         `;
         tbody.appendChild(tr);
       });
 
+      tbody.querySelectorAll('.playerBtn').forEach((btn) => {
+        btn.addEventListener('click', () => showPlayerDetails(btn.dataset.pid));
+      });
+
       el("countLabel").textContent = `${filtered.length} resultaten`;
+    }
+
+    async function showPlayerDetails(pid) {
+      const box = el("playerDetails");
+      box.style.display = "block";
+      box.textContent = `Laden speler ${pid}...`;
+
+      try {
+        const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(pid)}&t=${Date.now()}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.ok || !data.player) {
+          const apiError = data.error || `API fout (${res.status})`;
+          box.textContent = `Kon spelerdetails niet ophalen: ${apiError}`;
+          return;
+        }
+
+        const p = data.player;
+        box.innerHTML = `
+          <strong>${pid}</strong><br>
+          Account level: <strong>${p.acc_lvl || "-"}</strong><br>
+          Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong>
+        `;
+      } catch (error) {
+        box.textContent = `Netwerkfout bij spelerdetails: ${error?.message || "onbekend"}`;
+      }
     }
 
     async function fetchData() {
       el("errorBox").style.display = "none";
       el("status").textContent = `Bezig met laden voor ${clanName(currentClanTag)}...`;
 
-      const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) {
+      try {
+        const res = await fetch(`/api/join_data?clan=${encodeURIComponent(currentClanTag)}&limit=10&t=${Date.now()}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.ok) {
+          const apiError = data.error || `API fout (${res.status})`;
+          const detailsText = (data.details || "").trim();
+          const hasDistinctDetails = detailsText && detailsText !== apiError;
+          const details = hasDistinctDetails ? ` Details: ${detailsText}` : "";
+          el("status").textContent = "";
+          el("errorBox").style.display = "block";
+          el("errorBox").textContent = `${apiError}${details}`;
+          return;
+        }
+
+        joinData = (data.joins || []).slice(0, 10);
+        if (data.note) {
+          const noteEl = el("trackerNote");
+          if (noteEl) noteEl.textContent = data.note;
+        }
+        el("updated").textContent = new Date().toLocaleString();
+        el("countLabel").textContent = `${joinData.length} resultaten`;
+        el("status").textContent = "";
+        renderTable();
+      } catch (error) {
         el("status").textContent = "";
         el("errorBox").style.display = "block";
-        el("errorBox").textContent = `API fout (${res.status})`;
-        return;
+        el("errorBox").textContent = `Netwerkfout tijdens ophalen joins: ${error?.message || "onbekend"}`;
       }
-
-      const data = await res.json();
-      if (!data.ok) {
-        el("status").textContent = "";
-        el("errorBox").style.display = "block";
-        el("errorBox").textContent = data.error || "Onbekende fout";
-        return;
-      }
-
-      joinData = data.joins || [];
-      el("updated").textContent = new Date().toLocaleString();
-      el("countLabel").textContent = `${joinData.length} resultaten`;
-      el("status").textContent = "";
-      renderTable();
     }
 
     el("refresh").addEventListener("click", fetchData);
     el("search").addEventListener("input", renderTable);
-    el("minLevel").addEventListener("input", renderTable);
-
+    
     function init() {
       renderClanButtons();
       const params = new URLSearchParams(window.location.search);
