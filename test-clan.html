@@ -105,6 +105,11 @@
       <div class="cardHead"><div class="title">Known gaps (direct API)</div></div>
       <pre id="gaps">(loading...)</pre>
     </div>
+
+    <div class="card fullRow">
+      <div class="cardHead"><div class="title">Today fame scoreboard (players who played today)</div></div>
+      <div id="todayFame" class="empty">(loading...)</div>
+    </div>
   </div>
 
 <script>
@@ -160,7 +165,7 @@
         <td><span class="pill">${row.decks_used_today}/${row.decks_total_today}</span></td>
         <td>${row.avg_medals_per_deck != null ? row.avg_medals_per_deck.toFixed(2) : "-"}</td>
         <td>${row.projected_medals || "-"}</td>
-        <td>${row.repair_points || 0}</td>
+        <td>${row.boat_points || 0}</td>
         <td>${row.medals || 0}</td>`;
       tbody.appendChild(tr);
     });
@@ -231,6 +236,35 @@
     wrap.appendChild(table);
   }
 
+  function renderTodayFame(players) {
+    const activePlayers = (players || [])
+      .filter((player) => Number(player.decks_used_today || 0) > 0)
+      .sort((a, b) => Number(b.fame || 0) - Number(a.fame || 0));
+
+    if (!activePlayers.length) {
+      el("todayFame").className = "empty";
+      el("todayFame").textContent = "(nog geen spelers met decks used today)";
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.className = "playersTable";
+    table.innerHTML = `<thead><tr><th>#</th><th>Name</th><th>Decks used today</th><th>Fame today</th></tr></thead>`;
+    const tbody = document.createElement("tbody");
+
+    activePlayers.forEach((player, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${idx + 1}</td><td>${player.name} <span class="badge">${player.tag}</span></td><td>${player.decks_used_today || 0}</td><td>${player.fame || 0}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    const wrap = el("todayFame");
+    wrap.innerHTML = "";
+    wrap.className = "";
+    wrap.appendChild(table);
+  }
+
   function makeRiskText(players) {
     const buckets = { 3: [], 2: [], 1: [] };
     players.forEach((p) => {
@@ -282,6 +316,7 @@
     const players = data.players || [];
     renderOverview(rows);
     renderPlayers(players);
+    renderTodayFame(players);
     renderFinishOutlook(data.finish_outlook || {}, rows.length);
 
     const current = rows.find((r) => (r.tag || "").replace("#", "") === currentClanTag) || {};
@@ -289,7 +324,7 @@
       `Clan avg --> Projected`,
       `${current.name || CLANS[currentClanTag].name} ${current.avg_medals_per_deck != null ? current.avg_medals_per_deck.toFixed(2) : "-"} --> ${current.projected_medals || "-"}`,
       `Members: ${data.clan.members || 0} | War trophies: ${data.clan.war_trophies || 0}`,
-      `Current medals model: fame + repair = ${(data.race_state.fame || 0) + (data.race_state.repair_points || 0)}`,
+      `Current medals model: total fame from players with decks used today = ${current.medals || 0}`,
     ].join("\n\n");
 
     el("risk").textContent = makeRiskText(players);
@@ -302,7 +337,7 @@
     el("gaps").textContent = [
       "- Day 1 800+ en Day 4 last chance blokken blijven placeholder (dag-context en historische race details niet 1-op-1 in currentriverrace endpoint).",
       "- Colosseum-weekend specifieke detectie blijft placeholder zonder cwstats scrape-context.",
-      "- Current medals op echte landing kan per bron verschillen; in dit prototype gebruiken we fame+repair als direct reproduceerbaar model.",
+      "- Current medals in dit prototype = som van speler-fame van deelnemers met minimaal 1 deck vandaag; Boat toont boat points (repairPoints).",
       "- Projected/best/worst finish is lokaal berekend i.p.v. cwstats direct geïmporteerd.",
     ].join("\n");
 
