@@ -1,9 +1,12 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+from typing import Dict, List, Tuple
 from urllib.parse import parse_qs, urlparse
 
 import requests
+
+from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
 
 ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 
@@ -16,13 +19,57 @@ def parse_player_from_query(path: str) -> str:
     return ""
 
 
+def parse_clan_from_query(path: str) -> str:
+    parsed = urlparse(path)
+    params = parse_qs(parsed.query)
+    if "clan" in params and params["clan"]:
+        return params["clan"][0]
+    return ""
+
+
 def normalize_player_tag(raw_tag: str) -> str:
     clean = (raw_tag or "").replace("#", "").replace("%23", "")
     clean = "".join(ch for ch in clean if ch.isalnum())
     return clean.upper()
 
 
-def fetch_player_summary(pid: str) -> dict:
+def parse_created_date_sort_key(created_date: str) -> int:
+    stamp = (created_date or "")[:8]
+    return int(stamp) if stamp.isdigit() else 0
+
+
+def find_player_weekend_stats(race: Dict[str, object], clan_tag: str, player_tag: str) -> Tuple[int, int] | None:
+    standings = race.get("standings") or []
+    clans_blob = race.get("clans") or []
+    source_rows: List[Dict[str, object]] = []
+
+    if standings:
+        for standing in standings:
+            clan = standing.get("clan") or {}
+            if normalize_player_tag(str(clan.get("tag") or "")) == clan_tag:
+                source_rows = clan.get("participants") or standing.get("participants") or []
+                break
+    elif clans_blob:
+        for clan in clans_blob:
+            if normalize_player_tag(str(clan.get("tag") or "")) == clan_tag:
+                source_rows = clan.get("participants") or []
+                break
+
+    for participant in source_rows:
+        participant_tag = normalize_player_tag(str(participant.get("tag") or ""))
+        if participant_tag != player_tag:
+            continue
+
+        fame = int(participant.get("fame") or 0)
+        repair_points = int(participant.get("repairPoints") or 0)
+        contribution = fame + repair_points
+        decks_used = max(0, min(16, int(participant.get("decksUsed") or 0)))
+        return contribution, decks_used
+
+    return None
+
+
+def fetch_player_summary(pid: str, clan_tag: str) -> dict:
     api_key = os.environ.get("CLASH_ROYALE_API_KEY")
     if not api_key:
         raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
@@ -30,6 +77,9 @@ def fetch_player_summary(pid: str) -> dict:
     clean_pid = normalize_player_tag(pid)
     if not clean_pid:
         raise RuntimeError("Missing or invalid player tag.")
+
+    clan_config = get_clan_config(clan_tag or DEFAULT_CLAN_TAG)
+    norm_clan_tag = clan_config["tag"]
 
     endpoint = f"{ROYAL_API_BASE_URL}/players/%23{clean_pid}"
     response = requests.get(
@@ -41,11 +91,61 @@ def fetch_player_summary(pid: str) -> dict:
         raise RuntimeError(f"Clash API error {response.status_code} for /players/%23{clean_pid}")
 
     data = response.json() if response.content else {}
+
+    encoded_clan_tag = f"%23{norm_clan_tag}"
+    race_log_endpoint = f"{ROYAL_API_BASE_URL}/clans/{encoded_clan_tag}/riverracelog"
+    race_log_response = requests.get(
+        race_log_endpoint,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=25,
+    )
+    if race_log_response.status_code != 200:
+        raise RuntimeError(f"Clash API error {race_log_response.status_code} for /clans/{encoded_clan_tag}/riverracelog")
+
+    race_items = (race_log_response.json() if race_log_response.content else {}).get("items", [])
+
+    current_race_endpoint = f"{ROYAL_API_BASE_URL}/clans/{encoded_clan_tag}/currentriverrace"
+    current_race_response = requests.get(
+        current_race_endpoint,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=25,
+    )
+    if current_race_response.status_code == 200:
+        current_race = current_race_response.json() if current_race_response.content else {}
+        if current_race:
+            race_items.append(current_race)
+
+    race_items.sort(
+        key=lambda race: (
+            int(race.get("seasonId") or 0),
+            parse_created_date_sort_key(str(race.get("createdDate") or "")),
+        )
+    )
+
+    war_history = []
+    for race in race_items:
+        season = int(race.get("seasonId") or 0)
+        section = int(race.get("sectionIndex") or 0)
+        week_key = f"{season}-{section}"
+        stats = find_player_weekend_stats(race, norm_clan_tag, clean_pid)
+        if not stats:
+            continue
+        contribution, decks_used = stats
+        war_history.append(
+            {
+                "week": week_key,
+                "contribution": contribution,
+                "decks_used": decks_used,
+            }
+        )
+
     return {
         "pid": clean_pid,
         "acc_lvl": str(data.get("expLevel") or "-"),
         "cw2_wins": str(data.get("warDayWins") or 0),
         "url": f"https://royaleapi.com/player/{clean_pid}",
+        "clan_tag": norm_clan_tag,
+        "war_history": war_history,
     }
 
 
@@ -72,7 +172,8 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             pid = parse_player_from_query(self.path)
-            data = fetch_player_summary(pid)
+            clan_tag = parse_clan_from_query(self.path)
+            data = fetch_player_summary(pid, clan_tag=clan_tag)
 
             payload = {
                 "ok": True,
