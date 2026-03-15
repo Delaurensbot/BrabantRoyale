@@ -45,9 +45,8 @@ def build_overview_rows(clans):
         decks_total = participant_count * MAX_DECKS_PER_PLAYER
         decks_remaining = max(0, decks_total - decks_used)
 
-        fame = int_value(row.get("fame"))
-        repair = int_value(row.get("repairPoints"))
-        medals = fame + repair
+        medals = int_value(row.get("fame"))
+        boat_points = int_value(row.get("repairPoints"))
 
         avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
         projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
@@ -56,8 +55,8 @@ def build_overview_rows(clans):
             {
                 "name": row.get("name", "-"),
                 "tag": row.get("tag", "-"),
-                "fame": fame,
-                "repair_points": repair,
+                "fame": medals,
+                "boat_points": boat_points,
                 "medals": medals,
                 "decks_used_today": decks_used,
                 "decks_total_today": decks_total,
@@ -85,7 +84,7 @@ def build_players(member_items, participant_rows):
 
         decks_used_today = int_value(participant.get("decksUsedToday"))
         decks_total_so_far = int_value(participant.get("decksUsed"))
-        fame = int_value(participant.get("fame"))
+        fame_total = int_value(participant.get("fame"))
         boat_attacks = int_value(participant.get("boatAttacks"))
         attacks_left = max(0, MAX_DECKS_PER_PLAYER - decks_used_today)
 
@@ -95,7 +94,8 @@ def build_players(member_items, participant_rows):
                 "tag": member.get("tag", ""),
                 "role": member.get("role", ""),
                 "trophies": int_value(member.get("trophies")),
-                "fame": fame,
+                "fame": fame_total,
+                "fame_total": fame_total,
                 "boat_attacks": boat_attacks,
                 "decks_used_today": decks_used_today,
                 "decks_total_so_far": decks_total_so_far,
@@ -197,7 +197,7 @@ class handler(BaseHTTPRequestHandler):
                         "section_index": race_data.get("sectionIndex"),
                         "period_index": race_data.get("periodIndex"),
                         "fame": int_value(own_clan.get("fame")),
-                        "repair_points": int_value(own_clan.get("repairPoints")),
+                        "boat_points": int_value(own_clan.get("repairPoints")),
                         "participants": len(participant_rows),
                         "decks_used_today": sum(int_value(p.get("decksUsedToday")) for p in participant_rows),
                     },
