@@ -303,6 +303,13 @@ def parse_int_cell(cell: str) -> Optional[int]:
     return int(c)
 
 
+def row_total_for_weeks(week_values: Dict[str, int], week_headers: List[str]) -> int:
+    total = 0
+    for wh in week_headers:
+        total += int(week_values.get(wh, 0) or 0)
+    return total
+
+
 def season_of_week_header(wh: str) -> Optional[int]:
     m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", wh)
     if not m:
@@ -756,8 +763,12 @@ def collect_analytics_data(
     decks_rows: List[List[str]] = []
     for ptag, pname in ordered_players:
         role = role_map.get(ptag, "")
-        contrib_rows.append([pname, role, "", *[str(contrib_map.get(ptag, {}).get(wh, "")) for wh in week_headers]])
-        decks_rows.append([pname, role, "", *[str(decks_map.get(ptag, {}).get(wh, "")) for wh in week_headers]])
+        per_week_contrib = contrib_map.get(ptag, {})
+        per_week_decks = decks_map.get(ptag, {})
+        total_contrib = row_total_for_weeks(per_week_contrib, week_headers)
+        total_decks = row_total_for_weeks(per_week_decks, week_headers)
+        contrib_rows.append([pname, role, str(total_contrib), *[str(per_week_contrib.get(wh, "")) for wh in week_headers]])
+        decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
 
     return {
         "mvp_current": mvp_current,
