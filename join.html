@@ -198,7 +198,7 @@
       box.textContent = `Laden speler ${pid}...`;
 
       try {
-        const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(pid)}&t=${Date.now()}`, { cache: "no-store" });
+        const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(pid)}&clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok || !data.ok || !data.player) {
@@ -208,10 +208,27 @@
         }
 
         const p = data.player;
+        const historyRows = ((p.total_war_history && p.total_war_history.length) ? p.total_war_history : (p.war_history || []))
+          .slice()
+          .reverse();
+
+        const warRows = historyRows
+          .map((row) => {
+            const clanLabel = row.clan_tag || p.clan_tag || currentClanTag;
+            return `<tr><td>${row.week}</td><td>${clanLabel}</td><td>${row.contribution}</td><td>${row.decks_used}</td></tr>`;
+          })
+          .join("");
+
+        const historyNote = p.history_note ? `<div class="muted" style="margin-top:6px;">${p.history_note}</div>` : "";
+        const warTable = warRows
+          ? `<div style="margin-top:10px;"><strong>Totale war geschiedenis (zichtbaar na klik)</strong>${historyNote}<table style="margin-top:8px;"><thead><tr><th>Weekend</th><th>Clan</th><th>Fame/Contribution</th><th>Decks used</th></tr></thead><tbody>${warRows}</tbody></table></div>`
+          : `<div style="margin-top:10px;" class="muted">Geen war weekends gevonden voor deze speler.</div>`;
+
         box.innerHTML = `
           <strong>${pid}</strong><br>
           Account level: <strong>${p.acc_lvl || "-"}</strong><br>
           Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong>
+          ${warTable}
         `;
       } catch (error) {
         box.textContent = `Netwerkfout bij spelerdetails: ${error?.message || "onbekend"}`;
