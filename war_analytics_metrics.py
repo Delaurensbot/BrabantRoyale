@@ -482,6 +482,13 @@ def average_contribution(per_week_contrib: Dict[str, int]) -> float:
     return round(sum(played_weeks) / len(played_weeks), 2)
 
 
+def format_average_contribution(per_week_contrib: Dict[str, int]) -> str:
+    avg = average_contribution(per_week_contrib)
+    if avg.is_integer():
+        return str(int(avg))
+    return f"{avg:.2f}".rstrip("0").rstrip(".")
+
+
 def build_promotion_candidates(
     contrib_map: Dict[str, Dict[str, int]],
     decks_map: Dict[str, Dict[str, int]],
@@ -755,7 +762,7 @@ def collect_analytics_data(
     ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
     promotion_candidates = build_promotion_candidates(contrib_map, decks_map, role_map, player_print_map)
 
-    contrib_headers = ["Player", "Role", "C", *week_headers]
+    contrib_headers = ["Player", "Role", "C", "Avg C", *week_headers]
     decks_headers = ["Player", "Role", "D", *week_headers]
     ordered_players = sorted(player_print_map.items(), key=lambda item: item[1].lower())
 
@@ -767,7 +774,13 @@ def collect_analytics_data(
         per_week_decks = decks_map.get(ptag, {})
         total_contrib = row_total_for_weeks(per_week_contrib, week_headers)
         total_decks = row_total_for_weeks(per_week_decks, week_headers)
-        contrib_rows.append([pname, role, str(total_contrib), *[str(per_week_contrib.get(wh, "")) for wh in week_headers]])
+        contrib_rows.append([
+            pname,
+            role,
+            str(total_contrib),
+            format_average_contribution(per_week_contrib),
+            *[str(per_week_contrib.get(wh, "")) for wh in week_headers],
+        ])
         decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
 
     return {
