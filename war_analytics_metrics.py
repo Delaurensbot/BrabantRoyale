@@ -687,22 +687,45 @@ def collect_analytics_data(
     if not race_items:
         raise RuntimeError("No river race data returned by Clash API.")
 
+    def to_pos_int(value: object) -> Optional[int]:
+        try:
+            ivalue = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        return ivalue if ivalue > 0 else None
+
     def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
         created = str(race.get("createdDate") or "")
         season = int(race.get("seasonId") or 0)
         return (season, int(created[:8]) if created[:8].isdigit() else 0)
 
     race_items.sort(key=race_sort_key)
-    last_10 = race_items[-10:]
-    week_headers: List[str] = []
+
+    # Build stable week keys from seasonId-sectionIndex and deduplicate snapshots
+    # for the same week (e.g. river race log + current race overlap).
+    #
+    # The official API can occasionally omit `sectionIndex` on one payload; in
+    # that case we infer it by sequence within the season, which prevents invalid
+    # keys like "130-9" and keeps week ordering consistent with RoyaleAPI.
+    inferred_section_by_season: Dict[int, int] = {}
+    race_by_week_key: Dict[str, Dict[str, object]] = {}
+
+    for race in race_items:
+        season = to_pos_int(race.get("seasonId")) or 0
+        section = to_pos_int(race.get("sectionIndex"))
+        if section is None:
+            section = inferred_section_by_season.get(season, 0) + 1
+        inferred_section_by_season[season] = max(inferred_section_by_season.get(season, 0), section)
+
+        week_key = f"{season}-{section}"
+        race_by_week_key[week_key] = race
+
+    week_headers = sorted(race_by_week_key.keys(), key=parse_week_key)[-10:]
     contrib_map: Dict[str, Dict[str, int]] = {}
     decks_map: Dict[str, Dict[str, int]] = {}
 
-    for idx, race in enumerate(last_10, 1):
-        season = race.get("seasonId") or "0"
-        section = race.get("sectionIndex") or idx
-        week_key = f"{season}-{section}"
-        week_headers.append(week_key)
+    for week_key in week_headers:
+        race = race_by_week_key[week_key]
 
         standings = race.get("standings") or []
         clans_blob = race.get("clans") or []
