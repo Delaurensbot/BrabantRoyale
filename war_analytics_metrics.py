@@ -653,6 +653,8 @@ def collect_analytics_data(
     role_map: Dict[str, str] = {}
     player_print_map: Dict[str, str] = {}
     known_players: Set[str] = set()
+    member_levels: List[int] = []
+    member_trophies: List[int] = []
     for item in members:
         tag = (item.get("tag") or "").replace("#", "").upper()
         if not tag:
@@ -660,6 +662,12 @@ def collect_analytics_data(
         known_players.add(tag)
         player_print_map[tag] = item.get("name") or tag
         role_map[tag] = item.get("role") or ""
+        exp_level = item.get("expLevel")
+        if isinstance(exp_level, int):
+            member_levels.append(exp_level)
+        trophies = item.get("trophies")
+        if isinstance(trophies, int):
+            member_trophies.append(trophies)
 
     if not known_players:
         raise RuntimeError("No clan members returned by Clash API.")
@@ -770,6 +778,45 @@ def collect_analytics_data(
         contrib_rows.append([pname, role, str(total_contrib), *[str(per_week_contrib.get(wh, "")) for wh in week_headers]])
         decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
 
+    total_players = len(ordered_players)
+    total_week_entries = total_players * len(week_headers)
+    total_contrib_all = sum(row_total_for_weeks(contrib_map.get(ptag, {}), week_headers) for ptag, _ in ordered_players)
+    total_decks_all = sum(row_total_for_weeks(decks_map.get(ptag, {}), week_headers) for ptag, _ in ordered_players)
+    active_week_entries = sum(
+        1
+        for ptag, _ in ordered_players
+        for wh in week_headers
+        if int(contrib_map.get(ptag, {}).get(wh, 0) or 0) > 0
+    )
+    colosseum_weeks = [wh for wh in week_headers if parse_week_key(wh)[1] == 4]
+    total_colosseum_score = sum(
+        int(contrib_map.get(ptag, {}).get(wh, 0) or 0)
+        for ptag, _ in ordered_players
+        for wh in colosseum_weeks
+    )
+    avg_level = round(sum(member_levels) / len(member_levels), 2) if member_levels else 0
+    avg_trophies = round(sum(member_trophies) / len(member_trophies), 2) if member_trophies else 0
+    avg_weekend_score = round(total_contrib_all / total_players, 2) if total_players else 0
+    avg_day_score = round(total_contrib_all / total_week_entries, 2) if total_week_entries else 0
+    avg_colosseum_score = round(total_colosseum_score / total_players, 2) if total_players and colosseum_weeks else 0
+    avg_played_week_score = round(total_contrib_all / active_week_entries, 2) if active_week_entries else 0
+    avg_decks_played_week = round(total_decks_all / active_week_entries, 2) if active_week_entries else 0
+
+    metadata_table = {
+        "headers": ["Metric", "Value", "Notes"],
+        "rows": [
+            ["Clan members", str(total_players), "Current members included in analytics"],
+            ["Average player level", f"{avg_level}", "Based on expLevel from clan members endpoint"],
+            ["Average trophies", f"{avg_trophies}", "Based on current trophies of clan members"],
+            ["Average weekend score (Contribution)", f"{avg_weekend_score}", "Total contribution across loaded weeks ÷ member count"],
+            ["Average day/week score per player", f"{avg_day_score}", "Total contribution ÷ (members × loaded weeks)"],
+            ["Average colosseum score", f"{avg_colosseum_score}", "Average contribution in sectionIndex 4 weeks when available"],
+            ["Average played-week score", f"{avg_played_week_score}", "Average contribution for played weeks only (Contribution > 0)"],
+            ["Average decks used (played weeks)", f"{avg_decks_played_week}", "Decks used average when a player had Contribution > 0"],
+            ["Loaded race weeks", str(len(week_headers)), "Up to 10 latest river race snapshots"],
+        ],
+    }
+
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
@@ -777,6 +824,7 @@ def collect_analytics_data(
         "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+        "metadata_table": metadata_table,
     }
 
 
