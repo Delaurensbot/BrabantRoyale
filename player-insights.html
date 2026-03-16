@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Speler insights</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --text: #eef2ff;
+      --muted: rgba(238, 242, 255, 0.76);
+      --card: rgba(22, 26, 40, 0.9);
+      --card-border: rgba(177, 92, 255, 0.28);
+      --green: #74ff8d;
+    }
+    body { font-family: system-ui, Arial; max-width: 1000px; margin: 28px auto; padding: 0 16px; color: var(--text); background: radial-gradient(circle at 20% 12%, rgba(177, 92, 255, 0.3), transparent 36%), radial-gradient(circle at 76% 0%, rgba(116, 255, 141, 0.24), transparent 28%), linear-gradient(165deg, #141829, #0c0e16); }
+    .top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .muted { color: var(--muted); }
+    .card { border-radius: 16px; padding: 16px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); margin-bottom: 16px; }
+    .title { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: linear-gradient(145deg, rgba(177, 92, 255, 0.22), rgba(116, 255, 141, 0.08)); color: inherit; cursor: pointer; }
+    button:hover { border-color: rgba(116, 255, 141, 0.85); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    th { background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); }
+    .error { margin: 10px 0; padding: 12px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display: none; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1 style="margin:0;">Speler details</h1>
+    <a class="muted" href="/index.html">← Terug naar dashboard</a>
+  </div>
+
+  <div class="card">
+    <div class="title" id="playerTitle">Speler #JGYG89QG</div>
+    <div class="top">
+      <button id="loadBtn">Laad spelergegevens</button>
+      <div class="muted" id="status"></div>
+    </div>
+    <div class="error" id="errorBox"></div>
+    <div id="summary" class="muted">Klik op de knop om data op te halen.</div>
+  </div>
+
+  <div class="card">
+    <div class="title">Volledige clan geschiedenis</div>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Clan tag</th>
+          <th>Clan naam</th>
+          <th>Joined</th>
+          <th>Left</th>
+        </tr>
+      </thead>
+      <tbody id="historyRows">
+        <tr><td colspan="5" class="muted">Nog geen data geladen.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const PLAYER_TAG = 'JGYG89QG';
+    const el = (id) => document.getElementById(id);
+
+    function setError(msg) {
+      const box = el('errorBox');
+      if (!msg) {
+        box.style.display = 'none';
+        box.textContent = '';
+        return;
+      }
+      box.style.display = 'block';
+      box.textContent = msg;
+    }
+
+    function renderHistory(rows) {
+      const tbody = el('historyRows');
+      tbody.innerHTML = '';
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="muted">Geen clan history gevonden.</td></tr>';
+        return;
+      }
+
+      rows.forEach((row, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${row.tag ? '#' + row.tag : '-'}</td>
+          <td>${row.name || '-'}</td>
+          <td>${row.joined_at || '-'}</td>
+          <td>${row.left_at || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadPlayerData() {
+      setError('');
+      el('status').textContent = 'Bezig met laden...';
+      el('summary').textContent = 'Data ophalen...';
+
+      try {
+        const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(PLAYER_TAG)}&t=${Date.now()}`, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.ok || !data.player) {
+          const err = data.error || `API fout (${res.status})`;
+          setError(err);
+          el('summary').textContent = 'Data kon niet geladen worden.';
+          renderHistory([]);
+          el('status').textContent = '';
+          return;
+        }
+
+        const p = data.player;
+        const title = el('playerTitle');
+        if (title) {
+          title.textContent = `Speler ${p.name || '-'} (#${PLAYER_TAG})`;
+        }
+
+        el('summary').innerHTML = `
+          Speler naam: <strong>${p.name || '-'}</strong><br>
+          Account level: <strong>${p.acc_lvl || '-'}</strong><br>
+          Kaarten level 16: <strong>${p.cards_lvl_16 ?? '-'}</strong><br>
+          Kaarten level 15: <strong>${p.cards_lvl_15 ?? '-'}</strong>
+        `;
+
+        renderHistory(p.clan_history || []);
+        el('status').textContent = 'Klaar';
+      } catch (error) {
+        setError(`Netwerkfout: ${error?.message || 'onbekend'}`);
+        el('summary').textContent = 'Data kon niet geladen worden.';
+        renderHistory([]);
+        el('status').textContent = '';
+      }
+    }
+
+    el('loadBtn').addEventListener('click', loadPlayerData);
+  </script>
+</body>
+</html>
