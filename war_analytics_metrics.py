@@ -637,22 +637,53 @@ def collect_analytics_data(
     if not api_key:
         raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
 
-    def api_get(path: str) -> Dict[str, object]:
+    def api_get(path: str, required: bool = True, max_retries: int = 3) -> Dict[str, object]:
         url = f"{ROYAL_API_BASE_URL}{path}"
-        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Clash API error {resp.status_code} for {path}")
-        return resp.json() if resp.content else {}
+        last_error: Optional[Exception] = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= max_retries:
+                    break
+                continue
+
+            if resp.status_code == 200:
+                return resp.json() if resp.content else {}
+
+            retryable = resp.status_code in {429, 500, 502, 503, 504}
+            if retryable and attempt < max_retries:
+                continue
+
+            msg = f"Clash API error {resp.status_code} for {path}"
+            if required:
+                raise RuntimeError(msg)
+            return {"_error": msg}
+
+        if required:
+            if last_error:
+                raise RuntimeError(f"Clash API request failed for {path}: {last_error}")
+            raise RuntimeError(f"Clash API request failed for {path}")
+        if last_error:
+            return {"_error": f"Clash API request failed for {path}: {last_error}"}
+        return {"_error": f"Clash API request failed for {path}"}
 
     norm_tag = clan_tag.strip().replace("#", "").upper()
     encoded = f"%23{norm_tag}"
 
-    members_payload = api_get(f"/clans/{encoded}/members")
-    members = members_payload.get("items", [])
+    warnings: List[str] = []
+    members_payload = api_get(f"/clans/{encoded}/members", required=False)
+    members = members_payload.get("items", []) if isinstance(members_payload, dict) else []
+    if not members and isinstance(members_payload, dict) and members_payload.get("_error"):
+        warnings.append(str(members_payload.get("_error")))
 
     role_map: Dict[str, str] = {}
     player_print_map: Dict[str, str] = {}
     known_players: Set[str] = set()
+    member_levels: List[int] = []
+    member_trophies: List[int] = []
     for item in members:
         tag = (item.get("tag") or "").replace("#", "").upper()
         if not tag:
@@ -660,9 +691,14 @@ def collect_analytics_data(
         known_players.add(tag)
         player_print_map[tag] = item.get("name") or tag
         role_map[tag] = item.get("role") or ""
+        exp_level = item.get("expLevel")
+        if isinstance(exp_level, int):
+            member_levels.append(exp_level)
+        trophies = item.get("trophies")
+        if isinstance(trophies, int):
+            member_trophies.append(trophies)
 
-    if not known_players:
-        raise RuntimeError("No clan members returned by Clash API.")
+    members_source_available = bool(known_players)
 
     # Collect weekly race snapshots: historic races + current race when available.
     race_items: List[Dict[str, object]] = []
@@ -716,9 +752,12 @@ def collect_analytics_data(
 
         for p in source_rows:
             ptag = (p.get("tag") or "").replace("#", "").upper()
-            if not ptag or ptag not in known_players:
+            if not ptag:
+                continue
+            if members_source_available and ptag not in known_players:
                 continue
 
+            known_players.add(ptag)
             player_print_map.setdefault(ptag, p.get("name") or ptag)
             role_map.setdefault(ptag, "")
             fame = int(p.get("fame") or 0)
@@ -728,6 +767,12 @@ def collect_analytics_data(
 
             contrib_map.setdefault(ptag, {})[week_key] = contrib
             decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
+
+    if not members_source_available and known_players:
+        warnings.append("Using race-participant fallback because clan members endpoint was unavailable.")
+
+    if not known_players:
+        raise RuntimeError("No players available from members endpoint or race logs.")
 
     # Ensure all known players exist in maps for frontend stability.
     for ptag in known_players:
@@ -770,6 +815,46 @@ def collect_analytics_data(
         contrib_rows.append([pname, role, str(total_contrib), *[str(per_week_contrib.get(wh, "")) for wh in week_headers]])
         decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
 
+    total_players = len(ordered_players)
+    total_week_entries = total_players * len(week_headers)
+    total_contrib_all = sum(row_total_for_weeks(contrib_map.get(ptag, {}), week_headers) for ptag, _ in ordered_players)
+    total_decks_all = sum(row_total_for_weeks(decks_map.get(ptag, {}), week_headers) for ptag, _ in ordered_players)
+    active_week_entries = sum(
+        1
+        for ptag, _ in ordered_players
+        for wh in week_headers
+        if int(contrib_map.get(ptag, {}).get(wh, 0) or 0) > 0
+    )
+    colosseum_weeks = [wh for wh in week_headers if parse_week_key(wh)[1] == 4]
+    total_colosseum_score = sum(
+        int(contrib_map.get(ptag, {}).get(wh, 0) or 0)
+        for ptag, _ in ordered_players
+        for wh in colosseum_weeks
+    )
+    avg_level = round(sum(member_levels) / len(member_levels), 2) if member_levels else 0
+    avg_trophies = round(sum(member_trophies) / len(member_trophies), 2) if member_trophies else 0
+    avg_weekend_score = round(total_contrib_all / total_players, 2) if total_players else 0
+    avg_day_score = round(total_contrib_all / total_week_entries, 2) if total_week_entries else 0
+    avg_colosseum_score = round(total_colosseum_score / total_players, 2) if total_players and colosseum_weeks else 0
+    avg_played_week_score = round(total_contrib_all / active_week_entries, 2) if active_week_entries else 0
+    avg_decks_played_week = round(total_decks_all / active_week_entries, 2) if active_week_entries else 0
+
+    metadata_table = {
+        "headers": ["Metric", "Value", "Notes"],
+        "rows": [
+            ["Clan members", str(total_players), "Current members included in analytics"],
+            ["Average player level", f"{avg_level}", "Based on expLevel from clan members endpoint"],
+            ["Average trophies", f"{avg_trophies}", "Based on current trophies of clan members"],
+            ["Average weekend score (Contribution)", f"{avg_weekend_score}", "Total contribution across loaded weeks ÷ member count"],
+            ["Average day/week score per player", f"{avg_day_score}", "Total contribution ÷ (members × loaded weeks)"],
+            ["Average colosseum score", f"{avg_colosseum_score}", "Average contribution in sectionIndex 4 weeks when available"],
+            ["Average played-week score", f"{avg_played_week_score}", "Average contribution for played weeks only (Contribution > 0)"],
+            ["Average decks used (played weeks)", f"{avg_decks_played_week}", "Decks used average when a player had Contribution > 0"],
+            ["Loaded race weeks", str(len(week_headers)), "Up to 10 latest river race snapshots"],
+            ["Data warnings", " | ".join(warnings) if warnings else "None", "API availability/fallback notes"],
+        ],
+    }
+
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
@@ -777,6 +862,8 @@ def collect_analytics_data(
         "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+        "metadata_table": metadata_table,
+        "warnings": warnings,
     }
 
 
