@@ -743,17 +743,19 @@
     const decksIdx = (decks.headers || []).findIndex((h) => (h || '').toLowerCase() === 'd');
     if (contribIdx === -1 || decksIdx === -1) return [];
 
-    const weekHeaders = (contrib.headers || []).slice(contribIdx + 1);
+    const weekHeaders = (contrib.headers || []).filter((h, idx) => idx > contribIdx && /^\d+\s*-\s*\d+$/.test((h || '').trim()));
     const contribRow = (contrib.rows || []).find((r) => normalizeName(r[0]) === normalizeName(player));
     const decksRow = (decks.rows || []).find((r) => normalizeName(r[0]) === normalizeName(player));
     if (!contribRow || !decksRow) return [];
 
     const weekData = weekHeaders
       .map((wh, idx) => {
-        const scoreRaw = contribRow[contribIdx + 1 + idx];
+        const contribColIdx = (contrib.headers || []).findIndex((h) => h === wh);
+        const scoreRaw = contribColIdx === -1 ? undefined : contribRow[contribColIdx];
         const scoreNum = scoreRaw === undefined || scoreRaw === '' ? null : Number(scoreRaw);
         const score = Number.isNaN(scoreNum) ? null : scoreNum;
-        const attacksRaw = decksRow[decksIdx + 1 + idx];
+        const decksColIdx = (decks.headers || []).findIndex((h) => h === wh);
+        const attacksRaw = decksColIdx === -1 ? undefined : decksRow[decksColIdx];
         const attacksNum = attacksRaw === undefined || attacksRaw === '' ? null : Number(attacksRaw);
         const attacks = Number.isNaN(attacksNum) ? null : attacksNum;
         if (score === null && attacks === null) return null;
