@@ -19,11 +19,13 @@ For each participant per race we use:
 
 The official API does not expose the same RoyaleAPI analytics table format. We therefore build our own weekly dataset:
 
-- `week_key = "{seasonId}-{sectionIndex}"`
+- `week_key = "{seasonId}-{logical_week_index}"`
 - `contribution = fame + repairPoints`
 - `decks_used = clamp(decksUsed, 0..16)`
 - include only players that are in current clan members list
 - use latest 10 race snapshots (river race log + current race when available)
+- dedupe overlapping snapshots on `(seasonId, createdDate)` before numbering weeks
+- assign week numbers sequentially per season based on chronological `createdDate`
 
 ## Table logic
 
@@ -109,4 +111,4 @@ Watchlist C (NEW):
 
 ## Known limitation
 - The official endpoints do not provide the same RoyaleAPI war/analytics HTML history layout.
-- We can still build all 10 tables, but week columns now come from available race snapshots (`seasonId-sectionIndex`) and depend on how many races the API returns.
+- We therefore derive stable week columns from chronologically ordered race snapshots per season, instead of trusting the raw API `sectionIndex`.
