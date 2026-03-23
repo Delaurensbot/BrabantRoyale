@@ -531,6 +531,164 @@ def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optiona
     return current, prev
 
 
+def race_created_sort_value(race: Dict[str, object]) -> int:
+    created = str(race.get("createdDate") or "")
+    return int(created[:8]) if created[:8].isdigit() else 0
+
+
+def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
+    season = int(race.get("seasonId") or 0)
+    return (season, race_created_sort_value(race))
+
+
+def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[str, Dict[str, object]]]:
+    """
+    Build logical week keys from chronological race order instead of raw sectionIndex.
+
+    The Clash API's `sectionIndex` is not reliable for analytics history in practice:
+    it can jump (e.g. `130-9`) and the current race can overlap with the latest race log
+    entry, producing duplicates. We therefore:
+    - sort chronologically by `(seasonId, createdDate)`
+    - dedupe overlapping snapshots on `(seasonId, createdDate)`
+    - assign week numbers sequentially within each season (`season-1`, `season-2`, ...)
+    """
+
+    ordered = sorted(race_items, key=race_sort_key)
+    deduped: List[Dict[str, object]] = []
+    seen_keys: Set[Tuple[int, int]] = set()
+
+    for race in ordered:
+        dedupe_key = (
+            int(race.get("seasonId") or 0),
+            race_created_sort_value(race),
+        )
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        deduped.append(race)
+
+    labeled: List[Tuple[str, Dict[str, object]]] = []
+    season_counts: Dict[int, int] = {}
+    for race in deduped:
+        season = int(race.get("seasonId") or 0)
+        season_counts[season] = season_counts.get(season, 0) + 1
+        labeled.append((f"{season}-{season_counts[season]}", race))
+
+    return labeled
+
+
+def extract_clan_participants(race: Dict[str, object], clan_tag: str) -> List[Dict[str, object]]:
+    standings = race.get("standings") or []
+    clans_blob = race.get("clans") or []
+
+    if standings:
+        for standing in standings:
+            clan = standing.get("clan") or {}
+            if (clan.get("tag") or "").replace("#", "").upper() == clan_tag:
+                return clan.get("participants") or standing.get("participants") or []
+
+    if clans_blob:
+        for clan in clans_blob:
+            if (clan.get("tag") or "").replace("#", "").upper() == clan_tag:
+                return clan.get("participants") or []
+
+    return []
+
+
+def build_player_week_maps(
+    labeled_races: List[Tuple[str, Dict[str, object]]],
+    clan_tag: str,
+    known_players: Set[str],
+    role_map: Dict[str, str],
+    player_print_map: Dict[str, str],
+) -> Tuple[List[str], Dict[str, Dict[str, int]], Dict[str, Dict[str, int]]]:
+    week_headers: List[str] = []
+    contrib_map: Dict[str, Dict[str, int]] = {}
+    decks_map: Dict[str, Dict[str, int]] = {}
+
+    for week_key, race in labeled_races:
+        week_headers.append(week_key)
+        source_rows = extract_clan_participants(race, clan_tag)
+
+        for player in source_rows:
+            ptag = (player.get("tag") or "").replace("#", "").upper()
+            if not ptag or ptag not in known_players:
+                continue
+
+            player_print_map.setdefault(ptag, player.get("name") or ptag)
+            role_map.setdefault(ptag, "")
+            fame = int(player.get("fame") or 0)
+            repair = int(player.get("repairPoints") or 0)
+            contrib = fame + repair
+            decks = int(player.get("decksUsed") or 0)
+
+            contrib_map.setdefault(ptag, {})[week_key] = contrib
+            decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
+
+    for ptag in known_players:
+        contrib_map.setdefault(ptag, {})
+        decks_map.setdefault(ptag, {})
+        player_print_map.setdefault(ptag, ptag)
+        role_map.setdefault(ptag, "")
+
+    return week_headers, contrib_map, decks_map
+
+
+def build_player_history_summary(
+    week_headers: List[str],
+    per_week_contrib: Dict[str, int],
+    per_week_decks: Dict[str, int],
+) -> Dict[str, object]:
+    played_rows: List[Tuple[str, int, int, int]] = []
+    perfect_scores: List[int] = []
+    missed_scores: List[int] = []
+    missed_amounts: List[int] = []
+    longest_perfect_streak = 0
+    current_streak = 0
+
+    for week_key in week_headers:
+        score = int(per_week_contrib.get(week_key, 0) or 0)
+        attacks = int(per_week_decks.get(week_key, 0) or 0)
+        if score <= 0 and attacks <= 0:
+            continue
+
+        missed = max(0, 16 - max(0, min(16, attacks)))
+        played_rows.append((week_key, score, attacks, missed))
+
+        if attacks == 16 and score > 0:
+            current_streak += 1
+            longest_perfect_streak = max(longest_perfect_streak, current_streak)
+            perfect_scores.append(score)
+        else:
+            current_streak = 0
+
+        if score > 0 and missed > 0:
+            missed_amounts.append(missed)
+            missed_scores.append(score)
+
+    played_scores = [score for _, score, _, _ in played_rows if score > 0]
+    first_week = played_rows[0][0] if played_rows else None
+    last_week = played_rows[-1][0] if played_rows else None
+
+    def avg(values: List[int]) -> float:
+        if not values:
+            return 0.0
+        return round(sum(values) / len(values), 2)
+
+    return {
+        "weeks_in_history": len(played_rows),
+        "perfect_weeks": len(perfect_scores),
+        "longest_perfect_streak": longest_perfect_streak,
+        "average_perfect_score": avg(perfect_scores),
+        "missed_weeks": len(missed_amounts),
+        "average_missed_attacks": avg(missed_amounts),
+        "average_missed_score": avg(missed_scores),
+        "average_score": avg(played_scores),
+        "first_week": first_week,
+        "last_week": last_week,
+    }
+
+
 def build_previous_season_mvp_simple(contrib_week_headers, contrib_map, decks_map, player_print_map,
                                     prev_season: int, top_n: int) -> str:
     season_weeks = [wh for wh in contrib_week_headers if season_of_week_header(wh) == prev_season]
@@ -687,61 +845,15 @@ def collect_analytics_data(
     if not race_items:
         raise RuntimeError("No river race data returned by Clash API.")
 
-    def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
-        created = str(race.get("createdDate") or "")
-        season = int(race.get("seasonId") or 0)
-        return (season, int(created[:8]) if created[:8].isdigit() else 0)
+    labeled_races = dedupe_and_label_races(race_items)
+    all_week_headers, all_contrib_map, all_decks_map = build_player_week_maps(
+        labeled_races, norm_tag, known_players, role_map, player_print_map
+    )
 
-    race_items.sort(key=race_sort_key)
-    last_10 = race_items[-10:]
-    week_headers: List[str] = []
-    contrib_map: Dict[str, Dict[str, int]] = {}
-    decks_map: Dict[str, Dict[str, int]] = {}
-
-    for idx, race in enumerate(last_10, 1):
-        season = race.get("seasonId") or "0"
-        section = race.get("sectionIndex") or idx
-        week_key = f"{season}-{section}"
-        week_headers.append(week_key)
-
-        standings = race.get("standings") or []
-        clans_blob = race.get("clans") or []
-        source_rows = []
-        if standings:
-            for s in standings:
-                clan = s.get("clan") or {}
-                if (clan.get("tag") or "").replace("#", "").upper() == norm_tag:
-                    # River race log usually nests participants under standing.clan.participants
-                    # (not directly under standing.participants).
-                    source_rows = clan.get("participants") or s.get("participants") or []
-                    break
-        elif clans_blob:
-            for c in clans_blob:
-                if (c.get("tag") or "").replace("#", "").upper() == norm_tag:
-                    source_rows = c.get("participants") or []
-                    break
-
-        for p in source_rows:
-            ptag = (p.get("tag") or "").replace("#", "").upper()
-            if not ptag or ptag not in known_players:
-                continue
-
-            player_print_map.setdefault(ptag, p.get("name") or ptag)
-            role_map.setdefault(ptag, "")
-            fame = int(p.get("fame") or 0)
-            repair = int(p.get("repairPoints") or 0)
-            contrib = fame + repair
-            decks = int(p.get("decksUsed") or 0)
-
-            contrib_map.setdefault(ptag, {})[week_key] = contrib
-            decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
-
-    # Ensure all known players exist in maps for frontend stability.
-    for ptag in known_players:
-        contrib_map.setdefault(ptag, {})
-        decks_map.setdefault(ptag, {})
-        player_print_map.setdefault(ptag, ptag)
-        role_map.setdefault(ptag, "")
+    last_10 = labeled_races[-10:]
+    week_headers, contrib_map, decks_map = build_player_week_maps(
+        last_10, norm_tag, known_players, role_map, player_print_map
+    )
 
     current_season, prev_season = detect_current_and_previous_season(week_headers)
 
@@ -768,10 +880,13 @@ def collect_analytics_data(
 
     contrib_rows: List[List[str]] = []
     decks_rows: List[List[str]] = []
+    player_history: List[Dict[str, object]] = []
     for ptag, pname in ordered_players:
         role = role_map.get(ptag, "")
         per_week_contrib = contrib_map.get(ptag, {})
         per_week_decks = decks_map.get(ptag, {})
+        per_week_contrib_all = all_contrib_map.get(ptag, {})
+        per_week_decks_all = all_decks_map.get(ptag, {})
         total_contrib = row_total_for_weeks(per_week_contrib, week_headers)
         total_decks = row_total_for_weeks(per_week_decks, week_headers)
         contrib_rows.append([
@@ -782,12 +897,37 @@ def collect_analytics_data(
             *[str(per_week_contrib.get(wh, "")) for wh in week_headers],
         ])
         decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
+        history_rows = []
+        for wh in all_week_headers:
+            score = per_week_contrib_all.get(wh)
+            attacks = per_week_decks_all.get(wh)
+            if score is None and attacks is None:
+                continue
+            history_rows.append(
+                {
+                    "week": wh,
+                    "score": score if score is not None else None,
+                    "attacks": attacks if attacks is not None else None,
+                    "missed": None if attacks is None else max(0, 16 - attacks),
+                }
+            )
+        player_history.append(
+            {
+                "player": pname,
+                "role": role,
+                "weeks": history_rows,
+                "summary": build_player_history_summary(all_week_headers, per_week_contrib_all, per_week_decks_all),
+            }
+        )
 
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
+        "current_season": current_season,
+        "previous_season": prev_season,
         "ratio_scores": ratio_scores,
         "promotion_candidates": promotion_candidates,
+        "player_history": player_history,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
     }
