@@ -531,6 +531,52 @@ def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optiona
     return current, prev
 
 
+def race_created_sort_value(race: Dict[str, object]) -> int:
+    created = str(race.get("createdDate") or "")
+    return int(created[:8]) if created[:8].isdigit() else 0
+
+
+def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
+    season = int(race.get("seasonId") or 0)
+    return (season, race_created_sort_value(race))
+
+
+def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[str, Dict[str, object]]]:
+    """
+    Build logical week keys from chronological race order instead of raw sectionIndex.
+
+    The Clash API's `sectionIndex` is not reliable for analytics history in practice:
+    it can jump (e.g. `130-9`) and the current race can overlap with the latest race log
+    entry, producing duplicates. We therefore:
+    - sort chronologically by `(seasonId, createdDate)`
+    - dedupe overlapping snapshots on `(seasonId, createdDate)`
+    - assign week numbers sequentially within each season (`season-1`, `season-2`, ...)
+    """
+
+    ordered = sorted(race_items, key=race_sort_key)
+    deduped: List[Dict[str, object]] = []
+    seen_keys: Set[Tuple[int, int]] = set()
+
+    for race in ordered:
+        dedupe_key = (
+            int(race.get("seasonId") or 0),
+            race_created_sort_value(race),
+        )
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        deduped.append(race)
+
+    labeled: List[Tuple[str, Dict[str, object]]] = []
+    season_counts: Dict[int, int] = {}
+    for race in deduped:
+        season = int(race.get("seasonId") or 0)
+        season_counts[season] = season_counts.get(season, 0) + 1
+        labeled.append((f"{season}-{season_counts[season]}", race))
+
+    return labeled
+
+
 def build_previous_season_mvp_simple(contrib_week_headers, contrib_map, decks_map, player_print_map,
                                     prev_season: int, top_n: int) -> str:
     season_weeks = [wh for wh in contrib_week_headers if season_of_week_header(wh) == prev_season]
@@ -687,21 +733,13 @@ def collect_analytics_data(
     if not race_items:
         raise RuntimeError("No river race data returned by Clash API.")
 
-    def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
-        created = str(race.get("createdDate") or "")
-        season = int(race.get("seasonId") or 0)
-        return (season, int(created[:8]) if created[:8].isdigit() else 0)
-
-    race_items.sort(key=race_sort_key)
-    last_10 = race_items[-10:]
+    labeled_races = dedupe_and_label_races(race_items)
+    last_10 = labeled_races[-10:]
     week_headers: List[str] = []
     contrib_map: Dict[str, Dict[str, int]] = {}
     decks_map: Dict[str, Dict[str, int]] = {}
 
-    for idx, race in enumerate(last_10, 1):
-        season = race.get("seasonId") or "0"
-        section = race.get("sectionIndex") or idx
-        week_key = f"{season}-{section}"
+    for week_key, race in last_10:
         week_headers.append(week_key)
 
         standings = race.get("standings") or []
