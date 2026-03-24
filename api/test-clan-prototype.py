@@ -41,16 +41,20 @@ def build_overview_rows(clans):
     for row in clans:
         participants = row.get("participants", []) or []
         decks_used = sum(int_value(p.get("decksUsedToday")) for p in participants)
+        boat_attacks = sum(int_value(p.get("boatAttacks")) for p in participants)
         participant_count = len(participants)
         decks_total = participant_count * MAX_DECKS_PER_PLAYER
-        decks_remaining = max(0, decks_total - decks_used)
 
         fame = int_value(row.get("fame"))
         repair = int_value(row.get("repairPoints"))
+        # API-compatible medals model: medals are derived from fame + repair points.
         medals = fame + repair
 
-        avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
-        projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
+        # Avg/deck is medals divided by used decks (guard against divide-by-zero).
+        avg_per_deck_raw = (medals / decks_used) if decks_used > 0 else None
+        avg_per_deck = round(avg_per_deck_raw, 2) if avg_per_deck_raw is not None else None
+        # Projected is a derived metric: current medals-based avg/deck × expected total decks.
+        projected = int(round((avg_per_deck_raw or 0) * decks_total))
 
         rows.append(
             {
@@ -61,9 +65,9 @@ def build_overview_rows(clans):
                 "medals": medals,
                 "decks_used_today": decks_used,
                 "decks_total_today": decks_total,
-                "decks_remaining_today": decks_remaining,
                 "avg_medals_per_deck": avg_per_deck,
                 "projected_medals": projected,
+                "boat_attacks": boat_attacks,
             }
         )
 
@@ -122,7 +126,9 @@ def build_finish_outlook(clan_tag, overview_rows, players):
     max_avg = max(avg_values) if avg_values else 0
 
     current_medals = int_value(ours.get("medals"))
-    remaining_decks = int_value(ours.get("decks_remaining_today"))
+    decks_used = int_value(ours.get("decks_used_today"))
+    decks_total = int_value(ours.get("decks_total_today"))
+    remaining_decks = max(0, decks_total - decks_used)
     projected_finish = int_value(ours.get("projected_medals"))
     best_finish = int(round(current_medals + (remaining_decks * max_avg)))
     worst_finish = int(round(current_medals + (remaining_decks * min_avg)))
