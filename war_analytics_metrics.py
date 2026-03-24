@@ -824,6 +824,8 @@ def collect_analytics_data(
     return {
         "mvp_current": mvp_current,
         "mvp_previous": mvp_previous,
+        "current_season": current_season,
+        "previous_season": prev_season,
         "ratio_scores": ratio_scores,
         "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
