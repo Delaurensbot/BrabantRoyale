@@ -87,7 +87,7 @@
   <div class="grid">
     <div class="card">
       <div class="cardHead">
-        <div class="title">Huidig seizoen MVP (Top 10)</div>
+        <div class="title" id="titleCurrentMvp">Huidig seizoen MVP (Top 10)</div>
         <div class="actions">
           <button class="iconBtn" id="infoCurrent">ℹ️ Info</button>
           <button class="iconBtn" id="copyCurrent">⧉ Kopieer tabel</button>
@@ -98,7 +98,7 @@
     </div>
     <div class="card">
       <div class="cardHead">
-        <div class="title">Vorig seizoen MVP (Top 10)</div>
+        <div class="title" id="titlePreviousMvp">Vorig seizoen MVP (Top 10)</div>
         <div class="actions">
           <button class="iconBtn" id="infoPrevious">ℹ️ Info</button>
           <button class="iconBtn" id="copyPrevious">⧉ Kopieer tabel</button>
@@ -288,6 +288,23 @@
     const headerLine = headers.join('\t');
     const body = rows.map((r) => r.map((cell) => cell ?? '').join('\t')).join('\n');
     copyText([headerLine, body].filter(Boolean).join('\n'), toastEl);
+  }
+
+  function mvpTitle(label, season) {
+    if (season === null || season === undefined || season === '') return `${label} MVP (Top 10)`;
+    return `${label} MVP (Seizoen ${season}, Top 10)`;
+  }
+
+  function updateMvpTitles() {
+    const currentTitle = el('titleCurrentMvp');
+    const previousTitle = el('titlePreviousMvp');
+    if (currentTitle) currentTitle.textContent = mvpTitle('Huidig seizoen', currentSeason);
+    if (previousTitle) previousTitle.textContent = mvpTitle('Vorig seizoen', previousSeason);
+  }
+
+  function mvpCopyLabel(label, season) {
+    if (season === null || season === undefined || season === '') return `${label} MVP`;
+    return `${label} MVP - Seizoen ${season}`;
   }
 
   function MVPCard(targetId, items, toastEl) {
@@ -558,6 +575,8 @@
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
   let mvpCurrent = [];
   let mvpPrevious = [];
+  let currentSeason = null;
+  let previousSeason = null;
   let promotionCandidates = [];
   let ratioExpanded = false;
   let openPlayerDetail = null;
@@ -940,6 +959,9 @@
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
+    currentSeason = data.current_season ?? null;
+    previousSeason = data.previous_season ?? null;
+    updateMvpTitles();
     promotionCandidates = data.promotion_candidates || [];
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
@@ -1053,12 +1075,18 @@
 
   el('copyCurrent').addEventListener('click', () => {
     const rows = (mvpCurrent || []).map((row, idx) => [`${idx + 1}`, row.player, row.score]);
-    copyTable(['#', 'Player', 'Score'], rows, el('toastCurrent'));
+    const label = mvpCopyLabel('Huidig seizoen', currentSeason);
+    const headerLine = ['#', 'Player', 'Score'].join('\t');
+    const body = rows.map((r) => r.map((cell) => cell ?? '').join('\t')).join('\n');
+    copyText([label, headerLine, body].filter(Boolean).join('\n'), el('toastCurrent'));
   });
 
   el('copyPrevious').addEventListener('click', () => {
     const rows = (mvpPrevious || []).map((row, idx) => [`${idx + 1}`, row.player, row.score]);
-    copyTable(['#', 'Player', 'Score'], rows, el('toastPrevious'));
+    const label = mvpCopyLabel('Vorig seizoen', previousSeason);
+    const headerLine = ['#', 'Player', 'Score'].join('\t');
+    const body = rows.map((r) => r.map((cell) => cell ?? '').join('\t')).join('\n');
+    copyText([label, headerLine, body].filter(Boolean).join('\n'), el('toastPrevious'));
   });
 
   el('copyPromotions').addEventListener('click', () => {
