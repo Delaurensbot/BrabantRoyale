@@ -124,8 +124,8 @@ def parse_cwstats_race_context_from_html(html: str):
         rank = int(match.group(1))
         name = re.sub(r"\s+", " ", match.group(2)).strip()
         trophy = int(match.group(3))
-        cw_trophy = int(match.group(4))
-        boat_movement = int(match.group(5))
+        boat_movement = int(match.group(4))
+        cw_trophy = int(match.group(5))
         fame_avg = float(match.group(6).replace(",", "."))
 
         rows[_normalize_clan_name(name)] = {
