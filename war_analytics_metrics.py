@@ -403,6 +403,7 @@ def compute_reliability_scores(
         results.append(
             {
                 "player": player_print_map.get(key, key),
+                "player_tag": key,
                 "role": role_map.get(key, ""),
                 "weeks_played": weeks_played,
                 "attacks_done": attacks_done,

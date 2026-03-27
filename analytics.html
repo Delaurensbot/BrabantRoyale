@@ -58,8 +58,11 @@
     .detailRow td { background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.08); }
     .detailRowInner { padding: 12px; border-radius: 12px; background: #0f1724; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 32px rgba(0,0,0,0.3); animation: slideDown 200ms ease; }
     .detailHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .detailActions { display: inline-flex; align-items: center; gap: 8px; }
     .detailTitle { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
     .detailSubtitle { color: rgba(232,235,240,0.75); margin-top: 4px; font-size: 13px; }
+    .moreInfoPanel { margin: 12px 0 14px; padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .moreInfoList { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
     .detailTable { width: 100%; border-collapse: collapse; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; overflow: hidden; }
     .detailTable thead th { background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); padding: 10px 12px; text-align: left; font-size: 13px; letter-spacing: 0.1px; }
     .detailTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
@@ -793,7 +796,38 @@
     openPlayerDetail = null;
   }
 
-  function renderPlayerDetail(player, reason, tableEl, anchorRow) {
+  function longestPerfectStreak(weeks) {
+    let longest = 0;
+    let current = 0;
+    (weeks || []).forEach((row) => {
+      if (row.attacks === 16) {
+        current += 1;
+        if (current > longest) longest = current;
+      } else {
+        current = 0;
+      }
+    });
+    return longest;
+  }
+
+  function averageScoreAllAttacks(weeks) {
+    const perfectWeeks = (weeks || []).filter((row) => row.attacks === 16 && row.score !== null);
+    if (!perfectWeeks.length) return null;
+    const total = perfectWeeks.reduce((sum, row) => sum + Number(row.score || 0), 0);
+    return Math.round((total / perfectWeeks.length) * 100) / 100;
+  }
+
+  async function fetchPlayerAccountLevel(playerTag) {
+    if (!playerTag) return '-';
+    const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(playerTag)}`);
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || 'Kon account level niet laden');
+    }
+    return json?.player?.acc_lvl || '-';
+  }
+
+  function renderPlayerDetail(player, reason, playerTag, tableEl, anchorRow) {
     clearPlayerDetail();
 
     const weeks = sortWeeksDesc(getPlayerWeekData(player));
@@ -820,13 +854,60 @@
     subtitle.textContent = reason || '';
     headLeft.appendChild(title);
     headLeft.appendChild(subtitle);
+    const actions = document.createElement('div');
+    actions.className = 'detailActions';
+    const moreInfoBtn = document.createElement('button');
+    moreInfoBtn.className = 'iconBtn';
+    moreInfoBtn.textContent = 'More info';
     const closeBtn = document.createElement('button');
     closeBtn.className = 'iconBtn';
     closeBtn.textContent = 'Sluiten';
     closeBtn.addEventListener('click', clearPlayerDetail);
+    actions.appendChild(moreInfoBtn);
+    actions.appendChild(closeBtn);
     head.appendChild(headLeft);
-    head.appendChild(closeBtn);
+    head.appendChild(actions);
     inner.appendChild(head);
+
+    const moreInfoPanel = document.createElement('div');
+    moreInfoPanel.className = 'moreInfoPanel';
+    moreInfoPanel.style.display = 'none';
+    inner.appendChild(moreInfoPanel);
+
+    moreInfoBtn.addEventListener('click', async () => {
+      if (moreInfoPanel.style.display !== 'none') {
+        moreInfoPanel.style.display = 'none';
+        moreInfoBtn.textContent = 'More info';
+        return;
+      }
+
+      moreInfoPanel.style.display = 'block';
+      moreInfoBtn.textContent = 'Hide info';
+      moreInfoPanel.innerHTML = '<div class="muted">Laden...</div>';
+
+      const avgAllAttacks = averageScoreAllAttacks(weeks);
+      const longestStreak = longestPerfectStreak(weeks.slice().reverse());
+      const highestScore = weeks.reduce((max, row) => (row.score === null ? max : Math.max(max, Number(row.score))), -Infinity);
+
+      let accountLevel = '-';
+      try {
+        accountLevel = await fetchPlayerAccountLevel(playerTag);
+      } catch (err) {
+        console.error(err);
+      }
+
+      const list = document.createElement('ul');
+      list.className = 'moreInfoList';
+      const items = [
+        `Average score with all attacks played (D=16): ${avgAllAttacks === null ? '-' : avgAllAttacks}`,
+        `Longest streak of 16 attacks: ${longestStreak}`,
+        `Highest score in last 10 weeks: ${Number.isFinite(highestScore) ? highestScore : '-'}`,
+        `Player account level: ${accountLevel}`,
+      ];
+      list.innerHTML = items.map((text) => `<li>${text}</li>`).join('');
+      moreInfoPanel.innerHTML = '';
+      moreInfoPanel.appendChild(list);
+    });
 
     const tableWrap = document.createElement('div');
     if (!weeks.length) {
@@ -881,12 +962,12 @@
     openPlayerDetail = { row: detailTr, table: tableEl, player };
   }
 
-  function showPlayerDetail(player, reason, tableEl, anchorRow) {
+  function showPlayerDetail(player, reason, playerTag, tableEl, anchorRow) {
     if (openPlayerDetail && openPlayerDetail.player === player && openPlayerDetail.table === tableEl) {
       clearPlayerDetail();
       return;
     }
-    renderPlayerDetail(player, reason, tableEl, anchorRow);
+    renderPlayerDetail(player, reason, playerTag, tableEl, anchorRow);
   }
 
   function getReliabilityPercent(row) {
@@ -922,7 +1003,7 @@
       badge,
       badgeClass,
       title: reason,
-      onClick: (ctx) => showPlayerDetail(row.player, reason, ctx.tableEl, ctx.rowEl),
+      onClick: (ctx) => showPlayerDetail(row.player, reason, row.player_tag, ctx.tableEl, ctx.rowEl),
     };
   }
 
