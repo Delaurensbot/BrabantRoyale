@@ -287,7 +287,7 @@
   }
 
   let overviewData = { headCells: [], rows: [] };
-  let overviewSortKey = "medals";
+  let overviewSortState = { index: -1, direction: "desc" };
   let currentClanTag = DEFAULT_CLAN;
 
   function parseOverviewValue(value, columnName) {
@@ -300,43 +300,52 @@
       return parseInt(m[1], 10);
     }
 
-    const n = parseFloat(raw.replace(",", "."));
-    if (Number.isNaN(n)) return Number.NEGATIVE_INFINITY;
+    const normalizedNumber = raw
+      .replace(/\./g, "")
+      .replace(",", ".")
+      .replace(/[^\d.-]/g, "");
+    const n = parseFloat(normalizedNumber);
+    if (Number.isNaN(n)) return null;
     return n;
   }
 
-  function sortOverviewRows(key) {
-    overviewSortKey = key;
-    const idx = overviewData.headCells.findIndex((cell) => cell.toLowerCase().includes(key));
-    if (idx === -1) {
+  function sortOverviewRows(index) {
+    if (typeof index !== "number" || index < 0 || index >= overviewData.headCells.length) {
       buildOverviewTable(overviewData.headCells, overviewData.rows);
       return;
     }
 
+    if (overviewSortState.index === index) {
+      overviewSortState.direction = overviewSortState.direction === "asc" ? "desc" : "asc";
+    } else {
+      overviewSortState = { index, direction: "desc" };
+    }
+
+    const directionFactor = overviewSortState.direction === "asc" ? 1 : -1;
+    const columnName = overviewData.headCells[index];
     const sortedRows = [...overviewData.rows].sort((a, b) => {
-      const aVal = parseOverviewValue(a[idx], overviewData.headCells[idx]);
-      const bVal = parseOverviewValue(b[idx], overviewData.headCells[idx]);
-      if (aVal === bVal) {
+      const aVal = parseOverviewValue(a[index], columnName);
+      const bVal = parseOverviewValue(b[index], columnName);
+
+      const bothNumeric = typeof aVal === "number" && typeof bVal === "number";
+      if (bothNumeric && aVal !== bVal) {
+        return (aVal - bVal) * directionFactor;
+      }
+
+      const aText = (a[index] || "").toString();
+      const bText = (b[index] || "").toString();
+      const textCompare = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" });
+      if (textCompare !== 0) {
+        return textCompare * directionFactor;
+      }
+
+      if (bothNumeric && aVal === bVal) {
         return (a[0] || "").localeCompare(b[0] || "");
       }
-      return bVal - aVal;
+      return (a[0] || "").localeCompare(b[0] || "");
     });
 
     buildOverviewTable(overviewData.headCells, sortedRows);
-  }
-
-  function isSortableOverviewColumn(label) {
-    const l = (label || "").toLowerCase();
-    return l.includes("decks") || l.includes("avg") || l.includes("projected") || l.includes("medals");
-  }
-
-  function sortKeyForHeader(label) {
-    const l = (label || "").toLowerCase();
-    if (l.includes("decks")) return "decks";
-    if (l.includes("avg")) return "avg";
-    if (l.includes("projected")) return "projected";
-    if (l.includes("medals")) return "medals";
-    return "";
   }
 
   function buildOverviewTable(headCells, rows) {
@@ -349,19 +358,16 @@
 
     const thead = document.createElement("thead");
     const headTr = document.createElement("tr");
-    headCells.forEach((cell) => {
+    headCells.forEach((cell, idx) => {
       const th = document.createElement("th");
-      const key = sortKeyForHeader(cell);
-      if (isSortableOverviewColumn(cell) && key) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "sortButton";
-        btn.textContent = cell || "";
-        btn.addEventListener("click", () => sortOverviewRows(key));
-        th.appendChild(btn);
-      } else {
-        th.textContent = cell || "";
-      }
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sortButton";
+      const isActive = overviewSortState.index === idx;
+      const arrow = isActive ? (overviewSortState.direction === "asc" ? " ↑" : " ↓") : "";
+      btn.textContent = `${cell || ""}${arrow}`;
+      btn.addEventListener("click", () => sortOverviewRows(idx));
+      th.appendChild(btn);
       headTr.appendChild(th);
     });
     thead.appendChild(headTr);
@@ -420,9 +426,13 @@
     const headCells = header.split("|").map(c => c.trim());
     const parsedRows = rows.map(line => line.split("|").map(p => p.trim()));
     overviewData = { headCells, rows: parsedRows };
-    overviewSortKey = "medals";
-
-    sortOverviewRows("medals");
+    const defaultIndex = headCells.findIndex((cell) => cell.toLowerCase().includes("medals"));
+    overviewSortState = { index: -1, direction: "desc" };
+    if (defaultIndex >= 0) {
+      sortOverviewRows(defaultIndex);
+    } else {
+      buildOverviewTable(headCells, parsedRows);
+    }
   }
 
   function mergeOverviewDecksFromPrototype(overviewText, prototypeRows) {
