@@ -10,6 +10,7 @@ ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 DEFAULT_CLAN_TAG = "9YP8UY"
 ALLOWED_CLANS = {"9YP8UY", "GPCLVLPP"}
 MAX_DECKS_PER_PLAYER = 4
+MAX_CLAN_DECKS_PER_DAY = 200
 
 
 def normalize_tag(raw_tag: str) -> str:
@@ -41,8 +42,7 @@ def build_overview_rows(clans):
     for row in clans:
         participants = row.get("participants", []) or []
         decks_used = sum(int_value(p.get("decksUsedToday")) for p in participants)
-        participant_count = len(participants)
-        decks_total = participant_count * MAX_DECKS_PER_PLAYER
+        decks_total = MAX_CLAN_DECKS_PER_DAY
         decks_remaining = max(0, decks_total - decks_used)
 
         fame = int_value(row.get("fame"))
