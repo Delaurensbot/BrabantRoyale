@@ -788,8 +788,12 @@
     if (!card || !container || !hiddenPre || !uniqueCount) return;
 
     const hasPlayers = Array.isArray(players) && players.length > 0;
+    const hasScoreAbove900 = hasPlayers && players.some((player) => {
+      const fame = Number(player?.fame);
+      return Number.isFinite(fame) && fame > 900;
+    });
 
-    if (!hasPlayers || !text) {
+    if (!hasPlayers || !text || hasScoreAbove900) {
       card.style.display = "none";
       container.innerHTML = "";
       hiddenPre.textContent = "";
