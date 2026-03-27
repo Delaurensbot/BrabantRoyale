@@ -221,6 +221,15 @@
     return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   }
 
+  function normalizeClanName(name) {
+    return (name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/^\d+\s+/, "")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
   function clanName(tag) {
     return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
   }
@@ -414,6 +423,47 @@
     overviewSortKey = "medals";
 
     sortOverviewRows("medals");
+  }
+
+  function mergeOverviewDecksFromPrototype(overviewText, prototypeRows) {
+    if (!overviewText || !Array.isArray(prototypeRows) || !prototypeRows.length) {
+      return overviewText;
+    }
+
+    const lines = overviewText.split("\n");
+    const dataLineIndexes = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.includes("|") && !/^[-|—\s]+$/.test(line));
+
+    if (dataLineIndexes.length < 2) return overviewText;
+
+    const [headerRef, ...rowRefs] = dataLineIndexes;
+    const headerCells = headerRef.line.split("|").map((cell) => cell.trim().toLowerCase());
+    const clanIdx = headerCells.findIndex((cell) => cell.includes("clan"));
+    const decksIdx = headerCells.findIndex((cell) => cell.includes("decks"));
+
+    if (clanIdx === -1 || decksIdx === -1) return overviewText;
+
+    const decksByClan = new Map();
+    prototypeRows.forEach((row) => {
+      const key = normalizeClanName(row?.name || "");
+      if (!key) return;
+      const used = Number(row?.decks_used_today);
+      const total = Number(row?.decks_total_today);
+      if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return;
+      decksByClan.set(key, `${used}/${total}`);
+    });
+
+    rowRefs.forEach(({ line, index }) => {
+      const cells = line.split("|").map((cell) => cell.trim());
+      const key = normalizeClanName(cells[clanIdx] || "");
+      const decksValue = decksByClan.get(key);
+      if (!decksValue) return;
+      cells[decksIdx] = decksValue;
+      lines[index] = cells.join(" | ");
+    });
+
+    return lines.join("\n");
   }
 
 
@@ -903,7 +953,23 @@
       throw new Error(data.error || "unknown");
     }
 
-    renderOverviewTable(data.race_overview_text || "");
+    let mergedOverviewText = data.race_overview_text || "";
+    try {
+      const prototypeRes = await fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
+      if (prototypeRes.ok) {
+        const prototypeData = await prototypeRes.json();
+        if (prototypeData?.ok) {
+          mergedOverviewText = mergeOverviewDecksFromPrototype(
+            mergedOverviewText,
+            prototypeData.overview_rows || []
+          );
+        }
+      }
+    } catch (_) {
+      // Silent fallback: keep original cwstats overview when prototype API is unavailable.
+    }
+
+    renderOverviewTable(mergedOverviewText);
     renderFinishOutlook(data);
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
