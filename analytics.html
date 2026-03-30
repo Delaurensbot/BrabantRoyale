@@ -827,6 +827,11 @@
     return json?.player?.acc_lvl || '-';
   }
 
+  function normalizeRoyalApiPlayerTag(playerTag) {
+    if (!playerTag) return '';
+    return String(playerTag).replace(/^#/, '').trim().toUpperCase();
+  }
+
   function renderPlayerDetail(player, reason, playerTag, tableEl, anchorRow) {
     clearPlayerDetail();
 
@@ -888,6 +893,8 @@
       const avgAllAttacks = averageScoreAllAttacks(weeks);
       const longestStreak = longestPerfectStreak(weeks.slice().reverse());
       const highestScore = weeks.reduce((max, row) => (row.score === null ? max : Math.max(max, Number(row.score))), -Infinity);
+      const normalizedTag = normalizeRoyalApiPlayerTag(playerTag);
+      const displayTag = normalizedTag ? `#${normalizedTag}` : '-';
 
       let accountLevel = '-';
       try {
@@ -903,10 +910,23 @@
         `Longest streak of 16 attacks: ${longestStreak}`,
         `Highest score in last 10 weeks: ${Number.isFinite(highestScore) ? highestScore : '-'}`,
         `Player account level: ${accountLevel}`,
+        `Player ID: ${displayTag}`,
       ];
       list.innerHTML = items.map((text) => `<li>${text}</li>`).join('');
       moreInfoPanel.innerHTML = '';
       moreInfoPanel.appendChild(list);
+
+      if (normalizedTag) {
+        const royalApiBtn = document.createElement('a');
+        royalApiBtn.className = 'iconBtn';
+        royalApiBtn.textContent = 'View Royal API';
+        royalApiBtn.href = `https://royaleapi.com/player/${encodeURIComponent(normalizedTag)}`;
+        royalApiBtn.target = '_blank';
+        royalApiBtn.rel = 'noopener noreferrer';
+        royalApiBtn.style.display = 'inline-block';
+        royalApiBtn.style.marginTop = '8px';
+        moreInfoPanel.appendChild(royalApiBtn);
+      }
     });
 
     const tableWrap = document.createElement('div');
