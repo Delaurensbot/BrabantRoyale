@@ -71,6 +71,8 @@
     .detailTable .statCell { border-radius: 8px; }
     .detailTable .scoreCell { font-weight: 700; }
     .clickableCell { cursor: pointer; }
+    .excludedCopyRow { opacity: 0.45; }
+    .excludedCopyRow td { text-decoration: line-through; }
     @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
@@ -147,6 +149,17 @@
       </div>
       <div class="toast" id="toastUnderperformers"></div>
       <div class="tableWrap" id="underperformersWrap">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title" id="titleLatestWeekendMissed">Laatst gespeelde weekend - gemiste aanvallen</div>
+        <div class="actions">
+          <button class="iconBtn" id="copyLatestWeekendMissed">⧉ Kopieer tabel</button>
+        </div>
+      </div>
+      <div class="toast" id="toastLatestWeekendMissed"></div>
+      <div class="tableWrap" id="latestWeekendMissedWrap">(laden...)</div>
     </div>
 
     <div class="card fullRow">
@@ -462,10 +475,13 @@
         return;
       }
 
-      lastRendered = filtered.map((r) => r.map((cell) => getCellValue(cell)));
+      lastRendered = filtered
+        .filter((r) => !r._excludedFromCopy)
+        .map((r) => r.map((cell) => getCellValue(cell)));
       filtered.forEach((row) => {
         const tr = document.createElement('tr');
         if (row._rowClass) tr.classList.add(row._rowClass);
+        if (row._excludedFromCopy) tr.classList.add('excludedCopyRow');
         row.forEach((cell) => {
           const td = document.createElement('td');
           if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
@@ -573,6 +589,8 @@
   let watchlistBData = [];
   let overperformersComponent = null;
   let overperformersData = [];
+  let latestWeekendMissedComponent = null;
+  let latestWeekendMissedRows = [];
   let contributionComponent = null;
   let decksComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
@@ -1057,6 +1075,69 @@
     return metrics.some((value) => Number(value) > 0);
   }
 
+  function getLatestWeekendMissedRows(contributionTable, decksTable) {
+    const contributionHeaders = contributionTable?.headers || [];
+    const contributionRows = contributionTable?.rows || [];
+    const decksHeaders = decksTable?.headers || [];
+    const decksRows = decksTable?.rows || [];
+
+    const weekendHeaders = contributionHeaders.filter((header) => /^\d+\s*-\s*\d+$/.test((header || '').trim()));
+    if (!weekendHeaders.length) return { latestWeekend: null, rows: [] };
+
+    const sortableWeekends = weekendHeaders
+      .map((week) => ({ week, parsed: parseWeekKeyJs(week) }))
+      .sort((a, b) => {
+        if (a.parsed[0] !== b.parsed[0]) return b.parsed[0] - a.parsed[0];
+        if (a.parsed[1] !== b.parsed[1]) return b.parsed[1] - a.parsed[1];
+        return b.week.localeCompare(a.week);
+      });
+
+    const latestWeekend = sortableWeekends.find(({ week }) => {
+      const contributionIdx = contributionHeaders.indexOf(week);
+      if (contributionIdx === -1) return false;
+      return contributionRows.some((row) => Number(row[contributionIdx] || 0) > 0);
+    })?.week || null;
+
+    if (!latestWeekend) return { latestWeekend: null, rows: [] };
+
+    const contributionIdx = contributionHeaders.indexOf(latestWeekend);
+    const decksIdx = decksHeaders.indexOf(latestWeekend);
+    if (contributionIdx === -1 || decksIdx === -1) return { latestWeekend, rows: [] };
+
+    const mappedRows = contributionRows
+      .map((contributionRow) => {
+        const playerName = contributionRow[0] || '';
+        const playerContribution = Number(contributionRow[contributionIdx] || 0);
+        if (playerContribution <= 0) return null;
+
+        const decksRow = decksRows.find((row) => normalizeName(row[0]) === normalizeName(playerName));
+        if (!decksRow) return null;
+
+        const attacksPlayed = Number(decksRow[decksIdx] || 0);
+        if (attacksPlayed >= 16) return null;
+
+        const missedAttacks = Math.max(0, 16 - attacksPlayed);
+        let tableRow;
+        const nameCell = {
+          value: playerName,
+          subtitle: 'Klik op naam om uit/in kopieerlijst te zetten',
+          title: 'Klik om deze speler uit of in de kopieerlijst te zetten',
+          onClick: () => {
+            tableRow._excludedFromCopy = !tableRow._excludedFromCopy;
+            tableRow._rowClass = tableRow._excludedFromCopy ? 'excludedCopyRow' : '';
+            if (latestWeekendMissedComponent) latestWeekendMissedComponent.setRows(latestWeekendMissedRows);
+          },
+        };
+        tableRow = [nameCell, missedAttacks];
+        tableRow._excludedFromCopy = false;
+        return tableRow;
+      })
+      .filter(Boolean)
+      .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]?.value || '').localeCompare(String(b[0]?.value || '')));
+
+    return { latestWeekend, rows: mappedRows };
+  }
+
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
@@ -1142,6 +1223,20 @@
     analyticsCache.contribution = data.contribution_table || { headers: [], rows: [] };
     analyticsCache.decks = data.decks_used_table || { headers: [], rows: [] };
 
+    const latestWeekendMissedAfterCache = getLatestWeekendMissedRows(analyticsCache.contribution, analyticsCache.decks);
+    latestWeekendMissedRows = latestWeekendMissedAfterCache.rows || [];
+    const latestTitleAfterCache = el('titleLatestWeekendMissed');
+    if (latestTitleAfterCache) {
+      latestTitleAfterCache.textContent = latestWeekendMissedAfterCache.latestWeekend
+        ? `Laatst gespeelde weekend (${latestWeekendMissedAfterCache.latestWeekend}) - gemiste aanvallen`
+        : 'Laatst gespeelde weekend - gemiste aanvallen';
+    }
+    latestWeekendMissedComponent = renderTable(
+      'latestWeekendMissedWrap',
+      ['Speler', 'Gemiste aanvallen'],
+      latestWeekendMissedRows
+    );
+
     contributionComponent = renderTable('contributionWrap', analyticsCache.contribution.headers, analyticsCache.contribution.rows);
 
     decksComponent = renderTable('decksWrap', analyticsCache.decks.headers, analyticsCache.decks.rows);
@@ -1209,6 +1304,15 @@
   el('copyUnderperformers').addEventListener('click', () => {
     if (underperformersComponent) {
       copyTable(underperformersComponent.getHeaders(), underperformersComponent.getVisibleRows(), el('toastUnderperformers'));
+    }
+  });
+  el('copyLatestWeekendMissed').addEventListener('click', () => {
+    if (latestWeekendMissedComponent) {
+      copyTable(
+        latestWeekendMissedComponent.getHeaders(),
+        latestWeekendMissedComponent.getVisibleRows(),
+        el('toastLatestWeekendMissed')
+      );
     }
   });
 
