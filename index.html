@@ -895,6 +895,37 @@
     return ["Clan avg --> Projected", ...formattedRows].join("\n\n");
   }
 
+  function buildDynamicShortStory(data) {
+    const maxChars = 200;
+    const clan = data?.clan_name || clanName(currentClanTag);
+    const activeDay = Number(data?.cwstats_active_day);
+    const dayText = Number.isFinite(activeDay) && activeDay >= 1 && activeDay <= 4
+      ? `Dag ${activeDay}`
+      : "War update";
+
+    const finishOutlook = data?.finish_outlook || {};
+    const rank = Number(finishOutlook?.projected_rank);
+    const projectedFinish = Number(finishOutlook?.projected_finish);
+    const battlesLeft = Number(finishOutlook?.battles_left);
+    const duelsLeft = Number(finishOutlook?.duels_left);
+    const players = Number(data?.total_players_participated);
+    const isColosseum = Boolean(data?.cwstats_colosseum_weekend);
+
+    const segments = [`${dayText} | ${clan}`];
+    if (Number.isFinite(rank) && rank > 0) segments.push(`geprojecteerd #${rank}`);
+    if (Number.isFinite(projectedFinish) && projectedFinish > 0) segments.push(`${projectedFinish} punten`);
+    if (Number.isFinite(players) && players > 0) segments.push(`${players} spelers actief`);
+    if (Number.isFinite(battlesLeft) && battlesLeft >= 0) segments.push(`${battlesLeft} battles over`);
+    if (Number.isFinite(duelsLeft) && duelsLeft >= 0) segments.push(`${duelsLeft} duels over`);
+    if (isColosseum) segments.push("Colosseum weekend");
+
+    let story = `${segments.join(" • ")}. Samen pushen naar boven! 🔥`;
+    if (story.length > maxChars) {
+      story = story.slice(0, maxChars - 1).trimEnd() + "…";
+    }
+    return story;
+  }
+
   async function copyText(targetId) {
     const map = {
       clanAvg: "clanAvg",
@@ -1021,14 +1052,15 @@
       }
     }
 
-    el("story").textContent = data.short_story_text || "(geen data)";
+    const storyText = buildDynamicShortStory(data);
+    el("story").textContent = storyText || "(geen data)";
     updateLength("clanAvg", formattedClanAvg);
     updateLength("battles", data.battles_left_text);
     updateLength("risk", data.risk_left_text);
     updateLength("highFame", highFameText);
     updateLength("day1HighFame", day1Text);
     updateLength("day4", day4Text);
-    updateLength("story", data.short_story_text, data.short_story_limit);
+    updateLength("story", storyText, 200);
 
     el("updated").textContent = new Date().toLocaleString();
     el("status").textContent = "";
