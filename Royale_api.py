@@ -21,6 +21,7 @@ DEFAULT_CLAN_TAG = "9YP8UY"
 CLAN_CONFIGS = {
     DEFAULT_CLAN_TAG: {"name": "Brabant Royale"},
     "GPCLVLPP": {"name": "Brabant Royale 2"},
+    "RLQQQC99": {"name": "Brabant Royale 3"},
 }
 
 
