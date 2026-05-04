@@ -209,10 +209,18 @@
         }
 
         const p = data.player;
+        const winRate = (p.win_rate === null || p.win_rate === undefined) ? "-" : `${p.win_rate}%`;
+        const leagueTrophies = (p.league === null || p.league === undefined) ? "-" : p.league;
         box.innerHTML = `
-          <strong>${pid}</strong><br>
+          <strong>${p.name || pid}</strong> <span class="pill">#${pid}</span><br>
           Account level: <strong>${p.acc_lvl || "-"}</strong><br>
-          Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong>
+          Trophies: <strong>${p.trophies ?? "-"}</strong> (best: <strong>${p.best_trophies ?? "-"}</strong>)<br>
+          Battles: <strong>${p.battle_count ?? "-"}</strong> • Wins/Losses: <strong>${p.wins ?? "-"}</strong>/<strong>${p.losses ?? "-"}</strong> (winrate <strong>${winRate}</strong>)<br>
+          Clan: <strong>${p.clan_name || "-"}</strong> (${p.clan_role || "-"})<br>
+          Donations: <strong>${p.donations ?? "-"}</strong> sent • <strong>${p.donations_received ?? "-"}</strong> received<br>
+          Path of Legends season trophies: <strong>${leagueTrophies}</strong><br>
+          Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong><br>
+          <small style="opacity:.75">${p.cw2_wins_note || ""}</small>
         `;
       } catch (error) {
         box.textContent = `Netwerkfout bij spelerdetails: ${error?.message || "onbekend"}`;

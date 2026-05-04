@@ -41,10 +41,32 @@ def fetch_player_summary(pid: str) -> dict:
         raise RuntimeError(f"Clash API error {response.status_code} for /players/%23{clean_pid}")
 
     data = response.json() if response.content else {}
+    battle_count = int(data.get("battleCount") or 0)
+    wins = int(data.get("wins") or 0)
+    losses = int(data.get("losses") or 0)
+    win_rate = round((wins / (wins + losses)) * 100, 1) if (wins + losses) else None
+
+    clan = data.get("clan") or {}
+    clan_name = clan.get("name") or "-"
+    clan_role = data.get("role") or "-"
+
     return {
         "pid": clean_pid,
+        "name": data.get("name") or clean_pid,
         "acc_lvl": str(data.get("expLevel") or "-"),
+        "trophies": int(data.get("trophies") or 0),
+        "best_trophies": int(data.get("bestTrophies") or 0),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "battle_count": battle_count,
+        "clan_name": clan_name,
+        "clan_role": clan_role,
+        "donations": int(data.get("donations") or 0),
+        "donations_received": int(data.get("donationsReceived") or 0),
+        "league": ((data.get("leagueStatistics") or {}).get("currentSeason") or {}).get("trophies"),
         "cw2_wins": str(data.get("warDayWins") or 0),
+        "cw2_wins_note": "Official API field `warDayWins` (can differ from RoyaleAPI lifetime CW2 interpretation).",
         "url": f"https://royaleapi.com/player/{clean_pid}",
     }
 
