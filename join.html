@@ -209,10 +209,31 @@
         }
 
         const p = data.player;
+        const war = p.recent_war_form || {};
+
+        const warLines = war.has_data
+          ? `
+            <strong>Recent War Form</strong><br>
+            Observed War Weeks: <strong>${war.observed_war_weeks ?? "-"}</strong> (${war.confidence_label || "-"})<br>
+            Recent Avg Contribution: <strong>${war.avg_contribution ?? "-"}</strong><br>
+            Weeks Above 3000: <strong>${war.weeks_above_3000 ?? "-"}</strong><br>
+            Total Decks Used: <strong>${war.total_decks_used ?? "-"}</strong><br>
+            Avg Decks Used: <strong>${war.avg_decks_used ?? "-"}</strong><br>
+            Reliability: <strong>${war.reliability_pct ?? "-"}%</strong><br>
+            Recent Perfect Streak (longest): <strong>${war.longest_recent_perfect_streak ?? "-"}</strong><br>
+            Current Perfect Streak: <strong>${war.current_perfect_streak ?? "-"}</strong>
+          `
+          : `<strong>Recent War Form</strong><br>${war.message || "No recent clan war data observable from live API"}`;
+
         box.innerHTML = `
-          <strong>${pid}</strong><br>
+          <strong>${p.name || pid}</strong> <span class="pill">#${pid}</span><br>
           Account level: <strong>${p.acc_lvl || "-"}</strong><br>
-          Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong>
+          Trophies: <strong>${p.trophies ?? "-"}</strong> (best: <strong>${p.best_trophies ?? "-"}</strong>)<br>
+          Current clan: <strong>${p.clan_name || "-"}</strong><br>
+          Level 15 cards: <strong>${p.level_15_cards ?? "-"}</strong> • Level 16 cards: <strong>${p.level_16_cards ?? "-"}</strong><br>
+          Cards tracked: <strong>${p.cards_total ?? "-"}</strong><br>
+          <hr style="border-color: rgba(255,255,255,.12); border-style: solid; border-width: 1px 0 0; margin: 10px 0;">
+          ${warLines}
         `;
       } catch (error) {
         box.textContent = `Netwerkfout bij spelerdetails: ${error?.message || "onbekend"}`;
