@@ -221,7 +221,7 @@
     const tbody = document.createElement("tbody");
     players.forEach((player, idx) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${idx + 1}</td><td>${player.name} <span class="badge">${player.tag}</span></td><td>${player.role || "-"}</td><td>${player.decks_used_today || 0}/${player.decks_total_so_far || 0}</td><td>${player.boat_attacks || 0}</td><td>${player.fame || 0}</td>`;
+      tr.innerHTML = `<td>${idx + 1}</td><td>${player.name}</td><td>${player.role || "-"}</td><td>${player.decks_used_today || 0}/${player.decks_total_so_far || 0}</td><td>${player.boat_attacks || 0}</td><td>${player.fame || 0}</td>`;
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);

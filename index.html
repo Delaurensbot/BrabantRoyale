@@ -769,8 +769,7 @@
           td.className = "role";
           td.textContent = p;
         } else if (idx === 1) {
-          const [name, badge] = p.split(/\s+-\s+/);
-          td.innerHTML = badge ? `${name} <span class="badge">${badge}</span>` : p;
+          td.textContent = p;
         } else {
           td.textContent = p || "-";
         }
