@@ -16,3 +16,22 @@ def test_parse_cwstats_race_context_maps_boat_and_medals_in_correct_order():
     assert row["trophy"] == 3530
     assert row["boat_movement"] == 9550
     assert row["cw_trophy"] == 3435
+
+def test_parse_cwstats_race_context_fallback_for_updated_layout():
+    html = """
+    <html><body>
+      <div>
+        1 #1 Clan 4,422 Clan War trophies 0 Boat movement 11,650 Fame 176.52
+        4 Brabant Royale 4,330 Clan War trophies 0 Boat movement 7,350 Fame 179.27
+      </div>
+    </body></html>
+    """
+
+    parsed = parse_cwstats_race_context_from_html(html)
+    row = parsed["rows_by_name"]["brabantroyale"]
+
+    assert row["rank"] == 4
+    assert row["trophy"] == 7350
+    assert row["boat_movement"] == 0
+    assert row["cw_trophy"] == 4330
+    assert row["fame_avg"] == 179.27

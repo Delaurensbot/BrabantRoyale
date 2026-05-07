@@ -108,6 +108,19 @@ def parse_cwstats_race_context_from_html(html: str):
     rows = {}
     row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
 
+    def _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg):
+        normalized_name = _normalize_clan_name(name)
+        if not normalized_name:
+            return
+        rows[normalized_name] = {
+            "rank": int(rank),
+            "name": re.sub(r"\s+", " ", name).strip(),
+            "trophy": _compact_number(str(trophy)) or 0,
+            "cw_trophy": _compact_number(str(cw_trophy)) or 0,
+            "boat_movement": _compact_number(str(boat_movement)) or 0,
+            "fame_avg": float(str(fame_avg).replace(",", ".")),
+        }
+
     for link in soup.find_all("a", href=True):
         href = (link.get("href") or "").strip()
         if not re.fullmatch(r"/clan/[A-Z0-9]+/race", href):
@@ -121,21 +134,22 @@ def parse_cwstats_race_context_from_html(html: str):
         if not match:
             continue
 
-        rank = int(match.group(1))
-        name = re.sub(r"\s+", " ", match.group(2)).strip()
-        trophy = int(match.group(3))
-        boat_movement = int(match.group(4))
-        cw_trophy = int(match.group(5))
-        fame_avg = float(match.group(6).replace(",", "."))
+        _store_row(*match.groups())
 
-        rows[_normalize_clan_name(name)] = {
-            "rank": rank,
-            "name": name,
-            "trophy": trophy,
-            "cw_trophy": cw_trophy,
-            "boat_movement": boat_movement,
-            "fame_avg": fame_avg,
-        }
+    if not rows:
+        fallback_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+        fallback_regex = re.compile(
+            r"(\d+)\s+"
+            r"(.+?)\s+"
+            r"([\d.,]+)\s+Clan\s*War\s*trophies\s+"
+            r"([\d.,]+)\s+Boat\s*movement\s+"
+            r"([\d.,]+)\s+Fame\s+"
+            r"([\d.,]+)",
+            flags=re.IGNORECASE,
+        )
+        for match in fallback_regex.finditer(fallback_blob):
+            rank, name, cw_trophy, boat_movement, trophy, fame_avg = match.groups()
+            _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg)
 
     return {
         "is_colosseum_weekend": is_colosseum_weekend,
