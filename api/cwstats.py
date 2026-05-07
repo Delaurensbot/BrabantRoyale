@@ -108,6 +108,19 @@ def parse_cwstats_race_context_from_html(html: str):
     rows = {}
     row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
 
+    def _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg):
+        normalized_name = _normalize_clan_name(name)
+        if not normalized_name:
+            return
+        rows[normalized_name] = {
+            "rank": int(rank),
+            "name": re.sub(r"\s+", " ", name).strip(),
+            "trophy": _compact_number(str(trophy)) or 0,
+            "cw_trophy": _compact_number(str(cw_trophy)) or 0,
+            "boat_movement": _compact_number(str(boat_movement)) or 0,
+            "fame_avg": float(str(fame_avg).replace(",", ".")),
+        }
+
     for link in soup.find_all("a", href=True):
         href = (link.get("href") or "").strip()
         if not re.fullmatch(r"/clan/[A-Z0-9]+/race", href):
@@ -121,21 +134,96 @@ def parse_cwstats_race_context_from_html(html: str):
         if not match:
             continue
 
-        rank = int(match.group(1))
-        name = re.sub(r"\s+", " ", match.group(2)).strip()
-        trophy = int(match.group(3))
-        boat_movement = int(match.group(4))
-        cw_trophy = int(match.group(5))
-        fame_avg = float(match.group(6).replace(",", "."))
+        _store_row(*match.groups())
 
-        rows[_normalize_clan_name(name)] = {
-            "rank": rank,
-            "name": name,
-            "trophy": trophy,
-            "cw_trophy": cw_trophy,
-            "boat_movement": boat_movement,
-            "fame_avg": fame_avg,
-        }
+    if not rows:
+        fallback_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+        fallback_regex = re.compile(
+            r"(\d+)\s+"
+            r"(.+?)\s+"
+            r"([\d.,]+)\s+Clan\s*War\s*trophies\s+"
+            r"([\d.,]+)\s+Boat\s*movement\s+"
+            r"([\d.,]+)\s+Fame\s+"
+            r"([\d.,]+)",
+            flags=re.IGNORECASE,
+        )
+        for match in fallback_regex.finditer(fallback_blob):
+            rank, name, cw_trophy, boat_movement, trophy, fame_avg = match.groups()
+            _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg)
+
+    if not rows:
+        def _to_int(value):
+            if isinstance(value, bool) or value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return int(value)
+            return _compact_number(str(value))
+
+        def _to_float(value):
+            if isinstance(value, bool) or value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+            raw = str(value).strip().replace(",", ".")
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+
+        def _find_row_nodes(obj):
+            found = []
+            if isinstance(obj, dict):
+                keys = {k.lower(): k for k in obj.keys()}
+                name_key = next((keys[k] for k in ("name", "clanname", "clan_name") if k in keys), None)
+                if name_key:
+                    has_rank = any(k in keys for k in ("rank", "position", "place"))
+                    has_cw = any(k in keys for k in ("clanwartrophies", "cw_trophy", "cw_trophies"))
+                    has_fame = any(k in keys for k in ("fame", "famepoints", "currentfame", "score"))
+                    if has_rank and has_cw and has_fame:
+                        found.append(obj)
+                for value in obj.values():
+                    found.extend(_find_row_nodes(value))
+            elif isinstance(obj, list):
+                for item in obj:
+                    found.extend(_find_row_nodes(item))
+            return found
+
+        for script in soup.find_all("script"):
+            script_text = script.string or script.get_text("", strip=True)
+            if not script_text or "{" not in script_text:
+                continue
+
+            candidates = []
+            if script_text.strip().startswith("{"):
+                candidates.append(script_text.strip())
+            if "__NEXT_DATA__" in script_text:
+                first_brace = script_text.find("{")
+                last_brace = script_text.rfind("}")
+                if first_brace != -1 and last_brace > first_brace:
+                    candidates.append(script_text[first_brace:last_brace + 1])
+
+            for candidate in candidates:
+                try:
+                    payload = json.loads(candidate)
+                except Exception:
+                    continue
+
+                for node in _find_row_nodes(payload):
+                    kl = {k.lower(): v for k, v in node.items()}
+                    name = kl.get("name") or kl.get("clanname") or kl.get("clan_name")
+                    rank = _to_int(kl.get("rank") or kl.get("position") or kl.get("place"))
+                    cw_trophy = _to_int(kl.get("clanwartrophies") or kl.get("cw_trophy") or kl.get("cw_trophies"))
+                    boat = _to_int(kl.get("boatmovement") or kl.get("boat_movement") or kl.get("boat")) or 0
+                    fame = _to_int(kl.get("fame") or kl.get("famepoints") or kl.get("currentfame") or kl.get("score")) or 0
+                    fame_avg = _to_float(kl.get("fameavg") or kl.get("fame_avg") or kl.get("avg") or kl.get("fameperdeck"))
+
+                    if not name or rank is None or cw_trophy is None:
+                        continue
+
+                    _store_row(rank, str(name), fame, boat, cw_trophy, fame_avg or 0)
+
+            if rows:
+                break
 
     return {
         "is_colosseum_weekend": is_colosseum_weekend,
