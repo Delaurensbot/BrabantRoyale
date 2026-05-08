@@ -235,6 +235,16 @@
     return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
   }
 
+  function stripPlayerTag(value) {
+    const text = String(value || "").trim();
+    return text.replace(/\s*#[A-Za-z0-9]+\b/g, "").trim();
+  }
+
+  function stripPlayerTagsInTableText(value) {
+    const text = String(value || "");
+    return text.replace(/\s#[A-Za-z0-9]{5,}\b/g, "");
+  }
+
   function updateClanNavLinks() {
     const query = `?clan=${encodeURIComponent(currentClanTag)}`;
     const analyticsLink = el("analyticsLink");
@@ -769,7 +779,7 @@
           td.className = "role";
           td.textContent = p;
         } else if (idx === 1) {
-          td.textContent = p;
+          td.textContent = stripPlayerTag(p);
         } else {
           td.textContent = p || "-";
         }
@@ -842,7 +852,7 @@
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.textContent = player.name || "-";
+      nameTd.textContent = stripPlayerTag(player.name) || "-";
       tr.appendChild(nameTd);
 
       const fameTd = document.createElement("td");
@@ -1019,10 +1029,12 @@
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
     renderPlayersTable(data.players_text || "");
-    el("battles").textContent = data.battles_left_text || "(geen data)";
-    el("risk").textContent = data.risk_left_text || "(geen data)";
+    const battlesText = stripPlayerTagsInTableText(data.battles_left_text || "");
+    const riskText = stripPlayerTagsInTableText(data.risk_left_text || "");
+    el("battles").textContent = battlesText || "(geen data)";
+    el("risk").textContent = riskText || "(geen data)";
 
-    const highFameText = (data.high_fame_text || "").trim();
+    const highFameText = stripPlayerTagsInTableText((data.high_fame_text || "").trim());
     const highFameCard = el("highFameCard");
     if (highFameCard) {
       if (highFameText) {
@@ -1037,10 +1049,10 @@
     const day1Players = Array.isArray(data.day1_high_famers)
       ? data.day1_high_famers
       : [];
-    const day1Text = (data.day1_high_fame_text || "").trim();
+    const day1Text = stripPlayerTagsInTableText((data.day1_high_fame_text || "").trim());
     renderDay1HighFameTable(day1Players, day1Text);
 
-    const day4Text = (data.day4_last_chance_text || "").trim();
+    const day4Text = stripPlayerTagsInTableText((data.day4_last_chance_text || "").trim());
     const day4Card = el("day4Card");
     if (day4Card) {
       if (day4Text) {
@@ -1055,8 +1067,8 @@
     const storyText = buildDynamicShortStory(data);
     el("story").textContent = storyText || "(geen data)";
     updateLength("clanAvg", formattedClanAvg);
-    updateLength("battles", data.battles_left_text);
-    updateLength("risk", data.risk_left_text);
+    updateLength("battles", battlesText);
+    updateLength("risk", riskText);
     updateLength("highFame", highFameText);
     updateLength("day1HighFame", day1Text);
     updateLength("day4", day4Text);

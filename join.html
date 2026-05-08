@@ -62,7 +62,7 @@
       <div class="muted" id="countLabel"></div>
     </div>
     <div class="filters">
-      <input id="search" type="search" placeholder="Filter op naam of tag..." />
+      <input id="search" type="search" placeholder="Filter op naam..." />
     </div>
     <div class="tableWrap">
       <table id="joinTable">
@@ -70,17 +70,14 @@
           <tr>
             <th>#</th>
             <th>Speler</th>
-            <th>Player ID</th>
             <th>Gejoind</th>
-            <th>Details</th>
           </tr>
         </thead>
         <tbody id="joinRows">
-          <tr><td colspan="5" style="text-align:center; padding: 16px;">(laden...)</td></tr>
+          <tr><td colspan="3" style="text-align:center; padding: 16px;">(laden...)</td></tr>
         </tbody>
       </table>
     </div>
-    <div class="detailsBox" id="playerDetails"></div>
   </div>
 
   <script>
@@ -155,7 +152,7 @@
       const search = (el("search").value || "").toLowerCase();
 
       const filtered = joinData.filter((row) => {
-        const haystack = `${row.name} ${row.pid}`.toLowerCase();
+        const haystack = `${row.name}`.toLowerCase();
         return !search || haystack.includes(search);
       });
 
@@ -164,7 +161,7 @@
       if (!filtered.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 5;
+        td.colSpan = 3;
         td.style.textAlign = "center";
         td.style.padding = "16px";
         td.textContent = "Geen resultaten";
@@ -178,45 +175,14 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${idx + 1}</td>
-          <td><button class="playerBtn" data-pid="${row.pid}">${row.name}</button></td>
-          <td><span class="pill">${row.pid}</span></td>
+          <td>${row.name}</td>
           <td>${row.ago}</td>
-          <td><button class="playerBtn" data-pid="${row.pid}">Bekijk</button></td>
         `;
         tbody.appendChild(tr);
       });
 
-      tbody.querySelectorAll('.playerBtn').forEach((btn) => {
-        btn.addEventListener('click', () => showPlayerDetails(btn.dataset.pid));
-      });
 
       el("countLabel").textContent = `${filtered.length} resultaten`;
-    }
-
-    async function showPlayerDetails(pid) {
-      const box = el("playerDetails");
-      box.style.display = "block";
-      box.textContent = `Laden speler ${pid}...`;
-
-      try {
-        const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(pid)}&t=${Date.now()}`, { cache: "no-store" });
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok || !data.ok || !data.player) {
-          const apiError = data.error || `API fout (${res.status})`;
-          box.textContent = `Kon spelerdetails niet ophalen: ${apiError}`;
-          return;
-        }
-
-        const p = data.player;
-        box.innerHTML = `
-          <strong>${pid}</strong><br>
-          Account level: <strong>${p.acc_lvl || "-"}</strong><br>
-          Total Clan War 2 wins: <strong>${p.cw2_wins || "-"}</strong>
-        `;
-      } catch (error) {
-        box.textContent = `Netwerkfout bij spelerdetails: ${error?.message || "onbekend"}`;
-      }
     }
 
     async function fetchData() {
