@@ -235,6 +235,11 @@
     return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
   }
 
+  function stripPlayerTag(value) {
+    const text = String(value || "").trim();
+    return text.replace(/\s*#[A-Za-z0-9]+\b/g, "").trim();
+  }
+
   function updateClanNavLinks() {
     const query = `?clan=${encodeURIComponent(currentClanTag)}`;
     const analyticsLink = el("analyticsLink");
@@ -769,7 +774,7 @@
           td.className = "role";
           td.textContent = p;
         } else if (idx === 1) {
-          td.textContent = p;
+          td.textContent = stripPlayerTag(p);
         } else {
           td.textContent = p || "-";
         }
@@ -842,7 +847,7 @@
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.textContent = player.name || "-";
+      nameTd.textContent = stripPlayerTag(player.name) || "-";
       tr.appendChild(nameTd);
 
       const fameTd = document.createElement("td");
