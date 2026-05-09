@@ -254,8 +254,10 @@ def parse_cwstats_players_from_html(html: str):
             "name": name,
             "role": "",
             "boat_attacks": _compact_number(cells[2]) or 0,
-            "decks_total_so_far": _compact_number(cells[3]) or 0,
-            "decks_used_today": _compact_number(cells[4]) or 0,
+            # cwstats participant rows are ordered as:
+            # boat movement | cards used today | cards | fame
+            "decks_used_today": _compact_number(cells[3]) or 0,
+            "decks_total_so_far": _compact_number(cells[4]) or 0,
             "fame": _compact_number(cells[5]) or 0,
         })
 

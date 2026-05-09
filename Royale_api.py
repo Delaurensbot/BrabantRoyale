@@ -340,8 +340,11 @@ def render_player_table(rows: List[Dict]) -> str:
 
 
 def attacks_left_today(row: Dict) -> Optional[int]:
+    raw_used = row.get("decks_used_today")
+    if raw_used in (None, ""):
+        return None
     try:
-        used = int(row.get("decks_used_today", 0))
+        used = int(raw_used)
     except Exception:
         return None
     left = 4 - used
@@ -411,6 +414,7 @@ def render_battles_left_today(rows: List[Dict]) -> str:
     buckets = bucket_open_players(rows)
     out: List[str] = []
     out.append("Battles left (today):")
+    known_players = sum(len(buckets.get(k, [])) for k in [4, 3, 2, 1, 0])
 
     any_added = False
     for k in [4, 3, 2, 1]:
@@ -423,7 +427,10 @@ def render_battles_left_today(rows: List[Dict]) -> str:
         for n in names:
             out.append(f"- {n}")
 
-    if not any_added:
+    if known_players == 0:
+        out.append("")
+        out.append("Nog geen betrouwbare data voor 'decks used today' beschikbaar.")
+    elif not any_added:
         out.append("")
         out.append("Iedereen is klaar voor vandaag.")
     return "\n".join(out)
