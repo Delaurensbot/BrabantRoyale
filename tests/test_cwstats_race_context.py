@@ -1,4 +1,7 @@
-from api.cwstats import parse_cwstats_race_context_from_html
+from api.cwstats import (
+    parse_cwstats_finish_outlook_from_html,
+    parse_cwstats_race_context_from_html,
+)
 
 
 def test_parse_cwstats_race_context_maps_boat_and_medals_in_correct_order():
@@ -69,3 +72,47 @@ def test_parse_cwstats_race_context_from_embedded_json_payload():
     assert row["boat_movement"] == 0
     assert row["trophy"] == 7350
     assert row["fame_avg"] == 179.27
+
+
+def test_parse_cwstats_finish_outlook_from_current_layout_labels():
+    html = """
+    <html><body>
+      Race Outlook Today
+      Decks used 182 / 200
+      Slots used 47 / 50
+      Possible Finish
+      Best possible 2nd 33,550
+      Worst possible 5th 31,350
+      Projected Finish Placement 3rd 32,450
+    </body></html>
+    """
+
+    parsed = parse_cwstats_finish_outlook_from_html(html)
+
+    assert parsed["projected_rank"] == 3
+    assert parsed["projected_finish"] == 32450
+    assert parsed["best_rank"] == 2
+    assert parsed["best_finish"] == 33550
+    assert parsed["worst_rank"] == 5
+    assert parsed["worst_finish"] == 31350
+
+def test_parse_cwstats_race_context_from_line_based_layout_blocks():
+    html = """
+    <html><body>
+      <div>Overview</div>
+      <div>Day 4</div>
+      <div>War</div>
+      <div>1</div><div>#1 Clan</div><div>4,422</div><div>Clan War trophies</div><div>0</div><div>Boat movement</div><div>33,700</div><div>Fame</div><div>168.50</div>
+      <div>2</div><div>Brabant Royale</div><div>4,330</div><div>Clan War trophies</div><div>0</div><div>Boat movement</div><div>29,550</div><div>Fame</div><div>162.36</div>
+    </body></html>
+    """
+
+    parsed = parse_cwstats_race_context_from_html(html)
+
+    assert "brabantroyale" in parsed["rows_by_name"]
+    br = parsed["rows_by_name"]["brabantroyale"]
+    assert br["rank"] == 2
+    assert br["cw_trophy"] == 4330
+    assert br["boat_movement"] == 0
+    assert br["trophy"] == 29550
+    assert br["fame_avg"] == 162.36

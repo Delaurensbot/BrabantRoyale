@@ -60,6 +60,21 @@ def parse_cwstats_finish_outlook_from_html(html: str):
     best_rank, best_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
     worst_rank, worst_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
 
+    # Nieuwe CWStats-layout kan het label vóór rank tonen,
+    # bv. "Best possible 2nd 33,550" en "Placement 3rd 32,450".
+    if projected_rank is None or projected_finish is None:
+        projected_rank, projected_finish = extract_rank_score(
+            r"(?:Projected\s*Finish|Placement)\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+    if best_rank is None or best_finish is None:
+        best_rank, best_finish = extract_rank_score(
+            r"Best\s*possible(?:\s*finish)?\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+    if worst_rank is None or worst_finish is None:
+        worst_rank, worst_finish = extract_rank_score(
+            r"Worst\s*possible(?:\s*finish)?\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+
     return {
         "battles_left": extract_number(r"Battles\s*Left\s*([\d.,]+)"),
         "duels_left": extract_number(r"Duels\s*Left\s*([\d.,]+)"),
@@ -108,9 +123,20 @@ def parse_cwstats_race_context_from_html(html: str):
     rows = {}
     row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
 
+    def _parse_float(value):
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        cleaned = re.sub(r"[^0-9,.-]", "", raw).replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
     def _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg):
         normalized_name = _normalize_clan_name(name)
-        if not normalized_name:
+        fame_avg_value = _parse_float(fame_avg)
+        if not normalized_name or fame_avg_value is None:
             return
         rows[normalized_name] = {
             "rank": int(rank),
@@ -118,7 +144,7 @@ def parse_cwstats_race_context_from_html(html: str):
             "trophy": _compact_number(str(trophy)) or 0,
             "cw_trophy": _compact_number(str(cw_trophy)) or 0,
             "boat_movement": _compact_number(str(boat_movement)) or 0,
-            "fame_avg": float(str(fame_avg).replace(",", ".")),
+            "fame_avg": fame_avg_value,
         }
 
     for link in soup.find_all("a", href=True):
@@ -136,6 +162,27 @@ def parse_cwstats_race_context_from_html(html: str):
 
         _store_row(*match.groups())
 
+
+    if not rows:
+        lines = [line.strip() for line in soup.get_text("\n", strip=True).splitlines() if line.strip()]
+        for idx, line in enumerate(lines):
+            if not re.fullmatch(r"\d+", line):
+                continue
+            if idx + 6 >= len(lines):
+                continue
+            if lines[idx + 2].lower() != "clan war trophies":
+                continue
+            if lines[idx + 4].lower() != "boat movement":
+                continue
+            if lines[idx + 6].lower() != "fame":
+                continue
+            rank = lines[idx]
+            name = lines[idx + 1]
+            cw_trophy = lines[idx + 3]
+            boat_movement = lines[idx + 5]
+            fame_avg = lines[idx + 7] if idx + 7 < len(lines) else ""
+            _store_row(rank, name, boat_movement, 0, cw_trophy, fame_avg)
+
     if not rows:
         fallback_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
         fallback_regex = re.compile(
@@ -150,6 +197,21 @@ def parse_cwstats_race_context_from_html(html: str):
         for match in fallback_regex.finditer(fallback_blob):
             rank, name, cw_trophy, boat_movement, trophy, fame_avg = match.groups()
             _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg)
+
+    if not rows:
+        labeled_row_regex = re.compile(
+            r"(\d+)\s+"
+            r"(.+?)\s+"
+            r"([\d.,]+)\s+Clan\s*War\s*trophies\s+"
+            r"([\d.,]+)\s+Boat\s*movement\s+"
+            r"([\d.,]+)\s+Fame\s+"
+            r"([\d.,]+)",
+            flags=re.IGNORECASE,
+        )
+        for match in labeled_row_regex.finditer(text_blob):
+            rank, name, cw_trophy, boat_movement, fame_total, fame_avg = match.groups()
+            # In de huidige CWStats race-sectie betekent "Fame" de voortgangsscore.
+            _store_row(rank, name, fame_total, boat_movement, cw_trophy, fame_avg)
 
     if not rows:
         def _to_int(value):
