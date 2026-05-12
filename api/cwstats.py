@@ -60,6 +60,21 @@ def parse_cwstats_finish_outlook_from_html(html: str):
     best_rank, best_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
     worst_rank, worst_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
 
+    # Nieuwe CWStats-layout kan het label vóór rank tonen,
+    # bv. "Best possible 2nd 33,550" en "Placement 3rd 32,450".
+    if projected_rank is None or projected_finish is None:
+        projected_rank, projected_finish = extract_rank_score(
+            r"(?:Projected\s*Finish|Placement)\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+    if best_rank is None or best_finish is None:
+        best_rank, best_finish = extract_rank_score(
+            r"Best\s*possible(?:\s*finish)?\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+    if worst_rank is None or worst_finish is None:
+        worst_rank, worst_finish = extract_rank_score(
+            r"Worst\s*possible(?:\s*finish)?\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)"
+        )
+
     return {
         "battles_left": extract_number(r"Battles\s*Left\s*([\d.,]+)"),
         "duels_left": extract_number(r"Duels\s*Left\s*([\d.,]+)"),
@@ -150,6 +165,21 @@ def parse_cwstats_race_context_from_html(html: str):
         for match in fallback_regex.finditer(fallback_blob):
             rank, name, cw_trophy, boat_movement, trophy, fame_avg = match.groups()
             _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg)
+
+    if not rows:
+        labeled_row_regex = re.compile(
+            r"(\d+)\s+"
+            r"(.+?)\s+"
+            r"([\d.,]+)\s+Clan\s*War\s*trophies\s+"
+            r"([\d.,]+)\s+Boat\s*movement\s+"
+            r"([\d.,]+)\s+Fame\s+"
+            r"([\d.,]+)",
+            flags=re.IGNORECASE,
+        )
+        for match in labeled_row_regex.finditer(text_blob):
+            rank, name, cw_trophy, boat_movement, fame_total, fame_avg = match.groups()
+            # In de huidige CWStats race-sectie betekent "Fame" de voortgangsscore.
+            _store_row(rank, name, fame_total, boat_movement, cw_trophy, fame_avg)
 
     if not rows:
         def _to_int(value):
