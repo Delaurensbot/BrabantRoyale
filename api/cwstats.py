@@ -6,6 +6,11 @@ import re
 
 from bs4 import BeautifulSoup
 
+try:
+    from api import strategy_engine
+except ImportError:
+    import strategy_engine
+
 from Royale_api import (
     OUR_CLAN_NAME_DEFAULT,
     RACE_URL_DEFAULT,
@@ -662,13 +667,15 @@ class handler(BaseHTTPRequestHandler):
             total_players_participated = compute_total_players_participated(filtered_players)
 
             war_phase = build_war_phase(day_num, cwstats_race_context)
-            race_rows = build_race_rows(clans)
-            strategy = build_strategy(
-                race_rows,
-                war_phase,
+            strategy_package = strategy_engine.build_strategy_package(
+                clans,
                 clan_config.get("name") or OUR_CLAN_NAME_DEFAULT,
+                filtered_players,
                 cwstats_finish_outlook,
+                war_phase,
             )
+            race_rows = strategy_package.get("raceRows", [])
+            strategy = strategy_package.get("recommendation", {})
 
             race_overview_text = render_clan_overview_table(clans)
             insights_text = render_clan_insights(clans, clan_config.get("name") or OUR_CLAN_NAME_DEFAULT)
@@ -713,7 +720,7 @@ class handler(BaseHTTPRequestHandler):
 
             sections = [
                 ("Race overview", race_overview_text),
-                ("Strategieadvies", strategy.get("copy_text")),
+                ("Strategieadvies", strategy.get("summary")),
                 ("Insights", insights_text),
                 ("Clan stats", clan_stats_text),
                 ("Clan averages", clan_avg_projection_text),
@@ -757,8 +764,12 @@ class handler(BaseHTTPRequestHandler):
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
                 "war_phase": war_phase,
+                "war_context": strategy_package.get("warContext"),
                 "race_rows": race_rows,
                 "strategy": strategy,
+                "rank_targets": strategy_package.get("rankTargets"),
+                "projections": strategy_package.get("projections"),
+                "data_quality": strategy_package.get("dataQuality"),
                 "cwstats_colosseum_weekend": bool(cwstats_race_context.get("is_colosseum_weekend")),
                 "cwstats_active_day": war_phase.get("day"),
                 "total_players_participated": total_players_participated,
