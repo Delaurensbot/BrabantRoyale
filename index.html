@@ -31,10 +31,12 @@
     .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
     .openClanWarning { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 70, 70, 0.75); background: rgba(255, 0, 0, 0.2); color: #ffdede; font-weight: 800; letter-spacing: 0.2px; display: none; }
     .colosseumNotice { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 181, 71, 0.85); background: rgba(255, 181, 71, 0.14); color: #ffe6bd; font-weight: 700; letter-spacing: 0.15px; display: none; }
+    .phaseBadge { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 999px; background: rgba(116, 255, 141, 0.12); border: 1px solid rgba(116, 255, 141, 0.34); color: var(--text); font-size: 13px; font-weight: 700; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
     .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
+    .cardHeadStack { display: grid; gap: 4px; }
     .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
     pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(12, 16, 27, 0.85); border: 1px solid rgba(177, 92, 255, 0.35); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
     .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 8px; }
@@ -75,6 +77,26 @@
     .ring--best { --ring-color: #55d66a; }
     .ring--worst { --ring-color: #ff5c5c; }
     .finishHint { color: var(--muted); font-size: 13px; }
+    .strategyPanel { display: grid; gap: 14px; }
+    .strategyLead { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.09); }
+    .strategyStatus { font-size: 20px; font-weight: 800; }
+    .strategyRecommendation { color: var(--muted); line-height: 1.45; }
+    .strategyGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    .strategyMetric { padding: 10px 12px; border-radius: 10px; background: rgba(12, 16, 27, 0.62); border: 1px solid rgba(255,255,255,0.08); }
+    .strategyMetricLabel { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.35px; }
+    .strategyMetricValue { margin-top: 4px; font-size: 22px; font-weight: 800; }
+    .strategyTargets { display: grid; gap: 8px; }
+    .strategyTarget { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245, 184, 61, 0.32); background: rgba(245, 184, 61, 0.08); }
+    .strategyTargetTitle { font-weight: 800; }
+    .strategyTargetMeta { color: var(--muted); font-size: 13px; }
+    .strategyBadges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .strategyBadge { display: inline-flex; width: fit-content; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--muted); font-size: 12px; font-weight: 700; }
+    .strategySectionTitle { margin-top: 2px; font-size: 15px; font-weight: 800; }
+    .compactTable { width: 100%; border-collapse: collapse; }
+    .compactTable th, .compactTable td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+    .compactTable th { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: 0.25px; }
+    .strategyReasons { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.5; }
+    .dataQuality { color: var(--muted); font-size: 13px; line-height: 1.5; }
     .hiddenCopy { display: none; }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
     @media (max-width: 640px) {
@@ -106,9 +128,20 @@
   <div class="grid">
     <div class="card fullRow">
       <div class="cardHead">
-        <div class="title">Race Overview</div>
+        <div class="cardHeadStack">
+          <div class="title">Race Overview</div>
+          <div class="subtle" id="overviewPhase">War status laden...</div>
+        </div>
+        <div class="phaseBadge" id="overviewPhaseBadge">-</div>
       </div>
       <div id="overview" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Strategieadvies</div>
+      </div>
+      <div id="strategy" class="empty">(loading...)</div>
     </div>
 
     <div class="card fullRow">
@@ -245,6 +278,32 @@
     return text.replace(/\s#[A-Za-z0-9]{5,}\b/g, "");
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function formatMetric(value, decimals = 0) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return new Intl.NumberFormat("en-US", {
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals,
+    }).format(n);
+  }
+
+  function formatDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "-";
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    return `${hours}u ${String(minutes).padStart(2, "0")}m`;
+  }
+
   function updateClanNavLinks() {
     const query = `?clan=${encodeURIComponent(currentClanTag)}`;
     const analyticsLink = el("analyticsLink");
@@ -311,13 +370,7 @@
       return parseInt(m[1], 10);
     }
 
-    const normalizedNumber = raw
-      .replace(/\./g, "")
-      .replace(",", ".")
-      .replace(/[^\d.-]/g, "");
-    const n = parseFloat(normalizedNumber);
-    if (Number.isNaN(n)) return null;
-    return n;
+    return parseMetricNumber(raw, col.includes("avg"));
   }
 
   function sortOverviewRows(index) {
@@ -363,6 +416,8 @@
     const container = el("overview");
     container.innerHTML = "";
     container.className = "tableWrap";
+    const clanIdx = headCells.findIndex((cell) => (cell || "").toLowerCase().includes("clan"));
+    const decksIdx = headCells.findIndex((cell) => (cell || "").toLowerCase().includes("decks"));
 
     const table = document.createElement("table");
     table.className = "overviewTable";
@@ -390,10 +445,10 @@
 
       parts.forEach((p, idx) => {
         const td = document.createElement("td");
-        if (idx === 0) {
+        if (idx === clanIdx) {
           td.className = "clanName";
           td.textContent = p;
-        } else if (idx === 1) {
+        } else if (idx === decksIdx) {
           td.innerHTML = `<span class="pill">${p || "-"}</span>`;
         } else {
           td.textContent = p || "-";
@@ -412,6 +467,36 @@
 
     table.appendChild(tbody);
     container.appendChild(table);
+  }
+
+  function renderOverviewFromRaceRows(raceRows) {
+    if (!Array.isArray(raceRows) || !raceRows.length) return false;
+
+    const headCells = ["Rank", "Clan", "Decks", "Avg/deck", "Projected", "Boat movement", "Medals"];
+    const rows = raceRows.map((row) => {
+      const decks = row.decks || null;
+      const used = decks ? decks.used : row.decksUsedToday;
+      const total = decks ? decks.total : row.estimatedDeckCapacityToday;
+      const capacityLabel = row.deckCapacityLabel || "live";
+      const totalText = capacityLabel === "live" ? `${total}` : `circa ${total}`;
+      const deckText = used != null && total != null && Number.isFinite(Number(used)) && Number.isFinite(Number(total))
+        ? `${used}/${totalText}`
+        : "-";
+      return [
+        row.current_rank != null ? String(row.current_rank) : row.currentRank != null ? String(row.currentRank) : "-",
+        row.name || "-",
+        deckText,
+        row.avg != null ? formatMetric(row.avg, 2) : row.todayAveragePerDeck != null ? formatMetric(row.todayAveragePerDeck, 2) : "-",
+        row.projected != null ? formatMetric(row.projected) : "-",
+        row.boat_points != null ? formatMetric(row.boat_points) : row.boatValueRaw != null ? formatMetric(row.boatValueRaw) : "-",
+        row.medals != null ? formatMetric(row.medals) : row.currentMedals != null ? formatMetric(row.currentMedals) : "-",
+      ];
+    });
+
+    overviewData = { headCells, rows };
+    overviewSortState = { index: -1, direction: "desc" };
+    buildOverviewTable(headCells, rows);
+    return true;
   }
 
   function renderOverviewTable(text) {
@@ -732,6 +817,147 @@
     `;
   }
 
+  function renderWarPhase(data) {
+    const phase = data?.war_phase || {};
+    const label = phase.label || "War status onbekend";
+    const source = phase.source && phase.source !== "unknown" ? `Bron: ${phase.source}` : "Bron onbekend";
+    const confidence = phase.confidence ? `, ${phase.confidence}` : "";
+
+    const badge = el("overviewPhaseBadge");
+    const detail = el("overviewPhase");
+    if (badge) badge.textContent = label;
+    if (detail) detail.textContent = `${source}${confidence}`;
+  }
+
+  function renderStrategy(data) {
+    const container = el("strategy");
+    if (!container) return;
+
+    const strategy = data?.strategy || {};
+    if (!strategy.headline && !strategy.summary && !strategy.status && !strategy.recommendation) {
+      container.className = "empty";
+      container.textContent = "(geen strategie beschikbaar)";
+      return;
+    }
+
+    const action = strategy.actionPlan || {};
+    const context = data?.war_context || {};
+    const dataQuality = data?.data_quality || {};
+    const rankTargets = Array.isArray(data?.rank_targets) ? data.rank_targets : [];
+    const projections = Array.isArray(data?.projections) ? data.projections : [];
+    const clansById = new Map((data?.race_rows || []).map((row) => [row.id || normalizeClanName(row.name), row]));
+
+    const requiredAvg = strategy.requiredAveragePerDeck != null
+      ? formatMetric(strategy.requiredAveragePerDeck, 2)
+      : "-";
+    const reasons = Array.isArray(strategy.rationale) ? strategy.rationale.slice(0, 3) : [];
+    const warnings = [
+      ...(Array.isArray(strategy.warnings) ? strategy.warnings : []),
+      ...(Array.isArray(dataQuality.missingFields) && dataQuality.missingFields.length ? [`Ontbrekend: ${dataQuality.missingFields.join(", ")}`] : []),
+      ...(Array.isArray(dataQuality.estimatedFields) && dataQuality.estimatedFields.length ? [`Geschat: ${dataQuality.estimatedFields.join(", ")}`] : []),
+    ];
+    const assumptions = Array.isArray(strategy.assumptions) ? strategy.assumptions.slice(0, 3) : [];
+
+    const ladderHtml = rankTargets.length
+      ? `
+        <div class="strategySectionTitle">Target ladder</div>
+        <table class="compactTable">
+          <thead><tr><th>Positie</th><th>Avg nodig</th><th>Min wins</th><th>Veilige losses</th><th>Status</th></tr></thead>
+          <tbody>
+            ${rankTargets.map((target) => `
+              <tr>
+                <td>${escapeHtml(target.rank)}</td>
+                <td>${escapeHtml(target.requiredAveragePerDeck != null ? formatMetric(target.requiredAveragePerDeck, 2) : "-")}</td>
+                <td>${escapeHtml(target.minimumWinsNeeded != null ? formatMetric(target.minimumWinsNeeded) : "-")}</td>
+                <td>${escapeHtml(target.safeLossesAllowed != null ? formatMetric(target.safeLossesAllowed) : "-")}</td>
+                <td>${escapeHtml(target.status || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `
+      : "";
+
+    const projectionHtml = projections.length
+      ? `
+        <div class="strategySectionTitle">Scenariovergelijking</div>
+        <table class="compactTable">
+          <thead><tr><th>Clan</th><th>Floor</th><th>Expected</th><th>Ceiling</th><th>Decks</th></tr></thead>
+          <tbody>
+            ${projections.map((projection) => {
+              const clan = clansById.get(projection.clanId) || {};
+              return `
+                <tr>
+                  <td>${escapeHtml(clan.name || projection.clanId || "-")}</td>
+                  <td>${escapeHtml(formatMetric(projection.floorFinal))}</td>
+                  <td>${escapeHtml(formatMetric(projection.expectedFinal))}</td>
+                  <td>${escapeHtml(formatMetric(projection.ceilingFinal))}</td>
+                  <td>${escapeHtml(projection.expectedRemainingDecks != null ? formatMetric(projection.expectedRemainingDecks) : "-")}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `
+      : "";
+
+    const reasonsHtml = reasons.length
+      ? `<ul class="strategyReasons">${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+      : `<div class="dataQuality">Geen extra rationale beschikbaar.</div>`;
+    const warningHtml = warnings.length
+      ? `<div class="dataQuality">${warnings.map(escapeHtml).join("<br>")}</div>`
+      : `<div class="dataQuality">Geen kritieke ontbrekende velden gevonden.</div>`;
+    const assumptionsHtml = assumptions.length
+      ? `<div class="dataQuality">${assumptions.map(escapeHtml).join("<br>")}</div>`
+      : "";
+
+    container.className = "strategyPanel";
+    container.innerHTML = `
+      <div class="strategyLead">
+        <div class="strategyStatus">${escapeHtml(strategy.headline || strategy.status || "-")}</div>
+        <div class="strategyRecommendation">${escapeHtml(strategy.summary || strategy.recommendation || "-")}</div>
+        <div class="strategyBadges">
+          <span class="strategyBadge">${escapeHtml(strategy.confidence || "low")} confidence</span>
+          <span class="strategyBadge">${escapeHtml(strategy.classification || "data-derived")}</span>
+          <span class="strategyBadge">${escapeHtml(strategy.mode || "DATA_INCOMPLETE")}</span>
+        </div>
+      </div>
+      <div class="strategyGrid">
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Minimaal wins</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.minimumWins))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Veilig verliezen</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.maximumSafeLosses))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Boat attacks</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.recommendedBoatAttacks))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Vasthouden</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.decksToHoldTemporarily))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Reset over</div>
+          <div class="strategyMetricValue">${escapeHtml(formatDuration(context.secondsUntilReset))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Avg nodig</div>
+          <div class="strategyMetricValue">${escapeHtml(requiredAvg)}</div>
+        </div>
+      </div>
+      ${ladderHtml}
+      ${projectionHtml}
+      <div class="strategySectionTitle">Uitleg</div>
+      ${reasonsHtml}
+      <div class="strategySectionTitle">Datakwaliteit</div>
+      ${warningHtml}
+      ${assumptionsHtml}
+    `;
+  }
+
   function renderPlayersTable(text) {
     const container = el("players");
     container.innerHTML = "";
@@ -1024,7 +1250,11 @@
       // Silent fallback: keep original cwstats overview when prototype API is unavailable.
     }
 
-    renderOverviewTable(mergedOverviewText);
+    renderWarPhase(data);
+    if (!renderOverviewFromRaceRows(data.race_rows || [])) {
+      renderOverviewTable(mergedOverviewText);
+    }
+    renderStrategy(data);
     renderFinishOutlook(data);
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
