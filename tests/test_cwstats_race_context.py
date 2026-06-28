@@ -1,4 +1,5 @@
 from api.cwstats import (
+    parse_cwstats_active_day,
     parse_cwstats_finish_outlook_from_html,
     parse_cwstats_race_context_from_html,
 )
@@ -112,3 +113,9 @@ def test_parse_cwstats_finish_outlook_from_current_layout():
     assert parsed["worst_finish"] == 27450
     assert parsed["projected_rank"] == 5
     assert parsed["projected_finish"] == 31350
+
+
+def test_parse_cwstats_active_day_ignores_training_day_label():
+    text = "Training Day 1-3 2 Day 1 +2235 1 Day 2 +3435 1 Day 3 +3435 Day 4 War"
+
+    assert parse_cwstats_active_day(text) == 4

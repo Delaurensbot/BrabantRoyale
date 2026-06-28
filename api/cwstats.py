@@ -123,6 +123,19 @@ def _normalize_clan_name(name: str):
     return re.sub(r"[^\w]+", "", cleaned)
 
 
+def parse_cwstats_active_day(text: str):
+    cleaned = re.sub(r"\bTraining\s+Day\s+1\s*-\s*3\b", " ", text or "", flags=re.IGNORECASE)
+    war_match = re.search(r"\bday\s*([1-4])\s+war\b", cleaned, flags=re.IGNORECASE)
+    if war_match:
+        return int(war_match.group(1))
+
+    matches = [
+        int(match.group(1))
+        for match in re.finditer(r"\bday\s*([1-4])\b", cleaned, flags=re.IGNORECASE)
+    ]
+    return matches[-1] if matches else None
+
+
 def parse_cwstats_race_context_from_html(html: str):
     soup = BeautifulSoup(html or "", "html.parser")
     text_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
@@ -130,10 +143,7 @@ def parse_cwstats_race_context_from_html(html: str):
 
     is_colosseum_weekend = bool(re.search(r"\bcolosseum\b", text_blob_lower))
 
-    active_day = None
-    day_match = re.search(r"\bday\s*(\d)\b", text_blob_lower)
-    if day_match:
-        active_day = int(day_match.group(1))
+    active_day = parse_cwstats_active_day(text_blob)
 
     rows = {}
     row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
@@ -321,6 +331,223 @@ def pick_reporting_soup(race_soup: BeautifulSoup, cwstats_active_day):
     return race_soup
 
 
+def build_war_phase(day_num, cwstats_race_context):
+    is_colosseum = bool((cwstats_race_context or {}).get("is_colosseum_weekend"))
+    cwstats_day = (cwstats_race_context or {}).get("active_day")
+    active_day = day_num if day_num in {1, 2, 3, 4} else cwstats_day
+    source = "royaleapi" if day_num in {1, 2, 3, 4} else "cwstats" if active_day in {1, 2, 3, 4} else "unknown"
+    mode = "colosseum" if is_colosseum else "river_race"
+    mode_label = "Colosseum" if is_colosseum else "River Race"
+    day_label = f"Dag {active_day}" if active_day in {1, 2, 3, 4} else "dag onbekend"
+
+    return {
+        "mode": mode,
+        "day": active_day,
+        "label": f"{mode_label} - {day_label}",
+        "is_battle_day": active_day in {1, 2, 3, 4},
+        "is_colosseum": is_colosseum,
+        "source": source,
+        "confidence": "high" if source == "royaleapi" else "medium" if source == "cwstats" else "low",
+    }
+
+
+def build_race_rows(clans):
+    current_sorted = sorted(
+        clans or [],
+        key=lambda c: (c.current_medals if c.current_medals is not None else -1, c.name.lower()),
+        reverse=True,
+    )
+    projected_sorted = sorted(
+        clans or [],
+        key=lambda c: (c.projected_medals if c.projected_medals is not None else -1, c.name.lower()),
+        reverse=True,
+    )
+    current_rank_by_name = {_normalize_clan_name(c.name): index for index, c in enumerate(current_sorted, start=1)}
+    projected_rank_by_name = {_normalize_clan_name(c.name): index for index, c in enumerate(projected_sorted, start=1)}
+
+    rows = []
+    for clan in current_sorted:
+        key = _normalize_clan_name(clan.name)
+        decks_used = clan.decks_used_today
+        decks_total = clan.decks_total_today
+        decks_remaining = None
+        if decks_used is not None and decks_total is not None:
+            decks_remaining = max(0, int(decks_total) - int(decks_used))
+
+        rows.append({
+            "name": clan.name,
+            "current_rank": current_rank_by_name.get(key),
+            "projected_rank": projected_rank_by_name.get(key),
+            "decks": {
+                "used": decks_used,
+                "total": decks_total,
+                "remaining": decks_remaining,
+            },
+            "avg": clan.avg_medals_per_deck,
+            "projected": clan.projected_medals,
+            "boat_points": clan.boat_points,
+            "medals": clan.current_medals,
+            "trophies": clan.trophies,
+        })
+
+    return rows
+
+
+def _rank_for_score(race_rows, score, own_name):
+    if score is None:
+        return None
+    better = 0
+    own_key = _normalize_clan_name(own_name)
+    for row in race_rows:
+        if _normalize_clan_name(row.get("name")) == own_key:
+            continue
+        comparable = row.get("projected")
+        if comparable is None:
+            comparable = row.get("medals")
+        if comparable is not None and comparable > score:
+            better += 1
+    return better + 1
+
+
+def build_strategy(race_rows, war_phase, clan_name, finish_outlook):
+    if not race_rows:
+        return {
+            "status": "Onvoldoende data",
+            "recommendation": "Geen betrouwbaar strategieadvies beschikbaar.",
+            "risk_level": "unknown",
+            "needed_medals": None,
+            "needed_avg_per_remaining_deck": None,
+            "safe_boat_attack_budget": 0,
+            "target_clan": None,
+            "boat_targets": [],
+            "copy_text": "Strategieadvies: onvoldoende data beschikbaar.",
+        }
+
+    own_key = _normalize_clan_name(clan_name)
+    own = next((row for row in race_rows if _normalize_clan_name(row.get("name")) == own_key), None)
+    if not own:
+        return {
+            "status": "Eigen clan niet gevonden",
+            "recommendation": "Controleer clanselectie en race data.",
+            "risk_level": "unknown",
+            "needed_medals": None,
+            "needed_avg_per_remaining_deck": None,
+            "safe_boat_attack_budget": 0,
+            "target_clan": None,
+            "boat_targets": [],
+            "copy_text": "Strategieadvies: eigen clan niet gevonden in Race Overview.",
+        }
+
+    if war_phase.get("is_colosseum"):
+        copy_text = "Strategieadvies: Colosseum actief. Focus op medailles; bootaanvallen zijn niet relevant."
+        return {
+            "status": "Colosseum actief",
+            "recommendation": "Focus op medailles. Bootaanvallen zijn in Colosseum niet relevant.",
+            "risk_level": "colosseum",
+            "needed_medals": None,
+            "needed_avg_per_remaining_deck": None,
+            "safe_boat_attack_budget": 0,
+            "target_clan": None,
+            "boat_targets": [],
+            "copy_text": copy_text,
+        }
+
+    projected_rows = sorted(
+        [row for row in race_rows if row.get("projected") is not None],
+        key=lambda row: row.get("projected") or 0,
+        reverse=True,
+    )
+    own_projected = own.get("projected")
+    own_rank = _rank_for_score(race_rows, own_projected, own.get("name")) or own.get("projected_rank")
+    own_remaining = (own.get("decks") or {}).get("remaining") or 0
+    own_avg = own.get("avg") or 0
+
+    if own_projected is None or not projected_rows:
+        copy_text = "Strategieadvies: Race Overview is zichtbaar, maar projected data ontbreekt."
+        return {
+            "status": "Projected data ontbreekt",
+            "recommendation": "Gebruik Race Overview en battles left; geen harde boot-target tonen.",
+            "risk_level": "unknown",
+            "needed_medals": None,
+            "needed_avg_per_remaining_deck": None,
+            "safe_boat_attack_budget": 0,
+            "target_clan": None,
+            "boat_targets": [],
+            "copy_text": copy_text,
+        }
+
+    if own_rank and own_rank > 1:
+        target = projected_rows[max(0, own_rank - 2)]
+        needed_medals = max(0, (target.get("projected") or 0) - own_projected + 1)
+        needed_avg = round(needed_medals / own_remaining, 2) if own_remaining else None
+        copy_text = (
+            f"Strategieadvies: focus medailles. Target: {target.get('name')} staat "
+            f"{needed_medals} projected punten voor."
+        )
+        return {
+            "status": "Achter op projected",
+            "recommendation": "Focus op medailles. Bootaanvallen nu niet adviseren zolang we punten moeten inlopen.",
+            "risk_level": "behind",
+            "needed_medals": needed_medals,
+            "needed_avg_per_remaining_deck": needed_avg,
+            "safe_boat_attack_budget": 0,
+            "target_clan": target.get("name"),
+            "boat_targets": [],
+            "copy_text": copy_text,
+        }
+
+    threat = next((row for row in projected_rows if _normalize_clan_name(row.get("name")) != own_key), None)
+    margin = own_projected - (threat.get("projected") or 0) if threat else None
+    buffer = 1000
+    safe_budget = 0
+    if margin is not None and own_avg:
+        safe_budget = max(0, int((margin - buffer) // max(1, own_avg)))
+        safe_budget = min(safe_budget, 8)
+
+    boat_targets = []
+    if threat and safe_budget > 0:
+        boat_targets.append({
+            "priority": 1,
+            "clan": threat.get("name"),
+            "reason": "Hoogste projected bedreiging onder ons.",
+            "projected_gap": margin,
+            "boat_points": threat.get("boat_points"),
+            "medals": threat.get("medals"),
+            "projected": threat.get("projected"),
+        })
+
+    if margin is None:
+        status = "Geen directe bedreiging gevonden"
+        recommendation = "Blijf medailles pakken; er is geen duidelijke boot-target."
+        risk_level = "safe"
+    elif margin <= buffer:
+        status = "Voorsprong is krap"
+        recommendation = "Focus op medailles. Bootaanvallen niet adviseren zolang de marge klein is."
+        risk_level = "watch"
+        safe_budget = 0
+        boat_targets = []
+    else:
+        status = "Voorsprong op projected"
+        recommendation = "Medailles blijven pakken. Bootaanvallen zijn optioneel als de lead ruim blijft."
+        risk_level = "safe"
+
+    copy_text = f"Strategieadvies: {status}. {recommendation}"
+    if boat_targets:
+        copy_text += f" Mogelijke boot-target: {boat_targets[0]['clan']}."
+
+    return {
+        "status": status,
+        "recommendation": recommendation,
+        "risk_level": risk_level,
+        "needed_medals": 0,
+        "needed_avg_per_remaining_deck": None,
+        "safe_boat_attack_budget": safe_budget,
+        "target_clan": threat.get("name") if threat else None,
+        "boat_targets": boat_targets,
+        "copy_text": copy_text,
+    }
+
+
 def pick_clan_config(path: str):
     parsed = urlparse(path)
     params = parse_qs(parsed.query)
@@ -434,6 +661,15 @@ class handler(BaseHTTPRequestHandler):
             filtered_players = dedupe_rows(filtered_players)
             total_players_participated = compute_total_players_participated(filtered_players)
 
+            war_phase = build_war_phase(day_num, cwstats_race_context)
+            race_rows = build_race_rows(clans)
+            strategy = build_strategy(
+                race_rows,
+                war_phase,
+                clan_config.get("name") or OUR_CLAN_NAME_DEFAULT,
+                cwstats_finish_outlook,
+            )
+
             race_overview_text = render_clan_overview_table(clans)
             insights_text = render_clan_insights(clans, clan_config.get("name") or OUR_CLAN_NAME_DEFAULT)
             clan_stats_text = render_clan_stats_block(
@@ -477,6 +713,7 @@ class handler(BaseHTTPRequestHandler):
 
             sections = [
                 ("Race overview", race_overview_text),
+                ("Strategieadvies", strategy.get("copy_text")),
                 ("Insights", insights_text),
                 ("Clan stats", clan_stats_text),
                 ("Clan averages", clan_avg_projection_text),
@@ -519,8 +756,11 @@ class handler(BaseHTTPRequestHandler):
                 "clan_name": clan_config.get("name"),
                 "copy_all_text": copy_all_text,
                 "finish_outlook": cwstats_finish_outlook,
+                "war_phase": war_phase,
+                "race_rows": race_rows,
+                "strategy": strategy,
                 "cwstats_colosseum_weekend": bool(cwstats_race_context.get("is_colosseum_weekend")),
-                "cwstats_active_day": cwstats_race_context.get("active_day"),
+                "cwstats_active_day": war_phase.get("day"),
                 "total_players_participated": total_players_participated,
                 "clan_access_type": clan_access_type,
                 "cw_official_started": cw_official_started,
