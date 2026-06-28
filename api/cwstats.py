@@ -36,7 +36,14 @@ from Royale_api import (
 
 
 def _compact_number(raw: str):
-    digits = re.sub(r"[^0-9]", "", (raw or ""))
+    value = str(raw or "").strip()
+    compact_match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*([KMB])", value, flags=re.IGNORECASE)
+    if compact_match:
+        number = float(compact_match.group(1).replace(",", "."))
+        multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[compact_match.group(2).upper()]
+        return int(number * multiplier)
+
+    digits = re.sub(r"[^0-9]", "", value)
     return int(digits) if digits else None
 
 
@@ -60,9 +67,32 @@ def parse_cwstats_finish_outlook_from_html(html: str):
     best_rank, best_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
     worst_rank, worst_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
 
+    if projected_rank is None:
+        projected_rank, projected_finish = extract_rank_score(r"Placement\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
+    if best_rank is None:
+        best_rank, best_finish = extract_rank_score(r"Best\s*possible\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
+    if worst_rank is None:
+        worst_rank, worst_finish = extract_rank_score(r"Worst\s*possible\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
+
+    battles_left = extract_number(r"Battles\s*Left\s*([\d.,]+)")
+    if battles_left is None:
+        decks_used_match = re.search(r"Decks\s*used\s*([\d.,]+)\s*/\s*([\d.,]+)", blob, flags=re.IGNORECASE)
+        if decks_used_match:
+            used = _compact_number(decks_used_match.group(1)) or 0
+            total = _compact_number(decks_used_match.group(2)) or 0
+            battles_left = max(0, total - used)
+
+    duels_left = extract_number(r"Duels\s*Left\s*([\d.,]+)")
+    if duels_left is None:
+        slots_used_match = re.search(r"Slots\s*used\s*([\d.,]+)\s*/\s*([\d.,]+)", blob, flags=re.IGNORECASE)
+        if slots_used_match:
+            used = _compact_number(slots_used_match.group(1)) or 0
+            total = _compact_number(slots_used_match.group(2)) or 0
+            duels_left = max(0, total - used)
+
     return {
-        "battles_left": extract_number(r"Battles\s*Left\s*([\d.,]+)"),
-        "duels_left": extract_number(r"Duels\s*Left\s*([\d.,]+)"),
+        "battles_left": battles_left,
+        "duels_left": duels_left,
         "projected_rank": projected_rank,
         "projected_finish": projected_finish,
         "best_rank": best_rank,
@@ -107,6 +137,16 @@ def parse_cwstats_race_context_from_html(html: str):
 
     rows = {}
     row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
+    current_row_regex = re.compile(
+        r"^\s*(\d+)\s+"
+        r"(.+?)\s+"
+        r"(?:\d+(?:[.,]\d+)?K\s+)?"
+        r"([\d.,]+)\s+"
+        r"([\d.,]+)\s+"
+        r"([\d.,]+)\s+"
+        r"([\d.,]+)\s*$",
+        flags=re.IGNORECASE,
+    )
 
     def _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg):
         normalized_name = _normalize_clan_name(name)
@@ -117,6 +157,8 @@ def parse_cwstats_race_context_from_html(html: str):
             "name": re.sub(r"\s+", " ", name).strip(),
             "trophy": _compact_number(str(trophy)) or 0,
             "cw_trophy": _compact_number(str(cw_trophy)) or 0,
+            "fame": _compact_number(str(trophy)) or 0,
+            "clan_war_trophies": _compact_number(str(cw_trophy)) or 0,
             "boat_movement": _compact_number(str(boat_movement)) or 0,
             "fame_avg": float(str(fame_avg).replace(",", ".")),
         }
@@ -131,10 +173,14 @@ def parse_cwstats_race_context_from_html(html: str):
             continue
 
         match = row_regex.match(row_text)
-        if not match:
+        if match:
+            _store_row(*match.groups())
             continue
 
-        _store_row(*match.groups())
+        match = current_row_regex.match(row_text)
+        if match:
+            rank, name, cw_trophy, boat_movement, fame, fame_avg = match.groups()
+            _store_row(rank, name, fame, boat_movement, cw_trophy, fame_avg)
 
     if not rows:
         fallback_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
@@ -338,8 +384,8 @@ class handler(BaseHTTPRequestHandler):
                         avg_medals_per_deck=row.get("fame_avg"),
                         projected_medals=int(float(row.get("fame_avg")) * 200) if row.get("fame_avg") is not None else None,
                         boat_points=row.get("boat_movement"),
-                        current_medals=row.get("cw_trophy"),
-                        trophies=row.get("trophy"),
+                        current_medals=row.get("fame") or row.get("trophy"),
+                        trophies=row.get("clan_war_trophies") or row.get("cw_trophy"),
                     )
                     for row in cwstats_rows.values()
                     if row.get("name")
@@ -355,9 +401,9 @@ class handler(BaseHTTPRequestHandler):
                 if clan.boat_points in (None, 0):
                     clan.boat_points = cw_row.get("boat_movement")
                 if clan.current_medals in (None, 0):
-                    clan.current_medals = cw_row.get("cw_trophy")
+                    clan.current_medals = cw_row.get("fame") or cw_row.get("trophy")
                 if clan.trophies in (None, 0):
-                    clan.trophies = cw_row.get("trophy")
+                    clan.trophies = cw_row.get("clan_war_trophies") or cw_row.get("cw_trophy")
 
                 if (
                     is_colosseum_weekend
