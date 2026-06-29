@@ -306,7 +306,7 @@ def dedupe_rows(rows: List[Dict]) -> List[Dict]:
 # Rendering player table + battles left + duels left
 # -----------------------------
 def render_player_table(rows: List[Dict]) -> str:
-    headers = ["#", "Name", "Role", "Today/Total", "Boat", "Fame"]
+    headers = ["#", "Name", "Role", "Today/Total", "Boat", "Medals"]
 
     def s(x) -> str:
         return str(x) if x is not None else ""
@@ -320,11 +320,11 @@ def render_player_table(rows: List[Dict]) -> str:
         ]
         + [len("Today/Total")]
     )
-    fame_w = max([len(s(r.get("fame", ""))) for r in rows] + [len("Fame")])
+    medal_w = max([len(s(r.get("fame", ""))) for r in rows] + [len("Medals")])
 
     head = (
         f'{headers[0]:>3} | {headers[1]:<{name_w}} | {headers[2]:<{role_w}} | '
-        f'{headers[3]:>{decks_w}} | {headers[4]:>4} | {headers[5]:>{fame_w}}'
+        f'{headers[3]:>{decks_w}} | {headers[4]:>4} | {headers[5]:>{medal_w}}'
     )
     sep = "-" * len(head)
 
@@ -333,7 +333,7 @@ def render_player_table(rows: List[Dict]) -> str:
         decks = f'{s(r.get("decks_used_today",""))}/{s(r.get("decks_total_so_far",""))}'
         lines.append(
             f'{int(r["rank"]):>3} | {s(r.get("name","")):<{name_w}} | {s(r.get("role","")):<{role_w}} | '
-            f'{decks:>{decks_w}} | {s(r.get("boat_attacks","")):>4} | {s(r.get("fame","")):>{fame_w}}'
+            f'{decks:>{decks_w}} | {s(r.get("boat_attacks","")):>4} | {s(r.get("fame","")):>{medal_w}}'
         )
 
     return "\n".join(lines)

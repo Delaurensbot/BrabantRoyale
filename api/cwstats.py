@@ -296,6 +296,27 @@ def parse_cwstats_players_from_html(html: str):
     soup = BeautifulSoup(html or "", "html.parser")
     players = []
 
+    def normalize_header(value):
+        return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+    header_indexes = {}
+    for tr in soup.find_all("tr"):
+        headers = [normalize_header(th.get_text(" ", strip=True)) for th in tr.find_all("th")]
+        if headers:
+            header_indexes = {header: index for index, header in enumerate(headers)}
+
+    def idx_by(*names):
+        normalized_names = {normalize_header(name) for name in names}
+        for header, index in header_indexes.items():
+            if header in normalized_names:
+                return index
+        return None
+
+    idx_boat = idx_by("Boat movement", "Boat")
+    idx_used_today = idx_by("Cards used today", "Decks used today", "Used today", "Today")
+    idx_cards = idx_by("Cards", "Decks", "Decks used", "Total")
+    idx_medals = idx_by("Medals", "Score", "Fame")
+
     for tr in soup.find_all("tr"):
         cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
         if len(cells) < 6:
@@ -309,17 +330,20 @@ def parse_cwstats_players_from_html(html: str):
         if not name:
             continue
 
+        boat_index = idx_boat if idx_boat is not None else 2
+        used_index = idx_used_today if idx_used_today is not None else 3
+        cards_index = idx_cards if idx_cards is not None else 4
+        medals_index = idx_medals if idx_medals is not None else 5
+
         players.append({
             "rank": int(rank_raw),
             "tag": "",
             "name": name,
             "role": "",
-            "boat_attacks": _compact_number(cells[2]) or 0,
-            # cwstats participant rows are ordered as:
-            # boat movement | cards used today | cards | fame
-            "decks_used_today": _compact_number(cells[3]) or 0,
-            "decks_total_so_far": _compact_number(cells[4]) or 0,
-            "fame": _compact_number(cells[5]) or 0,
+            "boat_attacks": (_compact_number(cells[boat_index]) if boat_index < len(cells) else 0) or 0,
+            "decks_used_today": (_compact_number(cells[used_index]) if used_index < len(cells) else 0) or 0,
+            "decks_total_so_far": (_compact_number(cells[cards_index]) if cards_index < len(cells) else 0) or 0,
+            "fame": (_compact_number(cells[medals_index]) if medals_index < len(cells) else 0) or 0,
         })
 
     return players
@@ -720,7 +744,6 @@ class handler(BaseHTTPRequestHandler):
 
             sections = [
                 ("Race overview", race_overview_text),
-                ("Strategieadvies", strategy.get("summary")),
                 ("Insights", insights_text),
                 ("Clan stats", clan_stats_text),
                 ("Clan averages", clan_avg_projection_text),
@@ -731,6 +754,7 @@ class handler(BaseHTTPRequestHandler):
                 ("Day 1 high fame", day1_high_fame_text),
                 ("Day 4 last chance", day4_last_chance_text),
                 ("Short story", short_story_text),
+                ("Strategieadvies", strategy.get("summary")),
             ]
             copy_all_parts = []
             for title, text in sections:

@@ -139,13 +139,6 @@
 
     <div class="card fullRow">
       <div class="cardHead">
-        <div class="title">Strategieadvies</div>
-      </div>
-      <div id="strategy" class="empty">(loading...)</div>
-    </div>
-
-    <div class="card fullRow">
-      <div class="cardHead">
         <div class="title">Clan finish outlook</div>
       </div>
       <div id="finishOutlook" class="empty">(loading...)</div>
@@ -229,6 +222,13 @@
       </div>
       <div id="players" class="empty">(loading...)</div>
     </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Strategieadvies</div>
+      </div>
+      <div id="strategy" class="empty">(loading...)</div>
+    </div>
   </div>
 
 <script>
@@ -288,12 +288,50 @@
   }
 
   function formatMetric(value, decimals = 0) {
+    if (value == null || value === "") return "-";
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
     return new Intl.NumberFormat("en-US", {
       maximumFractionDigits: decimals,
       minimumFractionDigits: decimals,
     }).format(n);
+  }
+
+  function humanizeStrategyValue(value) {
+    const labels = {
+      POSITION_LOCKED_THROW: "Positie vast",
+      COLOSSEUM_LOCKED_THROW: "Colosseumpositie vast",
+      EARLY_FINISH_BALANCING: "Early-finish balans",
+      DATA_INCOMPLETE: "Data incompleet",
+      CONTROLLED_PUSH: "Gecontroleerd pushen",
+      COLOSSEUM_PUSH: "Colosseum push",
+      PROTECT_CURRENT_POSITION: "Huidige positie beschermen",
+      POSITION_UNREACHABLE: "Doel niet haalbaar",
+      SAFE_LOSS_WINDOW: "Veilige lossruimte",
+      ALL_OUT: "All-out",
+      "data-derived": "Gebaseerd op data",
+      mixed: "Combinatie van data en communitykennis",
+      high: "Hoge betrouwbaarheid",
+      medium: "Gemiddelde betrouwbaarheid",
+      low: "Lage betrouwbaarheid",
+      "projected-target": "Projectiedoel",
+      stretch: "Stretch-doel",
+      unlikely: "Onwaarschijnlijk",
+      impossible: "Niet haalbaar",
+      safe: "Veilig",
+    };
+    return labels[value] || value || "-";
+  }
+
+  function humanizeDataQuality(value) {
+    const text = String(value || "");
+    return text
+      .replace("deckCapacity", "deckcapaciteit")
+      .replace("decksUsed", "gebruikte decks")
+      .replace("opponentBounds", "tegenstanderbounds")
+      .replace("inferred-from-medals-and-average", "afgeleid uit medailles en avg/deck")
+      .replace("inferred-from-projection", "afgeleid uit projected score")
+      .replace("unknown", "onbekend");
   }
 
   function formatDuration(seconds) {
@@ -477,10 +515,8 @@
       const decks = row.decks || null;
       const used = decks ? decks.used : row.decksUsedToday;
       const total = decks ? decks.total : row.estimatedDeckCapacityToday;
-      const capacityLabel = row.deckCapacityLabel || "live";
-      const totalText = capacityLabel === "live" ? `${total}` : `circa ${total}`;
       const deckText = used != null && total != null && Number.isFinite(Number(used)) && Number.isFinite(Number(total))
-        ? `${used}/${totalText}`
+        ? `${used}/${total}`
         : "-";
       return [
         row.current_rank != null ? String(row.current_rank) : row.currentRank != null ? String(row.currentRank) : "-",
@@ -853,8 +889,8 @@
     const reasons = Array.isArray(strategy.rationale) ? strategy.rationale.slice(0, 3) : [];
     const warnings = [
       ...(Array.isArray(strategy.warnings) ? strategy.warnings : []),
-      ...(Array.isArray(dataQuality.missingFields) && dataQuality.missingFields.length ? [`Ontbrekend: ${dataQuality.missingFields.join(", ")}`] : []),
-      ...(Array.isArray(dataQuality.estimatedFields) && dataQuality.estimatedFields.length ? [`Geschat: ${dataQuality.estimatedFields.join(", ")}`] : []),
+      ...(Array.isArray(dataQuality.missingFields) && dataQuality.missingFields.length ? [`Ontbrekend: ${dataQuality.missingFields.map(humanizeDataQuality).join(", ")}`] : []),
+      ...(Array.isArray(dataQuality.estimatedFields) && dataQuality.estimatedFields.length ? [`Geschat: ${dataQuality.estimatedFields.map(humanizeDataQuality).join(", ")}`] : []),
     ];
     const assumptions = Array.isArray(strategy.assumptions) ? strategy.assumptions.slice(0, 3) : [];
 
@@ -870,7 +906,7 @@
                 <td>${escapeHtml(target.requiredAveragePerDeck != null ? formatMetric(target.requiredAveragePerDeck, 2) : "-")}</td>
                 <td>${escapeHtml(target.minimumWinsNeeded != null ? formatMetric(target.minimumWinsNeeded) : "-")}</td>
                 <td>${escapeHtml(target.safeLossesAllowed != null ? formatMetric(target.safeLossesAllowed) : "-")}</td>
-                <td>${escapeHtml(target.status || "-")}</td>
+                <td>${escapeHtml(humanizeStrategyValue(target.status))}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -917,9 +953,9 @@
         <div class="strategyStatus">${escapeHtml(strategy.headline || strategy.status || "-")}</div>
         <div class="strategyRecommendation">${escapeHtml(strategy.summary || strategy.recommendation || "-")}</div>
         <div class="strategyBadges">
-          <span class="strategyBadge">${escapeHtml(strategy.confidence || "low")} confidence</span>
-          <span class="strategyBadge">${escapeHtml(strategy.classification || "data-derived")}</span>
-          <span class="strategyBadge">${escapeHtml(strategy.mode || "DATA_INCOMPLETE")}</span>
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.confidence || "low"))}</span>
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.classification || "data-derived"))}</span>
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.mode || "DATA_INCOMPLETE"))}</span>
         </div>
       </div>
       <div class="strategyGrid">
