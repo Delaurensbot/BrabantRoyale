@@ -8,6 +8,11 @@ LOSS_SCORE = 100
 THEORETICAL_PLAYER_CAPACITY = 50
 DECKS_PER_PLAYER = 4
 THEORETICAL_DECK_CAPACITY = THEORETICAL_PLAYER_CAPACITY * DECKS_PER_PLAYER
+# Avg/deck is scraped from UI text rounded to two decimals, so reconstructing
+# decks from medals/average needs a small tolerance around the original value.
+DECK_USAGE_AVERAGE_TOLERANCE = 0.15
+DECK_CAPACITY_RAW_TOLERANCE = 0.25
+CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 
 
 def normalize_name(name):
@@ -30,6 +35,49 @@ def safe_number(value):
 def safe_int(value):
     number = safe_number(value)
     return int(number) if number is not None else None
+
+
+def lower_confidence(current, candidate):
+    current = current if current in CONFIDENCE_ORDER else "low"
+    candidate = candidate if candidate in CONFIDENCE_ORDER else "low"
+    return current if CONFIDENCE_ORDER[current] <= CONFIDENCE_ORDER[candidate] else candidate
+
+
+def infer_deck_capacity_from_projection(projected_medals, average_per_deck):
+    projected = safe_number(projected_medals)
+    average = safe_number(average_per_deck)
+    if projected is None or average is None or projected <= 0 or average <= 0:
+        return None
+
+    raw_capacity = projected / average
+    inferred_capacity = int(round(raw_capacity))
+    if inferred_capacity < 0 or inferred_capacity > THEORETICAL_DECK_CAPACITY:
+        return None
+    if abs(raw_capacity - inferred_capacity) > DECK_CAPACITY_RAW_TOLERANCE:
+        return None
+    return inferred_capacity
+
+
+def infer_decks_used_from_medals_and_average(current_medals, average_per_deck, deck_capacity):
+    medals = safe_number(current_medals)
+    average = safe_number(average_per_deck)
+    capacity = safe_int(deck_capacity)
+    if medals is None or average is None or capacity is None:
+        return None
+    if medals < 0 or average <= 0 or capacity < 0:
+        return None
+
+    raw_decks_used = medals / average
+    inferred_decks_used = int(round(raw_decks_used))
+    if inferred_decks_used < 0 or inferred_decks_used > capacity:
+        return None
+    if inferred_decks_used == 0:
+        return 0 if medals == 0 else None
+
+    reconstructed_average = medals / inferred_decks_used
+    if abs(reconstructed_average - average) > DECK_USAGE_AVERAGE_TOLERANCE:
+        return None
+    return inferred_decks_used
 
 
 def next_deck_reset_utc(now=None):
@@ -99,12 +147,17 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
         warnings = []
         decks_used = safe_int(clan.decks_used_today)
         decks_total = safe_int(clan.decks_total_today)
+        current_medals = safe_int(clan.current_medals)
+        today_avg = safe_number(clan.avg_medals_per_deck)
+        projected = safe_int(clan.projected_medals)
         confidence = "high"
-        capacity_source = "live"
+        capacity_source = "live" if decks_total is not None else "unknown"
+        deck_data_source = "api" if decks_used is not None or decks_total is not None else "unknown"
 
         if key == own_key and decks_used is None and player_used_known:
             decks_used = player_used
             confidence = "medium"
+            deck_data_source = "api"
             capacity_source = "player_rows"
             warnings.append("Decks gebruikt geschat uit spelersrijen.")
 
@@ -112,33 +165,56 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
             if decks_used is not None and decks_total is None:
                 decks_total = decks_used + finish_battles_left
                 confidence = "medium"
+                deck_data_source = "api"
                 capacity_source = "cwstats_battles_left"
                 warnings.append("Deckcapaciteit geschat uit decks gebruikt + battles left.")
             elif decks_used is None:
                 decks_total = None
 
-        capacity_label = "live"
+        if decks_total is None:
+            inferred_capacity = infer_deck_capacity_from_projection(projected, today_avg)
+            if inferred_capacity is not None:
+                decks_total = inferred_capacity
+                capacity_source = "inferred-from-projection"
+                if deck_data_source == "unknown":
+                    deck_data_source = "inferred-from-projection"
+                confidence = lower_confidence(confidence, "medium")
+                warnings.append("Deckcapaciteit geschat uit projected score en avg/deck.")
+
+        if decks_used is None:
+            inferred_used = infer_decks_used_from_medals_and_average(current_medals, today_avg, decks_total)
+            if inferred_used is not None:
+                decks_used = inferred_used
+                deck_data_source = "inferred-from-medals-and-average"
+                confidence = lower_confidence(confidence, "medium")
+                warnings.append("Decks gebruikt afgeleid uit huidige medailles en avg/deck.")
+
+        capacity_label = "live" if capacity_source == "live" and decks_total is not None else "unknown"
         if decks_total is None and decks_used is not None:
             decks_total = THEORETICAL_DECK_CAPACITY
             capacity_label = "theoretical"
-            confidence = "low"
+            confidence = lower_confidence(confidence, "low")
             capacity_source = "theoretical_50x4"
             warnings.append("Deckcapaciteit gebruikt theoretisch maximum 50 spelers x 4.")
         elif capacity_source != "live":
             capacity_label = "estimated"
 
+        valid_deck_bounds = True
         if decks_total is not None and decks_used is not None and decks_used > decks_total:
-            warnings.append("Decks gebruikt was groter dan capaciteit; resterende decks op 0 gezet.")
+            valid_deck_bounds = False
+            confidence = lower_confidence(confidence, "low")
+            warnings.append("Decks gebruikt is groter dan capaciteit; resterende decks onbekend gezet.")
 
         decks_remaining = None
-        if decks_used is not None and decks_total is not None:
+        if valid_deck_bounds and decks_used is not None and decks_total is not None:
             decks_remaining = max(0, decks_total - decks_used)
+        if decks_remaining is None:
+            confidence = lower_confidence(confidence, "low")
+            if deck_data_source == "unknown":
+                warnings.append("Deckdata ontbreekt en kon niet betrouwbaar worden afgeleid.")
 
-        current_medals = safe_int(clan.current_medals)
-        today_avg = safe_number(clan.avg_medals_per_deck)
-        projected = safe_int(clan.projected_medals)
         historical_avg = today_avg
-        if projected is not None and current_medals is not None and decks_remaining:
+        if projected is not None and current_medals is not None and decks_remaining is not None and decks_remaining > 0:
             historical_avg = max(0, (projected - current_medals) / decks_remaining)
 
         if today_avg is not None and historical_avg is not None and decks_used is not None:
@@ -158,6 +234,7 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
             "decksRemainingToday": decks_remaining,
             "deckCapacityLabel": capacity_label,
             "deckCapacitySource": capacity_source,
+            "deckDataSource": deck_data_source,
             "participantsToday": None,
             "expectedParticipantsToday": THEORETICAL_PLAYER_CAPACITY if capacity_label == "theoretical" else None,
             "todayAveragePerDeck": today_avg,
@@ -183,6 +260,7 @@ def project_clan(clan, score_rules=None):
     medals = safe_number(clan.get("currentMedals"))
     remaining = safe_int(clan.get("decksRemainingToday"))
     blended = safe_number(clan.get("blendedAveragePerDeck"))
+    projected = safe_int(clan.get("projected"))
     if medals is None or remaining is None or blended is None:
         return {
             "clanId": clan.get("id"),
@@ -195,15 +273,16 @@ def project_clan(clan, score_rules=None):
         }
 
     optimistic_avg = max(blended, safe_number(clan.get("todayAveragePerDeck")) or blended)
+    expected_final = projected if projected is not None else int(round(medals + remaining * blended))
     return {
         "clanId": clan.get("id"),
         "floorFinal": int(round(medals + remaining * loss)),
-        "expectedFinal": int(round(medals + remaining * blended)),
-        "optimisticFinal": int(round(medals + remaining * optimistic_avg)),
+        "expectedFinal": expected_final,
+        "optimisticFinal": max(expected_final, int(round(medals + remaining * optimistic_avg))),
         "ceilingFinal": int(round(medals + remaining * win)),
         "expectedRemainingDecks": remaining,
         "p10Final": int(round(medals + remaining * loss)),
-        "p50Final": int(round(medals + remaining * blended)),
+        "p50Final": expected_final,
         "p90Final": int(round(medals + remaining * min(win, optimistic_avg))),
         "confidence": clan.get("dataConfidence", "low"),
     }
@@ -230,17 +309,41 @@ def compute_rank_bounds(our_clan, projections, target_rank=1, score_rules=None):
     own_projection = next((p for p in projections if p.get("clanId") == our_clan.get("id")), None)
     if not own_projection:
         return None
-    best = rank_for_score(projections, our_clan.get("id"), own_projection.get("ceilingFinal"), "floorFinal")
-    expected = rank_for_score(projections, our_clan.get("id"), own_projection.get("expectedFinal"), "expectedFinal")
-    worst = rank_for_score(projections, our_clan.get("id"), own_projection.get("floorFinal"), "ceilingFinal")
+    own_floor = own_projection.get("floorFinal")
+    own_expected = own_projection.get("expectedFinal")
+    own_ceiling = own_projection.get("ceilingFinal")
+    opponent_projections = [p for p in projections if p.get("clanId") != our_clan.get("id")]
+    bounds_known = (
+        own_floor is not None
+        and own_ceiling is not None
+        and all(p.get("floorFinal") is not None and p.get("ceilingFinal") is not None for p in opponent_projections)
+    )
+    expected_known = (
+        own_expected is not None
+        and all(p.get("expectedFinal") is not None for p in opponent_projections)
+    )
+    if not bounds_known:
+        return {
+            "bestPossibleRank": None,
+            "expectedRank": None,
+            "worstPossibleRank": None,
+            "currentRankLocked": False,
+            "desiredRankMathematicallyLocked": False,
+            "desiredRankProbablyLocked": False,
+            "allRelevantOpponentBoundsKnown": False,
+        }
+
+    best = 1 + sum(1 for p in opponent_projections if p.get("floorFinal") > own_ceiling)
+    expected = None
+    if expected_known:
+        expected = 1 + sum(1 for p in opponent_projections if p.get("expectedFinal") >= own_expected)
+    worst = 1 + sum(1 for p in opponent_projections if p.get("ceilingFinal") >= own_floor)
     current_locked = best is not None and best == worst
 
     desired_locked = False
-    if target_rank and own_projection.get("floorFinal") is not None:
+    if target_rank and own_floor is not None:
         guaranteed_better = 0
-        for projection in projections:
-            if projection.get("clanId") == our_clan.get("id"):
-                continue
+        for projection in opponent_projections:
             if projection.get("ceilingFinal") is not None and projection.get("ceilingFinal") >= own_projection.get("floorFinal"):
                 guaranteed_better += 1
         desired_locked = guaranteed_better + 1 <= target_rank
@@ -252,6 +355,7 @@ def compute_rank_bounds(our_clan, projections, target_rank=1, score_rules=None):
         "currentRankLocked": current_locked,
         "desiredRankMathematicallyLocked": desired_locked,
         "desiredRankProbablyLocked": expected is not None and expected <= target_rank,
+        "allRelevantOpponentBoundsKnown": True,
     }
 
 
@@ -278,38 +382,47 @@ def build_rank_targets(our_clan, opponents, projections, score_rules=None):
         ],
         reverse=True,
     )
+    if len(scores) < len(opponents):
+        return []
+
     target_scores = {}
     total_clans = len(opponents) + 1
-    for rank in range(1, total_clans + 1):
-        if rank == total_clans:
-            target_scores[rank] = 0
-        else:
-            idx = rank - 1
-            target_scores[rank] = scores[idx] if idx < len(scores) else 0
+    for rank in range(1, total_clans):
+        idx = rank - 1
+        target_scores[rank] = scores[idx] + tie_margin
 
     targets = []
-    for rank in range(1, total_clans + 1):
+    for rank in range(1, total_clans):
         target_score = safe_int(target_scores.get(rank))
         if target_score is None:
             continue
-        needed_total = target_score + tie_margin
-        required_additional = max(0, needed_total - current)
+        required_additional = max(0, target_score - current)
         required_avg = (required_additional / remaining) if remaining > 0 else None
-        raw_wins = (needed_total - current - remaining * loss) / (win - loss) if remaining > 0 else 0
-        wins = math.ceil(raw_wins)
-        if required_avg is not None and required_avg > win:
-            wins = None
-            safe_losses = None
-            status = "impossible"
-        else:
-            wins = max(0, min(remaining, wins))
-            safe_losses = remaining - wins
-            if wins == 0:
-                status = "safe"
-            elif required_avg is not None and required_avg <= (win * 0.85):
-                status = "stretch"
+        if remaining <= 0:
+            if target_score > current:
+                wins = None
+                safe_losses = None
+                status = "impossible"
             else:
-                status = "unlikely"
+                wins = 0
+                safe_losses = 0
+                status = "projected-target"
+        else:
+            raw_wins = (target_score - current - remaining * loss) / (win - loss)
+            wins = math.ceil(raw_wins)
+            if wins > remaining:
+                wins = None
+                safe_losses = None
+                status = "impossible"
+            else:
+                wins = max(0, min(remaining, wins))
+                safe_losses = remaining - wins
+                if wins == 0:
+                    status = "projected-target"
+                elif required_avg is not None and required_avg <= win:
+                    status = "stretch"
+                else:
+                    status = "unlikely"
 
         targets.append({
             "rank": rank,
@@ -338,6 +451,15 @@ def build_score_plan(our_clan, target_score, score_rules=None):
     needed_total = score + tie_margin
     required_additional = max(0, needed_total - current)
     required_avg = (required_additional / remaining) if remaining > 0 else None
+    if remaining <= 0 and needed_total > current:
+        return {
+            "targetScore": score,
+            "requiredAdditionalMedals": required_additional,
+            "requiredAveragePerDeck": None,
+            "minimumWinsNeeded": None,
+            "safeLossesAllowed": None,
+            "status": "impossible",
+        }
     raw_wins = (needed_total - current - remaining * loss) / (win - loss) if remaining > 0 else 0
     wins = math.ceil(raw_wins)
     if required_avg is not None and required_avg > win:
@@ -484,6 +606,8 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             "bestPossibleRank": None,
             "expectedRank": None,
             "worstPossibleRank": None,
+            "currentRankLocked": False,
+            "allRelevantOpponentBoundsKnown": False,
             "rationale": ["Geen harde aanbeveling omdat data ontbreekt."],
             "warnings": warnings,
             "assumptions": assumptions,
@@ -504,7 +628,29 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             "bestPossibleRank": None,
             "expectedRank": None,
             "worstPossibleRank": None,
+            "currentRankLocked": False,
+            "allRelevantOpponentBoundsKnown": False,
             "rationale": ["Projectie ontbreekt voor onze clan."],
+            "warnings": warnings,
+            "assumptions": assumptions,
+        }
+    if not bounds.get("allRelevantOpponentBoundsKnown"):
+        warnings.append("Niet alle relevante tegenstanderprojecties hebben geldige floor en ceiling.")
+        return {
+            "mode": "DATA_INCOMPLETE",
+            "headline": "Onvoldoende betrouwbare tegenstanderdata",
+            "summary": "Een mathematisch advies is geblokkeerd omdat niet alle tegenstanderbounds bekend zijn.",
+            "confidence": "low",
+            "classification": "data-derived",
+            "targetClanId": None,
+            "targetRank": None,
+            "actionPlan": {"minimumWins": 0, "maximumSafeLosses": 0, "recommendedBoatAttacks": 0, "decksToHoldTemporarily": 0},
+            "requiredAveragePerDeck": None,
+            "bestPossibleRank": None,
+            "expectedRank": None,
+            "worstPossibleRank": None,
+            "currentRankLocked": False,
+            "rationale": ["Geen hard advies omdat opponent bounds ontbreken."],
             "warnings": warnings,
             "assumptions": assumptions,
         }
@@ -565,7 +711,7 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             summary = f"Alternatief: plaats {alt['rank']} vraagt gemiddeld {alt['requiredAveragePerDeck']} per deck."
         else:
             summary = "Geen hogere haalbare positie gevonden; bescherm huidige positie."
-    elif target and target.get("minimumWinsNeeded") == 0:
+    elif target and target.get("minimumWinsNeeded") == 0 and bounds.get("desiredRankMathematicallyLocked"):
         mode = "SAFE_LOSS_WINDOW"
         headline = f"Plaats {target_rank} is veilig haalbaar"
         summary = f"Er zijn {target.get('safeLossesAllowed')} veilige losses binnen dit doel."
@@ -628,6 +774,8 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
         "bestPossibleRank": bounds.get("bestPossibleRank"),
         "expectedRank": bounds.get("expectedRank"),
         "worstPossibleRank": bounds.get("worstPossibleRank"),
+        "currentRankLocked": bounds.get("currentRankLocked"),
+        "allRelevantOpponentBoundsKnown": bounds.get("allRelevantOpponentBoundsKnown"),
         "rationale": rationale[:3],
         "warnings": warnings,
         "assumptions": assumptions,
@@ -664,6 +812,17 @@ def build_strategy_package(clans, clan_name, players, finish_outlook, war_phase,
             missing.append(field)
     if own.get("deckCapacityLabel") != "live":
         estimated.append("deckCapacity")
+    if own.get("deckDataSource") not in (None, "api"):
+        estimated.append("decksUsed")
+    if any(
+        projection.get("floorFinal") is None or projection.get("ceilingFinal") is None
+        for projection in projections
+        if projection.get("clanId") != own.get("id")
+    ):
+        missing.append("opponentBounds")
+    for clan in opponents:
+        if clan.get("deckDataSource") not in (None, "api", "unknown"):
+            estimated.append(f"{clan.get('name')}: {clan.get('deckDataSource')}")
     return {
         "warContext": context,
         "raceRows": normalized,
@@ -672,8 +831,8 @@ def build_strategy_package(clans, clan_name, players, finish_outlook, war_phase,
         "recommendation": recommendation,
         "dataQuality": {
             "confidence": own.get("dataConfidence", "low"),
-            "missingFields": missing,
-            "estimatedFields": estimated,
+            "missingFields": sorted(set(missing)),
+            "estimatedFields": sorted(set(estimated)),
             "sources": ["royaleapi", "cwstats"],
         },
     }
