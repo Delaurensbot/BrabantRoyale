@@ -330,6 +330,14 @@ def parse_cwstats_players_from_html(html: str):
         if not name:
             continue
 
+        tag = ""
+        for link in tr.find_all("a", href=True):
+            href = (link.get("href") or "").strip()
+            tag_match = re.search(r"/player/([^/?#]+)", href)
+            if tag_match:
+                tag = tag_match.group(1).replace("#", "").replace("%23", "").upper()
+                break
+
         boat_index = idx_boat if idx_boat is not None else 2
         used_index = idx_used_today if idx_used_today is not None else 3
         cards_index = idx_cards if idx_cards is not None else 4
@@ -337,7 +345,7 @@ def parse_cwstats_players_from_html(html: str):
 
         players.append({
             "rank": int(rank_raw),
-            "tag": "",
+            "tag": tag,
             "name": name,
             "role": "",
             "boat_attacks": (_compact_number(cells[boat_index]) if boat_index < len(cells) else 0) or 0,
@@ -347,6 +355,103 @@ def parse_cwstats_players_from_html(html: str):
         })
 
     return players
+
+
+def _normalize_player_name(name: str):
+    return re.sub(r"[^\w]+", "", (name or "").strip().lower())
+
+
+def _safe_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        parsed = _compact_number(str(value))
+        return parsed if parsed is not None else None
+
+
+def _sum_player_medals(players):
+    total = 0
+    known = False
+    for player in players or []:
+        value = _safe_int(player.get("fame"))
+        if value is None:
+            continue
+        total += value
+        known = True
+    return total if known else None
+
+
+def _own_clan_medals(clans, clan_name):
+    own_key = _normalize_clan_name(clan_name)
+    for clan in clans or []:
+        if _normalize_clan_name(getattr(clan, "name", "")) == own_key:
+            return _safe_int(getattr(clan, "current_medals", None))
+    return None
+
+
+def reconcile_players_with_cwstats(players, cwstats_players, clans, clan_name):
+    """
+    Use cwstats player medals as the canonical per-person score when available.
+
+    RoyaleAPI can temporarily show stale or shifted per-player medals while the
+    clan overview score is already updated. Matching cwstats rows back onto the
+    official rows preserves tags/roles where possible and keeps the sum of the
+    visible player medals aligned with our clan total.
+    """
+    if not cwstats_players:
+        return list(players or [])
+
+    official_players = list(players or [])
+    cwstats_players = list(cwstats_players or [])
+    own_medals = _own_clan_medals(clans, clan_name)
+
+    by_tag = {
+        (row.get("tag") or "").strip().upper(): row
+        for row in cwstats_players
+        if (row.get("tag") or "").strip()
+    }
+    by_name = {
+        _normalize_player_name(row.get("name")): row
+        for row in cwstats_players
+        if _normalize_player_name(row.get("name"))
+    }
+
+    merged = []
+    matched_keys = set()
+    for row in official_players:
+        tag = (row.get("tag") or "").strip().upper()
+        name_key = _normalize_player_name(row.get("name"))
+        cw_row = by_tag.get(tag) if tag else None
+        if cw_row is None:
+            cw_row = by_name.get(name_key)
+
+        if not cw_row:
+            merged.append(dict(row))
+            continue
+
+        matched_keys.add((cw_row.get("tag") or "").strip().upper() or _normalize_player_name(cw_row.get("name")))
+        updated = dict(row)
+        for key in ("boat_attacks", "decks_used_today", "decks_total_so_far", "fame"):
+            value = cw_row.get(key)
+            if value not in (None, ""):
+                updated[key] = value
+        if not updated.get("tag") and cw_row.get("tag"):
+            updated["tag"] = cw_row.get("tag")
+        merged.append(updated)
+
+    for cw_row in cwstats_players:
+        cw_key = (cw_row.get("tag") or "").strip().upper() or _normalize_player_name(cw_row.get("name"))
+        if cw_key and cw_key not in matched_keys and not official_players:
+            merged.append(dict(cw_row))
+
+    merged_sum = _sum_player_medals(merged)
+    cwstats_sum = _sum_player_medals(cwstats_players)
+    if own_medals is not None and cwstats_sum == own_medals and merged_sum != own_medals:
+        return cwstats_players
+
+    return merged
 
 
 def pick_reporting_soup(race_soup: BeautifulSoup, cwstats_active_day):
@@ -685,6 +790,13 @@ class handler(BaseHTTPRequestHandler):
 
             if not filtered_players and cwstats_players:
                 filtered_players = list(cwstats_players)
+            elif cwstats_players:
+                filtered_players = reconcile_players_with_cwstats(
+                    filtered_players,
+                    cwstats_players,
+                    clans,
+                    clan_config.get("name") or OUR_CLAN_NAME_DEFAULT,
+                )
 
             filtered_players = sorted(filtered_players, key=lambda r: int(r.get("rank", 0) or 0))
             filtered_players = dedupe_rows(filtered_players)
