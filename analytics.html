@@ -141,7 +141,7 @@
 
     <div class="card fullRow">
       <div class="cardHead">
-        <div class="title">Underperformers</div>
+        <div class="title" id="underperformersTitle">Underperformers</div>
         <div class="actions">
           <button class="iconBtn" id="infoUnderperformers">ℹ️ Info</button>
           <button class="iconBtn" id="copyUnderperformers">⧉ Kopieer tabel</button>
@@ -671,6 +671,20 @@
         <p><strong>Urgent</strong><br />Toont URGENT badge bij Missed attacks ≥ 8 of Penalty points ≥ 24.</p>
       `,
     },
+    br2Policy: {
+      title: 'Brabant Royale 2 — Consequentiebeleid',
+      body: `
+        <p><strong>Doel</strong><br />Voor BR2 sturen we vooral op consequentie in plaats van alleen score.</p>
+        <p><strong>Regels</strong></p>
+        <ul>
+          <li>2x achter elkaar niet alle aanvallen doen (D &lt; 16):</li>
+          <li style="margin-left: 16px;">Elder → degradeer naar Member</li>
+          <li style="margin-left: 16px;">Member → kick</li>
+          <li>3x achter elkaar alle aanvallen doen (D = 16): Member → promoveer naar Elder</li>
+        </ul>
+        <p>Deze tabel wordt alleen toegepast als je op <em>Brabant Royale 2</em> staat.</p>
+      `,
+    },
     watchlistA: {
       title: 'Watchlist A — High performer maar onbetrouwbaar',
       body: `
@@ -714,6 +728,7 @@
   };
 
   function showInfoOverlay(key) {
+    if (key === 'underperformers' && currentClanTag === 'GPCLVLPP') key = 'br2Policy';
     const content = infoContent[key];
     if (!content) return;
     el('infoTitle').textContent = content.title;
@@ -722,6 +737,7 @@
   }
 
   const reliabilityHeaders = ['Player', 'Role', 'Weeks played', 'Avg score', 'Missed attacks', 'Reliability %'];
+  const br2PolicyHeaders = ['Player', 'Role', 'Actie', 'Reden'];
 
   const normalizeName = (name) => (name || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
@@ -1057,6 +1073,96 @@
     ];
   }
 
+  function computeConsecutiveStreak(weeks, predicate) {
+    let streak = 0;
+    for (const week of weeks) {
+      if (predicate(week)) streak += 1;
+      else break;
+    }
+    return streak;
+  }
+
+  function computeMaxConsecutiveStreak(weeks, predicate) {
+    let maxStreak = 0;
+    let current = 0;
+    for (const week of weeks) {
+      if (predicate(week)) {
+        current += 1;
+        if (current > maxStreak) maxStreak = current;
+      } else {
+        current = 0;
+      }
+    }
+    return maxStreak;
+  }
+
+  function getPlayerDeckWeekData(player) {
+    const decks = analyticsCache.decks || { headers: [], rows: [] };
+    const decksIdx = (decks.headers || []).findIndex((h) => (h || '').toLowerCase() === 'd');
+    if (decksIdx === -1) return [];
+
+    const weekHeaders = (decks.headers || []).filter((h, idx) => idx > decksIdx && /^\d+\s*-\s*\d+$/.test((h || '').trim()));
+    const decksRow = (decks.rows || []).find((r) => normalizeName(r[0]) === normalizeName(player));
+    if (!decksRow) return [];
+
+    const weekData = weekHeaders
+      .map((wh) => {
+        const decksColIdx = (decks.headers || []).findIndex((h) => h === wh);
+        const attacksRaw = decksColIdx === -1 ? undefined : decksRow[decksColIdx];
+        const attacksNum = attacksRaw === undefined || attacksRaw === '' ? null : Number(attacksRaw);
+        const attacks = Number.isNaN(attacksNum) ? null : attacksNum;
+        if (attacks === null) return null;
+        return { week: wh, attacks };
+      })
+      .filter(Boolean);
+
+    return sortWeeksDesc(weekData);
+  }
+
+  function buildBr2PolicyRows(ratioRows) {
+    const rows = [];
+    (ratioRows || []).forEach((row) => {
+      const role = (row.role || '').toLowerCase();
+      const weeks = getPlayerDeckWeekData(row.player);
+      if (!weeks.length) return;
+
+      const maxConsecutiveMisses = computeMaxConsecutiveStreak(weeks, (week) => week.attacks !== null && week.attacks < 16);
+      const consecutivePerfect = computeConsecutiveStreak(weeks, (week) => week.attacks === 16);
+
+      if (maxConsecutiveMisses >= 2) {
+        if (role === 'elder') {
+          rows.push([
+            playerCell(row, `2x op rij niet alle aanvallen gedaan (max ${maxConsecutiveMisses}w streak)`),
+            row.role || '',
+            'Degradeer naar Member',
+            `${maxConsecutiveMisses} weken op rij minder dan 16 attacks (Decks Used tabel).`,
+          ]);
+        } else if (role === 'member') {
+          rows.push([
+            playerCell(row, `2x op rij niet alle aanvallen gedaan (max ${maxConsecutiveMisses}w streak)`),
+            row.role || '',
+            'Kick',
+            `${maxConsecutiveMisses} weken op rij minder dan 16 attacks (Decks Used tabel).`,
+          ]);
+        }
+      } else if (consecutivePerfect >= 3 && role === 'member') {
+        rows.push([
+          playerCell(row, `3x op rij alle aanvallen gedaan (${consecutivePerfect}w streak)`),
+          row.role || '',
+          'Promoveer naar Elder',
+          `Laatste ${consecutivePerfect} weken 16/16 attacks.`,
+        ]);
+      }
+    });
+    return rows;
+  }
+
+  function updateUnderperformersContext() {
+    const titleEl = el('underperformersTitle');
+    if (!titleEl) return;
+    titleEl.textContent = currentClanTag === 'GPCLVLPP' ? 'BR2 Consequentie (Promoveer / Degradeer / Kick)' : 'Underperformers';
+  }
+
   function buildRatioRow(row) {
     const summary = buildReliabilitySummary(row) || 'Klik om weekdetails te openen';
     return [
@@ -1149,6 +1255,7 @@
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
     PromotionList('promotionList', promotionCandidates, el('toastPromotions'), el('promotionDetail'));
+    updateUnderperformersContext();
 
     const ratioRows = data.ratio_scores || [];
     ratioData = ratioRows.map((row) => buildRatioRow(row));
@@ -1156,17 +1263,22 @@
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
     ratioComponent = renderTable('ratioTableWrap', ratioHeaders, ratioData.slice(0, 10));
 
-    const underperformers = ratioRows.filter(
-      (row) => hasMeaningfulStats(row) && Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95
-    );
-    underperformersData = underperformers.map((row) => {
-      const urgent = Number(row.missed_attacks) >= 8 || Number(row.penalty_points) >= 24;
-      let reason = 'Underperformer: low avg + low reliability';
-      if (urgent && Number(row.missed_attacks) >= 8) reason = 'Underperformer (urgent): missed>=8';
-      else if (urgent && Number(row.penalty_points) >= 24) reason = 'Underperformer (urgent): penalty>=24';
-      return buildReliabilityRow(row, reason, urgent ? 'URGENT' : '', urgent ? 'pill--urgent' : '');
-    });
-    underperformersComponent = renderTable('underperformersWrap', reliabilityHeaders, underperformersData);
+    if (currentClanTag === 'GPCLVLPP') {
+      underperformersData = buildBr2PolicyRows(ratioRows);
+      underperformersComponent = renderTable('underperformersWrap', br2PolicyHeaders, underperformersData);
+    } else {
+      const underperformers = ratioRows.filter(
+        (row) => hasMeaningfulStats(row) && Number(row.avg_points) < 2400 && Number(getReliabilityPercent(row)) < 95
+      );
+      underperformersData = underperformers.map((row) => {
+        const urgent = Number(row.missed_attacks) >= 8 || Number(row.penalty_points) >= 24;
+        let reason = 'Underperformer: low avg + low reliability';
+        if (urgent && Number(row.missed_attacks) >= 8) reason = 'Underperformer (urgent): missed>=8';
+        else if (urgent && Number(row.penalty_points) >= 24) reason = 'Underperformer (urgent): penalty>=24';
+        return buildReliabilityRow(row, reason, urgent ? 'URGENT' : '', urgent ? 'pill--urgent' : '');
+      });
+      underperformersComponent = renderTable('underperformersWrap', reliabilityHeaders, underperformersData);
+    }
 
     const watchlistA = ratioRows.filter(
       (row) => hasMeaningfulStats(row) && Number(row.avg_points) >= 2800 && Number(getReliabilityPercent(row)) < 95
