@@ -209,6 +209,12 @@
       <div class="toast" id="toastDecks"></div>
       <div class="tableWrap" id="decksWrap">(laden...)</div>
     </div>
+
+    <div class="card fullRow">
+      <div class="cardHead"><div class="title">Clan metadata summary</div><div class="actions"><button class="iconBtn" id="copyMeta">⧉ Kopieer tabel</button></div></div>
+      <div class="toast" id="toastMeta"></div>
+      <div class="tableWrap" id="metaWrap">(laden...)</div>
+    </div>
   </div>
 
   <div class="infoOverlay" id="infoOverlay">
@@ -594,6 +600,7 @@
   let latestWeekendMissedRows = [];
   let contributionComponent = null;
   let decksComponent = null;
+  let metaComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
   let mvpCurrent = [];
   let mvpPrevious = [];
@@ -1241,6 +1248,9 @@
     contributionComponent = renderTable('contributionWrap', analyticsCache.contribution.headers, analyticsCache.contribution.rows);
 
     decksComponent = renderTable('decksWrap', analyticsCache.decks.headers, analyticsCache.decks.rows);
+
+    const metadata = data.metadata_table || { headers: ['Metric', 'Value', 'Notes'], rows: [] };
+    metaComponent = renderTable('metaWrap', metadata.headers, metadata.rows);
   }
 
   async function fetchAnalytics() {
@@ -1344,6 +1354,12 @@
   el('copyDecks').addEventListener('click', () => {
     if (decksComponent) {
       copyTable(decksComponent.getHeaders(), decksComponent.getVisibleRows(), el('toastDecks'));
+    }
+  });
+
+  el('copyMeta').addEventListener('click', () => {
+    if (metaComponent) {
+      copyTable(metaComponent.getHeaders(), metaComponent.getVisibleRows(), el('toastMeta'));
     }
   });
 
