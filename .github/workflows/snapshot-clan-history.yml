@@ -1,0 +1,28 @@
+name: Snapshot clan analytics history
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"
+      timezone: "Europe/Amsterdam"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-clan-analytics-history
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Store clan history in Supabase
+        env:
+          SUPABASE_INGEST_TOKEN: ${{ secrets.SUPABASE_INGEST_TOKEN }}
+        run: |
+          curl --fail-with-body --silent --show-error --retry 2 \
+            --request POST \
+            --header "X-Ingest-Token: ${SUPABASE_INGEST_TOKEN}" \
+            https://brabant-royale.vercel.app/api/snapshot_history

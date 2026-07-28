@@ -18,6 +18,11 @@ import requests
 from bs4 import BeautifulSoup
 
 from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
+from supabase_history import (
+    clash_date_to_datetime,
+    extract_clan_participants,
+    load_history_races_from_env,
+)
 
 
 DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
@@ -533,8 +538,10 @@ def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optiona
 
 
 def race_created_sort_value(race: Dict[str, object]) -> int:
-    created = str(race.get("createdDate") or "")
-    return int(created[:8]) if created[:8].isdigit() else 0
+    try:
+        return int(clash_date_to_datetime(race.get("createdDate")).timestamp())
+    except (TypeError, ValueError):
+        return 0
 
 
 def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
@@ -556,12 +563,12 @@ def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[st
 
     ordered = sorted(race_items, key=race_sort_key)
     deduped: List[Dict[str, object]] = []
-    seen_keys: Set[Tuple[int, int]] = set()
+    seen_keys: Set[Tuple[int, str]] = set()
 
     for race in ordered:
         dedupe_key = (
             int(race.get("seasonId") or 0),
-            race_created_sort_value(race),
+            str(race.get("createdDate") or ""),
         )
         if dedupe_key in seen_keys:
             continue
@@ -734,31 +741,19 @@ def collect_analytics_data(
     if not race_items:
         raise RuntimeError("No river race data returned by Clash API.")
 
+    history_races, history_status = load_history_races_from_env(norm_tag)
+    # Live races come first so an in-progress race replaces an older stored
+    # copy with the same season/createdDate during deduplication.
+    race_items.extend(history_races)
+
     labeled_races = dedupe_and_label_races(race_items)
-    last_10 = labeled_races[-10:]
     week_headers: List[str] = []
     contrib_map: Dict[str, Dict[str, int]] = {}
     decks_map: Dict[str, Dict[str, int]] = {}
 
-    for week_key, race in last_10:
+    for week_key, race in labeled_races:
         week_headers.append(week_key)
-
-        standings = race.get("standings") or []
-        clans_blob = race.get("clans") or []
-        source_rows = []
-        if standings:
-            for s in standings:
-                clan = s.get("clan") or {}
-                if (clan.get("tag") or "").replace("#", "").upper() == norm_tag:
-                    # River race log usually nests participants under standing.clan.participants
-                    # (not directly under standing.participants).
-                    source_rows = clan.get("participants") or s.get("participants") or []
-                    break
-        elif clans_blob:
-            for c in clans_blob:
-                if (c.get("tag") or "").replace("#", "").upper() == norm_tag:
-                    source_rows = c.get("participants") or []
-                    break
+        source_rows = extract_clan_participants(race, norm_tag)
 
         for p in source_rows:
             ptag = (p.get("tag") or "").replace("#", "").upper()
@@ -831,6 +826,10 @@ def collect_analytics_data(
         "promotion_candidates": promotion_candidates,
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+        "history": {
+            **history_status,
+            "available_weeks": len(week_headers),
+        },
     }
 
 
