@@ -11,6 +11,7 @@ import requests
 
 ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 HISTORY_TABLE = "clan_war_player_weeks"
+EXCLUSIONS_TABLE = "clan_war_week_exclusions"
 DEFAULT_PAGE_SIZE = 1000
 DEFAULT_WRITE_BATCH_SIZE = 500
 DEFAULT_SUPABASE_URL = "https://upbjlamddxooxhxhkivg.supabase.co"
@@ -184,6 +185,7 @@ def fetch_history_rows(
     *,
     supabase_url: str,
     api_key: str,
+    player_tag: Optional[str] = None,
     page_size: int = DEFAULT_PAGE_SIZE,
 ) -> List[Dict[str, object]]:
     norm_tag = normalize_tag(clan_tag)
@@ -196,6 +198,9 @@ def fetch_history_rows(
         "clan_tag": f"eq.{norm_tag}",
         "order": "race_created_at.asc,player_name.asc",
     }
+    normalized_player_tag = normalize_tag(player_tag)
+    if normalized_player_tag:
+        params["player_tag"] = f"eq.{normalized_player_tag}"
     headers = _supabase_headers(api_key)
     rows: List[Dict[str, object]] = []
     start = 0
@@ -225,6 +230,43 @@ def fetch_history_rows(
             break
         start += page_size
 
+    return rows
+
+
+def fetch_week_exclusions(
+    clan_tag: str,
+    *,
+    supabase_url: str,
+    api_key: str,
+    player_tag: Optional[str] = None,
+) -> List[Dict[str, object]]:
+    norm_tag = normalize_tag(clan_tag)
+    endpoint = f"{supabase_url.rstrip('/')}/rest/v1/{EXCLUSIONS_TABLE}"
+    params = {
+        "select": (
+            "clan_tag,race_created_at,player_tag,reason,created_at,updated_at"
+        ),
+        "clan_tag": f"eq.{norm_tag}",
+        "order": "race_created_at.asc,player_tag.asc",
+    }
+    normalized_player_tag = normalize_tag(player_tag)
+    if normalized_player_tag:
+        params["player_tag"] = f"eq.{normalized_player_tag}"
+    response = requests.get(
+        endpoint,
+        params=params,
+        headers=_supabase_headers(api_key),
+        timeout=25,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            "Supabase week exclusions read failed with "
+            f"HTTP {response.status_code}."
+        )
+
+    rows = response.json() if response.content else []
+    if not isinstance(rows, list):
+        raise RuntimeError("Supabase week exclusions response was not a row list.")
     return rows
 
 
@@ -296,6 +338,35 @@ def load_history_races_from_env(
         "source": "supabase_and_clash_api",
         "stored_rows": len(rows),
         "stored_weeks": len(races),
+    }
+
+
+def load_week_exclusions_from_env(
+    clan_tag: str,
+) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
+    config = get_supabase_read_config()
+    if not config:
+        return [], {
+            "enabled": False,
+            "message": "Supabase environment variables are not configured.",
+        }
+
+    supabase_url, api_key = config
+    try:
+        rows = fetch_week_exclusions(
+            clan_tag,
+            supabase_url=supabase_url,
+            api_key=api_key,
+        )
+    except Exception as exc:
+        return [], {
+            "enabled": True,
+            "message": str(exc),
+        }
+
+    return rows, {
+        "enabled": True,
+        "stored_exclusions": len(rows),
     }
 
 

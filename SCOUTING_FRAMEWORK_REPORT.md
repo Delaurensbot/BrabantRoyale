@@ -1,5 +1,43 @@
 # Clan War Scouting Framework — Developer Report
 
+## Implementation decision (28 July 2026)
+
+The useful and defensible version is a two-stage model:
+
+1. **Before joining:** use the official player profile only as a readiness
+   pre-screen (level 15/16 card depth, trophies, and challenge signal).
+2. **After joining:** replace uncertainty with our own stored clan-war
+   observations. From 2 played weeks onward these observations carry 60% of
+   the displayed score; confidence becomes high only after at least 6 played
+   weeks.
+
+The implementation intentionally does **not** treat a recent battlelog as proof
+of long-term war reliability. It is a short, mixed-mode sample and the official
+API does not provide a complete external clan-war history. Communication,
+availability, language, and conduct remain a manual four-question checklist.
+
+Current official context:
+
+- [Clash Royale developer portal](https://developer.clashroyale.com/api-docs/index.html)
+  documents the player profile and recent battlelog endpoints.
+- [Supercell recruitment guidance](https://support.supercell.com/clash-royale/en/articles/finding-the-right-clan-clan-members-for-you-3.html)
+  emphasizes recruiting through channels where you can meet and communicate
+  with players.
+- [Supercell clan-role guidance](https://support.supercell.com/clash-royale/en/articles/clan-roles-1.html)
+  explicitly advises leaders to promote only members they know and trust.
+- [The December 2025 update](https://supercell.com/en/games/clashroyale/blog/release-notes/december-update-2025/)
+  introduced card level 16.
+- [The May 2026 collection update](https://supercell.com/en/games/clashroyale/blog/news/new-collection-levels-and-mastery-changes/)
+  changed account progression, which is why the fit model uses card depth
+  directly instead of assuming the old XP/King Journey model is stable.
+
+Implemented files:
+
+- `scouting_metrics.py`: deterministic profile, war, confidence, and fit rules.
+- `api/scouting.py`: official player profile + included Supabase war history.
+- `analytics.html`: player-tag input, result score, reasons, limitations, and
+  manual checklist.
+
 ## A. Feasibility analysis
 
 ### Data source baseline (official API via RoyaleAPI proxy)

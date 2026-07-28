@@ -7,7 +7,6 @@
 # - Seasons are detected dynamically: current = max season in headers, previous = second max.
 
 import argparse
-import math
 import os
 import re
 import sys
@@ -19,9 +18,12 @@ from bs4 import BeautifulSoup
 
 from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
 from supabase_history import (
+    clash_date_to_iso,
     clash_date_to_datetime,
     extract_clan_participants,
     load_history_races_from_env,
+    load_week_exclusions_from_env,
+    normalize_tag,
 )
 
 
@@ -34,6 +36,12 @@ ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil 
 
 UNREPLACEABLE_PENALTY = {0: 0, 1: 2, 2: 4, 3: 12}
 ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
+PROMOTION_WINDOWS = (2, 4, 6)
+DEFAULT_PROMOTION_WINDOW = 6
+DEMOTION_WINDOW = 10
+DEMOTION_MAX_MISSED_ATTACKS = 2
+
+ExcludedWeeks = Set[Tuple[str, str]]
 
 
 def normalize_space(s: str) -> str:
@@ -235,14 +243,18 @@ def compute_mvp_list(
     player_print_map: Dict[str, str],
     top_n: int,
     require_all_weekends: bool,
+    excluded_weeks: Optional[ExcludedWeeks] = None,
 ) -> List[Dict[str, str]]:
     results: List[Dict[str, str]] = []
+    excluded_weeks = excluded_weeks or set()
 
     for key, per_week_c in contrib_map.items():
         total_score = 0
         eligible = True
 
         for wh in season_weeks:
+            if (key, wh) in excluded_weeks:
+                continue
             c_val = per_week_c.get(wh, 0)
 
             # Alleen meegerekend als Contribution > 0
@@ -375,17 +387,24 @@ def compute_reliability_scores(
     decks_map: Dict[str, Dict[str, int]],
     role_map: Dict[str, str],
     player_print_map: Dict[str, str],
+    excluded_weeks: Optional[ExcludedWeeks] = None,
 ) -> List[Dict[str, object]]:
     results: List[Dict[str, object]] = []
+    excluded_weeks = excluded_weeks or set()
 
     for key, per_week_c in contrib_map.items():
         weeks_played = 0
+        excluded_week_count = 0
         missed_attacks = 0
         penalty_points = 0
         attacks_done = 0
         total_points = 0
 
         for wh, c_val in per_week_c.items():
+            if (key, wh) in excluded_weeks:
+                if c_val > 0:
+                    excluded_week_count += 1
+                continue
             if c_val <= 0:
                 continue
 
@@ -411,6 +430,7 @@ def compute_reliability_scores(
                 "player_tag": key,
                 "role": role_map.get(key, ""),
                 "weeks_played": weeks_played,
+                "excluded_weeks": excluded_week_count,
                 "attacks_done": attacks_done,
                 "missed_attacks": missed_attacks,
                 "penalty_points": penalty_points,
@@ -423,73 +443,29 @@ def compute_reliability_scores(
     return results
 
 
-def parse_week_key(week_header: str) -> Tuple[int, int]:
-    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", week_header)
-    if not m:
-        return (math.inf, math.inf)
-    return (int(m.group(1)), int(m.group(2)))
-
-
-def sort_valid_weeks(decks_by_week: Dict[str, int]) -> List[Tuple[Tuple[int, int], str, int]]:
-    ordered: List[Tuple[Tuple[int, int], str, int]] = []
-    for week_header, decks_used in decks_by_week.items():
-        parsed = parse_week_key(week_header)
-        if math.isinf(parsed[0]) or math.isinf(parsed[1]):
-            continue
-        ordered.append((parsed, week_header, decks_used))
-    ordered.sort(key=lambda t: t[0])
-    return ordered
-
-
-def current_perfect_streak(decks_by_week: Dict[str, int]) -> int:
-    ordered = sort_valid_weeks(decks_by_week)
-    streak = 0
-    for _, _, decks_used in reversed(ordered):
-        if decks_used == 16:
-            streak += 1
-        else:
-            break
-    return streak
-
-
-ELDER_REQUIRED_STREAK = 6
 ELDER_MIN_AVG_CONTRIB = 2500
 
 
-def last_n_weeks_all_perfect(decks_by_week: Dict[str, int], n: int = ELDER_REQUIRED_STREAK) -> bool:
-    ordered = sort_valid_weeks(decks_by_week)
-    if len(ordered) < n:
-        return False
-    last_n = ordered[-n:]
-    return all(decks_used == 16 for _, _, decks_used in last_n)
-
-
-def should_promote_to_elder(player_name: str, role: str, decks_by_week: Dict[str, int]) -> bool:
-    """
-    True als:
-    - huidige role == "Member"
-    - huidige streak >= 6 weekends met D == 16
-    """
-
-    if (role or "").strip().lower() != "member":
-        return False
-
-    streak = current_perfect_streak(decks_by_week)
-    if streak < ELDER_REQUIRED_STREAK:
-        return False
-
-    return last_n_weeks_all_perfect(decks_by_week, n=ELDER_REQUIRED_STREAK)
-
-
-def average_contribution(per_week_contrib: Dict[str, int]) -> float:
-    played_weeks = [v for v in per_week_contrib.values() if v > 0]
+def average_contribution(
+    per_week_contrib: Dict[str, int],
+    week_headers: Optional[List[str]] = None,
+) -> float:
+    values = (
+        [per_week_contrib.get(week, 0) for week in week_headers]
+        if week_headers is not None
+        else list(per_week_contrib.values())
+    )
+    played_weeks = [v for v in values if v > 0]
     if not played_weeks:
         return 0.0
     return round(sum(played_weeks) / len(played_weeks), 2)
 
 
-def format_average_contribution(per_week_contrib: Dict[str, int]) -> str:
-    avg = average_contribution(per_week_contrib)
+def format_average_contribution(
+    per_week_contrib: Dict[str, int],
+    week_headers: Optional[List[str]] = None,
+) -> str:
+    avg = average_contribution(per_week_contrib, week_headers)
     if avg.is_integer():
         return str(int(avg))
     return f"{avg:.2f}".rstrip("0").rstrip(".")
@@ -500,31 +476,136 @@ def build_promotion_candidates(
     decks_map: Dict[str, Dict[str, int]],
     role_map: Dict[str, str],
     player_print_map: Dict[str, str],
+    week_headers: List[str],
+    evaluation_window: int = DEFAULT_PROMOTION_WINDOW,
+    excluded_weeks: Optional[ExcludedWeeks] = None,
 ) -> List[Dict[str, object]]:
     suggestions: List[Dict[str, object]] = []
+    excluded_weeks = excluded_weeks or set()
+    evaluation_window = max(1, int(evaluation_window))
 
     for key, per_week_decks in decks_map.items():
-        role = role_map.get(key, "")
-        if not should_promote_to_elder(key, role, per_week_decks):
+        if (role_map.get(key, "") or "").strip().lower() != "member":
             continue
 
-        streak = current_perfect_streak(per_week_decks)
-        avg_score = average_contribution(contrib_map.get(key, {}))
+        included_weeks = [
+            week
+            for week in week_headers
+            if (key, week) not in excluded_weeks
+        ]
+        if len(included_weeks) < evaluation_window:
+            continue
+
+        last_weeks = included_weeks[-evaluation_window:]
+        if not all(per_week_decks.get(week, 0) == 16 for week in last_weeks):
+            continue
+
+        streak = 0
+        for week in reversed(included_weeks):
+            if per_week_decks.get(week, 0) != 16:
+                break
+            streak += 1
+
+        avg_score = average_contribution(
+            contrib_map.get(key, {}),
+            last_weeks,
+        )
         if avg_score < ELDER_MIN_AVG_CONTRIB:
             continue
+
         suggestions.append(
             {
                 "player": player_print_map.get(key, key),
+                "player_tag": key,
+                "evaluation_window": evaluation_window,
                 "streak_weeks": streak,
                 "average_contribution": avg_score,
                 "reason": (
-                    f"Laatste {ELDER_REQUIRED_STREAK} weken perfecte attacks (D=16) als Member "
-                    f"en Gem. C ≥ {ELDER_MIN_AVG_CONTRIB}."
+                    f"Laatste {evaluation_window} meegetelde weken perfecte "
+                    "attacks (D=16) als Member en Gem. C "
+                    f"≥ {ELDER_MIN_AVG_CONTRIB}."
                 ),
             }
         )
 
-    suggestions.sort(key=lambda r: (r.get("streak_weeks", 0), r.get("average_contribution", 0)), reverse=True)
+    suggestions.sort(
+        key=lambda row: (
+            row.get("streak_weeks", 0),
+            row.get("average_contribution", 0),
+        ),
+        reverse=True,
+    )
+    return suggestions
+
+
+def build_demotion_candidates(
+    contrib_map: Dict[str, Dict[str, int]],
+    decks_map: Dict[str, Dict[str, int]],
+    role_map: Dict[str, str],
+    player_print_map: Dict[str, str],
+    week_headers: List[str],
+    window: int = DEMOTION_WINDOW,
+    max_missed_attacks: int = DEMOTION_MAX_MISSED_ATTACKS,
+    excluded_weeks: Optional[ExcludedWeeks] = None,
+) -> List[Dict[str, object]]:
+    suggestions: List[Dict[str, object]] = []
+    excluded_weeks = excluded_weeks or set()
+
+    for key, per_week_contrib in contrib_map.items():
+        if (role_map.get(key, "") or "").strip().lower() != "elder":
+            continue
+
+        played_weeks = [
+            week
+            for week in week_headers
+            if (key, week) not in excluded_weeks
+            and per_week_contrib.get(week, 0) > 0
+        ][-window:]
+        if not played_weeks:
+            continue
+
+        missed_by_week = [
+            max(
+                0,
+                16
+                - max(
+                    0,
+                    min(16, decks_map.get(key, {}).get(week, 0)),
+                ),
+            )
+            for week in played_weeks
+        ]
+        missed_attacks = sum(missed_by_week)
+        if missed_attacks <= max_missed_attacks:
+            continue
+
+        suggestions.append(
+            {
+                "player": player_print_map.get(key, key),
+                "player_tag": key,
+                "role": role_map.get(key, ""),
+                "window_weeks": window,
+                "observed_weeks": len(played_weeks),
+                "missed_attacks": missed_attacks,
+                "missed_weekends": sum(
+                    1 for missed in missed_by_week if missed > 0
+                ),
+                "reason": (
+                    f"In de laatste {len(played_weeks)} meegetelde gespeelde "
+                    f"weken {missed_attacks} aanvallen gemist "
+                    f"(grens: meer dan {max_missed_attacks} binnen "
+                    f"{window} weken)."
+                ),
+            }
+        )
+
+    suggestions.sort(
+        key=lambda row: (
+            row.get("missed_attacks", 0),
+            row.get("missed_weekends", 0),
+        ),
+        reverse=True,
+    )
     return suggestions
 
 
@@ -566,9 +647,13 @@ def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[st
     seen_keys: Set[Tuple[int, str]] = set()
 
     for race in ordered:
+        season_id = int(race.get("seasonId") or 0)
+        created_date = str(race.get("createdDate") or "")
+        if season_id <= 0 or race_created_sort_value(race) <= 0:
+            continue
         dedupe_key = (
-            int(race.get("seasonId") or 0),
-            str(race.get("createdDate") or ""),
+            season_id,
+            created_date,
         )
         if dedupe_key in seen_keys:
             continue
@@ -742,21 +827,43 @@ def collect_analytics_data(
         raise RuntimeError("No river race data returned by Clash API.")
 
     history_races, history_status = load_history_races_from_env(norm_tag)
+    exclusion_rows, exclusion_status = load_week_exclusions_from_env(norm_tag)
+    exclusions_by_snapshot: Dict[Tuple[str, str], str] = {}
+    for row in exclusion_rows:
+        try:
+            race_created_at = clash_date_to_iso(row.get("race_created_at"))
+        except (TypeError, ValueError):
+            continue
+        player_tag = normalize_tag(row.get("player_tag"))
+        if not player_tag:
+            continue
+        exclusions_by_snapshot[(race_created_at, player_tag)] = str(
+            row.get("reason") or ""
+        )
+
     # Live races come first so an in-progress race replaces an older stored
     # copy with the same season/createdDate during deduplication.
     race_items.extend(history_races)
 
     labeled_races = dedupe_and_label_races(race_items)
     week_headers: List[str] = []
+    week_metadata: Dict[str, Dict[str, object]] = {}
+    week_evaluations: Dict[str, Dict[str, Dict[str, object]]] = {}
+    excluded_weeks: ExcludedWeeks = set()
     contrib_map: Dict[str, Dict[str, int]] = {}
     decks_map: Dict[str, Dict[str, int]] = {}
 
     for week_key, race in labeled_races:
         week_headers.append(week_key)
+        race_created_at = clash_date_to_iso(race.get("createdDate"))
+        week_metadata[week_key] = {
+            "season_id": int(race.get("seasonId") or 0),
+            "race_created_at": race_created_at,
+        }
         source_rows = extract_clan_participants(race, norm_tag)
 
         for p in source_rows:
-            ptag = (p.get("tag") or "").replace("#", "").upper()
+            ptag = normalize_tag(p.get("tag"))
             if not ptag or ptag not in known_players:
                 continue
 
@@ -769,6 +876,21 @@ def collect_analytics_data(
 
             contrib_map.setdefault(ptag, {})[week_key] = contrib
             decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
+            exclusion_reason = exclusions_by_snapshot.get(
+                (race_created_at, ptag),
+                "",
+            )
+            is_included = not bool(exclusion_reason or (
+                race_created_at,
+                ptag,
+            ) in exclusions_by_snapshot)
+            if not is_included:
+                excluded_weeks.add((ptag, week_key))
+            week_evaluations.setdefault(ptag, {})[week_key] = {
+                "included": is_included,
+                "reason": exclusion_reason,
+                "race_created_at": race_created_at,
+            }
 
     # Ensure all known players exist in maps for frontend stability.
     for ptag in known_players:
@@ -783,18 +905,58 @@ def collect_analytics_data(
     if current_season is not None:
         weeks_current = [wh for wh in week_headers if season_of_week_header(wh) == current_season]
         mvp_current = compute_mvp_list(
-            weeks_current, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=False
+            weeks_current,
+            contrib_map,
+            decks_map,
+            player_print_map,
+            top_n,
+            require_all_weekends=False,
+            excluded_weeks=excluded_weeks,
         )
 
     mvp_previous: List[Dict[str, str]] = []
     if prev_season is not None:
         weeks_prev = [wh for wh in week_headers if season_of_week_header(wh) == prev_season]
         mvp_previous = compute_mvp_list(
-            weeks_prev, contrib_map, decks_map, player_print_map, top_n, require_all_weekends=True
+            weeks_prev,
+            contrib_map,
+            decks_map,
+            player_print_map,
+            top_n,
+            require_all_weekends=True,
+            excluded_weeks=excluded_weeks,
         )
 
-    ratio_scores = compute_reliability_scores(contrib_map, decks_map, role_map, player_print_map)
-    promotion_candidates = build_promotion_candidates(contrib_map, decks_map, role_map, player_print_map)
+    ratio_scores = compute_reliability_scores(
+        contrib_map,
+        decks_map,
+        role_map,
+        player_print_map,
+        excluded_weeks=excluded_weeks,
+    )
+    promotion_candidates_by_window = {
+        str(window): build_promotion_candidates(
+            contrib_map,
+            decks_map,
+            role_map,
+            player_print_map,
+            week_headers,
+            evaluation_window=window,
+            excluded_weeks=excluded_weeks,
+        )
+        for window in PROMOTION_WINDOWS
+    }
+    promotion_candidates = promotion_candidates_by_window[
+        str(DEFAULT_PROMOTION_WINDOW)
+    ]
+    demotion_candidates = build_demotion_candidates(
+        contrib_map,
+        decks_map,
+        role_map,
+        player_print_map,
+        week_headers,
+        excluded_weeks=excluded_weeks,
+    )
 
     contrib_headers = ["Player", "Role", "C", "Avg C", *week_headers]
     decks_headers = ["Player", "Role", "D", *week_headers]
@@ -806,13 +968,16 @@ def collect_analytics_data(
         role = role_map.get(ptag, "")
         per_week_contrib = contrib_map.get(ptag, {})
         per_week_decks = decks_map.get(ptag, {})
-        total_contrib = row_total_for_weeks(per_week_contrib, week_headers)
-        total_decks = row_total_for_weeks(per_week_decks, week_headers)
+        included_headers = [
+            week for week in week_headers if (ptag, week) not in excluded_weeks
+        ]
+        total_contrib = row_total_for_weeks(per_week_contrib, included_headers)
+        total_decks = row_total_for_weeks(per_week_decks, included_headers)
         contrib_rows.append([
             pname,
             role,
             str(total_contrib),
-            format_average_contribution(per_week_contrib),
+            format_average_contribution(per_week_contrib, included_headers),
             *[str(per_week_contrib.get(wh, "")) for wh in week_headers],
         ])
         decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
@@ -824,11 +989,22 @@ def collect_analytics_data(
         "previous_season": prev_season,
         "ratio_scores": ratio_scores,
         "promotion_candidates": promotion_candidates,
+        "promotion_candidates_by_window": promotion_candidates_by_window,
+        "promotion_windows": list(PROMOTION_WINDOWS),
+        "default_promotion_window": DEFAULT_PROMOTION_WINDOW,
+        "demotion_candidates": demotion_candidates,
+        "demotion_rule": {
+            "window_weeks": DEMOTION_WINDOW,
+            "max_missed_attacks": DEMOTION_MAX_MISSED_ATTACKS,
+        },
         "contribution_table": {"headers": contrib_headers, "rows": contrib_rows},
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
+        "week_metadata": week_metadata,
+        "week_evaluations": week_evaluations,
         "history": {
             **history_status,
             "available_weeks": len(week_headers),
+            "exclusions": exclusion_status,
         },
     }
 

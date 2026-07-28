@@ -47,14 +47,30 @@ The official API does not expose the same RoyaleAPI analytics table format. We t
 
 ## 3) Promotie naar Elder
 - Role must be `member`.
-- Perfect streak >= 6 races (`D=16`).
-- Last 6 races all perfect.
-- Average contribution over played races >= 2500.
+- The clan leader selects a 2, 4, or 6 week evaluation window.
+- Every included race in that window must be perfect (`D=16`).
+- Average contribution inside the selected window must be >= 2500.
+- Excluded player-weeks are removed from the window and do not break a streak.
 - Sorted by streak desc, then avg contribution desc.
 
-## 4) Reliability / Ratio Score
+## 4) Degradatie naar Member
+- Current role must be `elder`.
+- Use at most the latest 10 included played races.
+- Recommend demotion when missed attacks total is greater than 2.
+- Show observed weeks, missed weekends, total missed attacks, and the reason.
+
+## 5) Player-week exceptions
+- Stored in Supabase by `(clan_tag, race_created_at, player_tag)`.
+- The raw score and decks remain visible in player detail.
+- An excluded week is removed from MVP, reliability, promotion, demotion, table
+  totals, and scouting calculations.
+- Writes require a table-specific analytics admin key. The browser never
+  receives a Supabase secret/server key.
+
+## 6) Reliability / Ratio Score
 For each player over all available races:
 - Played race if `Contribution > 0`
+- Skip manually excluded player-weeks
 - Expected attacks = 16 per played race
 - `missing = 16 - decks_used`
 - `attacks_done += decks_used`
@@ -69,19 +85,19 @@ Penalty points:
 - miss 3 => +12
 - miss >=4 => `missing * 4`
 
-## 5) Underperformers
+## 7) Underperformers
 From ratio table:
 - `avg_points < 2400`
 - `reliability < 95`
 - meaningful stats required
 - `URGENT` badge if `missed_attacks >= 8` or `penalty_points >= 24`
 
-## 6) Watchlist A
+## 8) Watchlist A
 - `avg_points >= 2800`
 - `reliability < 95`
 - meaningful stats required
 
-## 7) Watchlist B/C
+## 9) Watchlist B/C
 Watchlist B:
 - `weeks_played >= 5`
 - `reliability >= 95`
@@ -92,24 +108,42 @@ Watchlist C (NEW):
 - `weeks_played < 5`
 - and (`reliability < 95` or `avg_points < 2400`)
 
-## 8) Overperformers
+## 10) Overperformers
 - `avg_points >= 2800`
 - `reliability >= 95`
 - `missed_attacks <= 2`
 - `weeks_played >= 5`
 - sort: avg desc, reliability desc, missed asc
 
-## 9) Contribution table
+## 11) Contribution table
 - Generated raw table from official API snapshots.
 - Columns: `Player, Role, C, <week_keys...>`
 - Cell value per week = `fame + repairPoints`.
 
-## 10) Decks Used table
+## 12) Decks Used table
 - Generated raw table from official API snapshots.
 - Columns: `Player, Role, D, <week_keys...>`
 - Cell value per week = clamped `decksUsed`.
+
+## 13) New-player clan-fit screening
+- Profile pre-screen from the official player endpoint:
+  - level 15+ and level 16 card depth
+  - current/best trophies
+  - challenge max wins
+- Own observed clan-war data, when available:
+  - played weeks (latest 10)
+  - average contribution
+  - reliability and missed attacks
+  - perfect-week rate
+- With fewer than 2 played war-weeks, profile data has 100% of the displayed
+  score and the recommendation always requires a trial period.
+- From 2 played weeks onward, profile readiness has 40% weight and own war
+  observations have 60% weight.
+- Communication, availability, language, and conduct remain manual checks.
 
 ## Known limitation
 - The official endpoints do not provide the same RoyaleAPI war/analytics HTML history layout.
 - We therefore derive stable week columns from chronologically ordered race snapshots per season, instead of trusting the raw API `sectionIndex`.
 - The first Supabase snapshot can only backfill races still returned by the Clash API. Older races that have already disappeared cannot be reconstructed; retention grows from the first successful scheduled snapshot onward.
+- Incomplete live payloads without a real positive `seasonId` and valid
+  `createdDate` are ignored. This prevents artificial rows such as `0-1`.

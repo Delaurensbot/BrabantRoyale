@@ -69,3 +69,29 @@ schrijven. `CLASH_ROYALE_API_KEY` blijft uitsluitend een geheime Vercel-variable
 Na een nieuwe deploy combineert `/api/analytics` de live Clash-data met alle
 opgeslagen Supabase-weken. Zonder deze variabelen blijft de endpoint werken met
 de publieke projectdefaults.
+
+### Weekuitzonderingen en beheer
+
+Een clanleider kan in de spelerdetails een specifieke week wel of niet laten
+meetellen. Uitzonderingen worden gedeeld opgeslagen in
+`public.clan_war_week_exclusions` en gelden voor alle analytics:
+
+- MVP, reliability en tabeltotalen
+- promotie met een venster van 2, 4 of 6 weken
+- degradatieadvies bij meer dan 2 gemiste aanvallen in maximaal 10 weken
+- clan-fit screening
+
+De beheerkey wordt alleen voor de browsersessie bewaard en via
+`X-Analytics-Admin-Key` naar `/api/analytics_overrides` gestuurd. De database
+controleert uitsluitend een SHA-256-hash via RLS. De key geeft geen algemene
+database- of Supabase-beheerrechten en er staat nooit een Supabase secret key in
+de frontend.
+
+### Nieuwe spelers screenen
+
+`/api/scouting?tag=<PLAYER_TAG>&clan=<CLAN_TAG>` haalt een officieel
+spelersprofiel op en combineert dit, wanneer beschikbaar, met onze opgeslagen
+war-historie. Profieldata is alleen een voorselectie; externe spelers houden
+altijd een proefperiodeadvies totdat minimaal twee eigen war-weken zijn
+waargenomen. De berekening en beperkingen staan in
+`SCOUTING_FRAMEWORK_REPORT.md`.

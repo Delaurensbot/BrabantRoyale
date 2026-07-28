@@ -70,6 +70,25 @@
     .detailTable .mutedCell { color: rgba(232,235,240,0.6); }
     .detailTable .statCell { border-radius: 8px; }
     .detailTable .scoreCell { font-weight: 700; }
+    .detailTable .evaluationCell { min-width: 180px; }
+    .detailTable .evaluationButton { padding: 6px 9px; font-size: 12px; box-shadow: none; }
+    .detailTable .evaluationReason { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); }
+    .detailTable tr.weekExcluded { opacity: 0.62; }
+    .detailTable tr.weekExcluded td:not(.evaluationCell) { text-decoration: line-through; }
+    .windowPicker { display: inline-flex; gap: 6px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 10px; }
+    .windowButton { padding: 7px 11px; box-shadow: none; font-size: 13px; }
+    .windowButton--active { border-color: var(--green); background: rgba(116, 255, 141, 0.16); }
+    .scoutingForm { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 8px 0 14px; }
+    .scoutingForm input { flex: 1 1 260px; min-width: 210px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(177,92,255,0.42); background: rgba(12,16,27,0.85); color: inherit; font: inherit; }
+    .scoutingResult { display: grid; gap: 12px; }
+    .scoutingHero { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 12px; border: 1px solid rgba(116,255,141,0.3); background: rgba(116,255,141,0.07); }
+    .scoutingScore { font-size: 24px; font-weight: 800; color: var(--green); white-space: nowrap; }
+    .scoutingMetrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; }
+    .scoutingMetric { padding: 10px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+    .scoutingMetric strong { display: block; font-size: 18px; margin-top: 3px; }
+    .scoutingNotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .scoutingNotes > div { padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); }
+    .scoutingNotes ul { margin: 7px 0 0; padding-left: 18px; }
     .clickableCell { cursor: pointer; }
     .excludedCopyRow { opacity: 0.45; }
     .excludedCopyRow td { text-decoration: line-through; }
@@ -82,6 +101,7 @@
     <h1 style="margin-right: 10px;">Clan War Analytics</h1>
     <a class="muted" id="dashboardLink" href="/index.html">← Terug naar dashboard</a>
     <button id="refresh">Refresh</button>
+    <button class="iconBtn" id="manageWeeks">Beheer weekuitzonderingen</button>
     <div class="muted status" id="status"></div>
     <div class="muted" id="updated" style="margin-left:auto;"></div>
   </div>
@@ -122,8 +142,43 @@
         </div>
       </div>
       <div class="toast" id="toastPromotions"></div>
+      <div class="windowPicker" id="promotionWindowPicker" role="group" aria-label="Promotieperiode">
+        <button class="windowButton" data-promotion-window="2">2 weken</button>
+        <button class="windowButton" data-promotion-window="4">4 weken</button>
+        <button class="windowButton windowButton--active" data-promotion-window="6">6 weken</button>
+      </div>
       <div class="promotionDetail muted" id="promotionDetail">Klik op een speler om de reden voor promotie te zien. (Tik om te kopiëren)</div>
       <div id="promotionList">(laden...)</div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Degradatie naar Member</div>
+        <div class="actions">
+          <button class="iconBtn" id="infoDemotions">Info</button>
+          <button class="iconBtn" id="copyDemotions">Kopieer lijst</button>
+        </div>
+      </div>
+      <div class="toast" id="toastDemotions"></div>
+      <div class="promotionDetail muted" id="demotionDetail">Klik op een speler om de reden voor degradatie te zien.</div>
+      <div id="demotionList">(laden...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div>
+          <div class="title">Nieuwe speler screenen op clan-fit</div>
+          <div class="muted">Profielvoorselectie + onze eigen war-historie zodra die bestaat.</div>
+        </div>
+        <button class="iconBtn" id="infoScouting">Info</button>
+      </div>
+      <form class="scoutingForm" id="scoutingForm">
+        <input id="scoutingTag" type="text" autocomplete="off" placeholder="Player tag, bijvoorbeeld #QP0C9QG9" aria-label="Player tag" />
+        <button type="submit" id="runScouting">Screen speler</button>
+      </form>
+      <div class="scoutingResult" id="scoutingResult">
+        <div class="muted">Vul een player tag in. Externe spelers krijgen altijd een proefperiodeadvies totdat er eigen war-data is.</div>
+      </div>
     </div>
 
     <div class="card fullRow">
@@ -352,7 +407,10 @@
   function formatPromotionReason(reason) {
     if (!reason) return '';
     let formatted = reason.trim().replace(/\.$/, '');
-    formatted = formatted.replace(/Laatste 6 weken perfecte attacks\s*\(D=16\)/i, 'de laatste 6 weken geen aanvallen heeft gemist');
+    formatted = formatted.replace(
+      /Laatste (\d+) meegetelde weken perfecte attacks\s*\(D=16\)/i,
+      'de laatste $1 meegetelde weken geen aanvallen heeft gemist'
+    );
     formatted = formatted.replace(/Gem\.?\s*C\s*≥\s*2500/i, 'een gemiddelde heeft van ≥ 2500');
     formatted = formatted.replace(/\s+als Member/i, '');
     return formatted;
@@ -413,6 +471,227 @@
     const target = el(targetId);
     target.innerHTML = '';
     target.appendChild(container);
+  }
+
+  function DemotionList(targetId, items, toastEl, detailEl) {
+    const container = document.createElement('ul');
+    container.className = 'mvpList';
+
+    if (!items || !items.length) {
+      container.innerHTML = '<li class="muted">Geen degradatiekandidaten gevonden</li>';
+      if (detailEl) detailEl.textContent = 'Geen degradatiekandidaten gevonden.';
+      el(targetId).innerHTML = '';
+      el(targetId).appendChild(container);
+      return;
+    }
+
+    if (detailEl) {
+      detailEl.textContent = 'Klik op een speler om de reden voor degradatie te zien.';
+    }
+    if (detailEl && !detailEl.dataset.copyBound) {
+      detailEl.addEventListener('click', () => {
+        if (detailEl.textContent) copyText(detailEl.textContent, toastEl);
+      });
+      detailEl.dataset.copyBound = 'true';
+    }
+
+    items.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'mvpItem';
+      li.title = 'Klik voor reden';
+      const left = document.createElement('div');
+      const player = document.createElement('div');
+      const playerName = document.createElement('strong');
+      playerName.textContent = row.player || '';
+      const missedBadge = document.createElement('span');
+      missedBadge.className = 'pill pill--urgent';
+      missedBadge.style.marginLeft = '6px';
+      missedBadge.textContent = `${row.missed_attacks} gemist`;
+      player.appendChild(playerName);
+      player.appendChild(missedBadge);
+      const reason = document.createElement('div');
+      reason.className = 'muted';
+      reason.textContent = row.reason || '';
+      left.appendChild(player);
+      left.appendChild(reason);
+      const observed = document.createElement('span');
+      observed.className = 'pill';
+      observed.textContent = `${row.observed_weeks}/10 weken`;
+      li.appendChild(left);
+      li.appendChild(observed);
+      li.addEventListener('click', () => {
+        if (detailEl) {
+          detailEl.textContent = `${row.player}: ${row.reason}`;
+        }
+      });
+      container.appendChild(li);
+    });
+
+    const target = el(targetId);
+    target.innerHTML = '';
+    target.appendChild(container);
+  }
+
+  function setPromotionWindow(windowValue) {
+    const parsed = Number(windowValue);
+    if (![2, 4, 6].includes(parsed)) return;
+    selectedPromotionWindow = parsed;
+    promotionCandidates = promotionCandidatesByWindow[String(parsed)] || [];
+    document.querySelectorAll('[data-promotion-window]').forEach((button) => {
+      button.classList.toggle(
+        'windowButton--active',
+        Number(button.dataset.promotionWindow) === parsed
+      );
+    });
+    PromotionList(
+      'promotionList',
+      promotionCandidates,
+      el('toastPromotions'),
+      el('promotionDetail')
+    );
+  }
+
+  function updateManageButton() {
+    const button = el('manageWeeks');
+    if (!button) return;
+    const unlocked = Boolean(sessionStorage.getItem('analyticsAdminKey'));
+    button.textContent = unlocked
+      ? 'Weekbeheer ontgrendeld'
+      : 'Beheer weekuitzonderingen';
+  }
+
+  function requestAdminKey(forceNew = false) {
+    if (!forceNew) {
+      const existing = sessionStorage.getItem('analyticsAdminKey');
+      if (existing) return existing;
+    }
+    const entered = window.prompt('Voer de analytics-beheerkey in:');
+    const normalized = String(entered || '').trim();
+    if (!normalized) return '';
+    sessionStorage.setItem('analyticsAdminKey', normalized);
+    updateManageButton();
+    return normalized;
+  }
+
+  async function saveWeekEvaluation(playerTag, weekRow, includeWeek) {
+    const adminKey = requestAdminKey();
+    if (!adminKey) throw new Error('Geen beheerkey ingevoerd.');
+
+    let reason = '';
+    if (!includeWeek) {
+      const enteredReason = window.prompt(
+        `Waarom moet ${weekRow.week} niet meetellen?`,
+        weekRow.reason || 'Afwezig / ingevallen'
+      );
+      if (enteredReason === null) return false;
+      reason = String(enteredReason || '').trim() || 'Handmatig uitgesloten';
+    }
+
+    const response = await fetch('/api/analytics_overrides', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Analytics-Admin-Key': adminKey,
+      },
+      body: JSON.stringify({
+        clan_tag: currentClanTag,
+        player_tag: playerTag,
+        race_created_at: weekRow.raceCreatedAt,
+        excluded: !includeWeek,
+        reason,
+      }),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (response.status === 403) {
+      sessionStorage.removeItem('analyticsAdminKey');
+      updateManageButton();
+    }
+    if (!response.ok || !json.ok) {
+      throw new Error(json.error || 'Weekuitzondering kon niet worden opgeslagen.');
+    }
+    await fetchAnalytics();
+    return true;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function renderScoutingResult(data) {
+    const target = el('scoutingResult');
+    const profile = data.profile || {};
+    const war = data.war || {};
+    const fit = data.fit || {};
+    const player = data.player || {};
+    const reasons = (fit.reasons || [])
+      .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+      .join('');
+    const manualChecks = (data.manual_checks || [])
+      .map((check) => `<li>${escapeHtml(check)}</li>`)
+      .join('');
+    const limitations = (data.limitations || [])
+      .map((item) => `<li>${escapeHtml(item)}</li>`)
+      .join('');
+
+    target.innerHTML = `
+      <div class="scoutingHero">
+        <div>
+          <div class="title">${escapeHtml(player.name || player.tag)}</div>
+          <div class="muted">${escapeHtml(player.tag)} · ${escapeHtml(data.mode)} · confidence ${escapeHtml(fit.confidence)}</div>
+          <div style="margin-top:8px;"><strong>${escapeHtml(fit.label)}</strong></div>
+          <ul>${reasons}</ul>
+        </div>
+        <div class="scoutingScore">${escapeHtml(fit.overall_score)}/100</div>
+      </div>
+      <div class="scoutingMetrics">
+        <div class="scoutingMetric"><span class="muted">Profielscore</span><strong>${escapeHtml(profile.score)}/100</strong></div>
+        <div class="scoutingMetric"><span class="muted">Kaarten level 16</span><strong>${escapeHtml(profile.cards_level_16)}</strong></div>
+        <div class="scoutingMetric"><span class="muted">Kaarten level 15+</span><strong>${escapeHtml(profile.cards_level_15_plus)}</strong></div>
+        <div class="scoutingMetric"><span class="muted">Best trophies</span><strong>${escapeHtml(profile.best_trophies)}</strong></div>
+        <div class="scoutingMetric"><span class="muted">War-weken</span><strong>${escapeHtml(war.weeks_played)}</strong></div>
+        <div class="scoutingMetric"><span class="muted">War reliability</span><strong>${escapeHtml(war.reliability)}%</strong></div>
+        <div class="scoutingMetric"><span class="muted">Gem. war-score</span><strong>${escapeHtml(war.average_contribution)}</strong></div>
+        <div class="scoutingMetric"><span class="muted">Gemiste attacks</span><strong>${escapeHtml(war.missed_attacks)}</strong></div>
+      </div>
+      <div class="scoutingNotes">
+        <div><strong>Handmatig controleren</strong><ul>${manualChecks}</ul></div>
+        <div><strong>Databeperkingen</strong><ul>${limitations}</ul></div>
+      </div>
+    `;
+  }
+
+  async function runScouting(event) {
+    if (event) event.preventDefault();
+    const playerTag = String(el('scoutingTag').value || '').trim();
+    if (!playerTag) {
+      el('scoutingResult').innerHTML = '<div class="muted">Vul eerst een player tag in.</div>';
+      return;
+    }
+
+    const button = el('runScouting');
+    button.disabled = true;
+    button.textContent = 'Screening laden...';
+    el('scoutingResult').innerHTML = '<div class="muted">Profiel en war-historie worden gecontroleerd...</div>';
+    try {
+      const response = await fetch(
+        `/api/scouting?tag=${encodeURIComponent(playerTag)}&clan=${encodeURIComponent(currentClanTag)}`
+      );
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) {
+        throw new Error(json.error || 'Screening kon niet worden geladen.');
+      }
+      renderScoutingResult(json);
+    } catch (error) {
+      el('scoutingResult').innerHTML = `<div class="error" style="display:block;">${escapeHtml(error.message)}</div>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Screen speler';
+    }
   }
 
   function createTableComponent(headers, rows) {
@@ -600,6 +879,12 @@
   let currentSeason = null;
   let previousSeason = null;
   let promotionCandidates = [];
+  let promotionCandidatesByWindow = {};
+  let selectedPromotionWindow = 6;
+  let demotionCandidates = [];
+  let weekMetadata = {};
+  let weekEvaluations = {};
+  let playerTagByName = {};
   let ratioExpanded = false;
   let openPlayerDetail = null;
 
@@ -639,10 +924,36 @@
         <p><strong>Vereiste</strong></p>
         <ul>
           <li>Huidige rol is <em>Member</em>.</li>
-          <li>Minimaal 6 opeenvolgende weekenden met perfecte attacks (Decks Used = 16).</li>
-          <li>Gemiddelde Contribution van minstens 2500 per gespeeld weekend.</li>
+          <li>Kies een beoordelingsvenster van 2, 4 of 6 meegetelde weken.</li>
+          <li>Alle weken in dat venster hebben perfecte attacks (Decks Used = 16).</li>
+          <li>Gemiddelde Contribution binnen datzelfde venster is minstens 2500.</li>
         </ul>
-        <p>We tonen alleen spelers waarvan de huidige streak 6 weken of meer is en de laatste 6 weekenden perfect waren.</p>
+        <p>Handmatig uitgesloten speler-weken worden uit het venster gehaald en breken de streak niet.</p>
+      `,
+    },
+    demotions: {
+      title: 'Degradatie naar Member',
+      body: `
+        <p><strong>Vereiste</strong></p>
+        <ul>
+          <li>Alleen huidige Elders worden beoordeeld.</li>
+          <li>We nemen maximaal de laatste 10 meegetelde gespeelde war-weken.</li>
+          <li>Bij meer dan 2 gemiste aanvallen volgt een degradatieadvies.</li>
+          <li>Een handmatig uitgesloten speler-week telt nergens mee.</li>
+        </ul>
+        <p>Dit is een advies. De uiteindelijke beslissing blijft bij de clanleiding.</p>
+      `,
+    },
+    scouting: {
+      title: 'Screening op clan-fit',
+      body: `
+        <p><strong>Wat wel kan</strong></p>
+        <ul>
+          <li>Profielsterkte beoordelen met kaartendiepte, trophies en challenge-signaal.</li>
+          <li>Na toetreding eigen war-reliability en gemiddelde contribution meenemen.</li>
+          <li>Confidence laten groeien naarmate we meer eigen weken observeren.</li>
+        </ul>
+        <p><strong>Wat niet betrouwbaar kan</strong><br />De officiële API levert geen volledige externe war-historie en profielstats zeggen niets zekers over communicatie of gedrag. Daarom blijft een proefperiode van 2–4 war-weken onderdeel van ieder extern advies.</p>
       `,
     },
     ratio: {
@@ -777,7 +1088,7 @@
     return `hsla(${hue}, 75%, ${light}%, 0.32)`;
   }
 
-  function getPlayerWeekData(player) {
+  function getPlayerWeekData(player, playerTag) {
     const contrib = analyticsCache.contribution || { headers: [], rows: [] };
     const decks = analyticsCache.decks || { headers: [], rows: [] };
     const contribIdx = (contrib.headers || []).findIndex((h) => (h || '').toLowerCase() === 'c');
@@ -801,7 +1112,18 @@
         const attacks = Number.isNaN(attacksNum) ? null : attacksNum;
         if (score === null && attacks === null) return null;
         const missed = attacks === null ? null : Math.max(0, 16 - attacks);
-        return { week: wh, score, attacks, missed };
+        const normalizedTag = normalizeRoyalApiPlayerTag(playerTag);
+        const evaluation = weekEvaluations?.[normalizedTag]?.[wh] || {};
+        const metadata = weekMetadata?.[wh] || {};
+        return {
+          week: wh,
+          score,
+          attacks,
+          missed,
+          included: evaluation.included !== false,
+          reason: evaluation.reason || '',
+          raceCreatedAt: evaluation.race_created_at || metadata.race_created_at || '',
+        };
       })
       .filter(Boolean);
 
@@ -818,7 +1140,7 @@
   function longestPerfectStreak(weeks) {
     let longest = 0;
     let current = 0;
-    (weeks || []).forEach((row) => {
+    (weeks || []).filter((row) => row.included !== false).forEach((row) => {
       if (row.attacks === 16) {
         current += 1;
         if (current > longest) longest = current;
@@ -830,7 +1152,9 @@
   }
 
   function averageScoreAllAttacks(weeks) {
-    const perfectWeeks = (weeks || []).filter((row) => row.attacks === 16 && row.score !== null);
+    const perfectWeeks = (weeks || []).filter(
+      (row) => row.included !== false && row.attacks === 16 && row.score !== null
+    );
     if (!perfectWeeks.length) return null;
     const total = perfectWeeks.reduce((sum, row) => sum + Number(row.score || 0), 0);
     return Math.round((total / perfectWeeks.length) * 100) / 100;
@@ -854,7 +1178,7 @@
   function renderPlayerDetail(player, reason, playerTag, tableEl, anchorRow) {
     clearPlayerDetail();
 
-    const weeks = sortWeeksDesc(getPlayerWeekData(player));
+    const weeks = sortWeeksDesc(getPlayerWeekData(player, playerTag));
     const colCount = tableEl.querySelector('thead tr')?.children.length || anchorRow.children.length || 1;
 
     const detailTr = document.createElement('tr');
@@ -911,7 +1235,9 @@
 
       const avgAllAttacks = averageScoreAllAttacks(weeks);
       const longestStreak = longestPerfectStreak(weeks.slice().reverse());
-      const highestScore = weeks.reduce((max, row) => (row.score === null ? max : Math.max(max, Number(row.score))), -Infinity);
+      const highestScore = weeks
+        .filter((row) => row.included !== false)
+        .reduce((max, row) => (row.score === null ? max : Math.max(max, Number(row.score))), -Infinity);
       const normalizedTag = normalizeRoyalApiPlayerTag(playerTag);
       const displayTag = normalizedTag ? `#${normalizedTag}` : '-';
 
@@ -959,7 +1285,7 @@
       table.className = 'detailTable';
       const thead = document.createElement('thead');
       const trHead = document.createElement('tr');
-      ['Week', 'Score', 'Missed'].forEach((titleText) => {
+      ['Week', 'Score', 'Missed', 'Telt mee?'].forEach((titleText) => {
         const th = document.createElement('th');
         th.textContent = titleText;
         trHead.appendChild(th);
@@ -970,6 +1296,7 @@
       const tbody = document.createElement('tbody');
       weeks.forEach((row) => {
         const tr = document.createElement('tr');
+        if (!row.included) tr.classList.add('weekExcluded');
         const missedText = row.missed === null ? '-' : row.missed;
 
         const cells = [
@@ -986,6 +1313,37 @@
           if (cell.text === '-') td.classList.add('mutedCell');
           tr.appendChild(td);
         });
+
+        const evaluationTd = document.createElement('td');
+        evaluationTd.className = 'evaluationCell';
+        const evaluationButton = document.createElement('button');
+        evaluationButton.type = 'button';
+        evaluationButton.className = 'evaluationButton';
+        evaluationButton.textContent = row.included
+          ? 'Ja · uitsluiten'
+          : 'Nee · weer meetellen';
+        evaluationButton.disabled = !row.raceCreatedAt || !playerTag;
+        evaluationButton.addEventListener('click', async () => {
+          evaluationButton.disabled = true;
+          evaluationButton.textContent = 'Opslaan...';
+          try {
+            await saveWeekEvaluation(playerTag, row, !row.included);
+          } catch (error) {
+            window.alert(error.message || 'Opslaan mislukt.');
+            evaluationButton.disabled = false;
+            evaluationButton.textContent = row.included
+              ? 'Ja · uitsluiten'
+              : 'Nee · weer meetellen';
+          }
+        });
+        evaluationTd.appendChild(evaluationButton);
+        if (!row.included && row.reason) {
+          const reason = document.createElement('span');
+          reason.className = 'evaluationReason';
+          reason.textContent = row.reason;
+          evaluationTd.appendChild(reason);
+        }
+        tr.appendChild(evaluationTd);
         tbody.appendChild(tr);
       });
 
@@ -1108,6 +1466,9 @@
     const mappedRows = contributionRows
       .map((contributionRow) => {
         const playerName = contributionRow[0] || '';
+        const playerTag = playerTagByName[normalizeName(playerName)] || '';
+        const evaluation = weekEvaluations?.[playerTag]?.[latestWeekend];
+        if (evaluation && evaluation.included === false) return null;
         const playerContribution = Number(contributionRow[contributionIdx] || 0);
         if (playerContribution <= 0) return null;
 
@@ -1145,12 +1506,29 @@
     currentSeason = data.current_season ?? null;
     previousSeason = data.previous_season ?? null;
     updateMvpTitles();
-    promotionCandidates = data.promotion_candidates || [];
+    promotionCandidatesByWindow = data.promotion_candidates_by_window || {
+      '6': data.promotion_candidates || [],
+    };
+    demotionCandidates = data.demotion_candidates || [];
+    weekMetadata = data.week_metadata || {};
+    weekEvaluations = data.week_evaluations || {};
     MVPCard('mvpCurrent', mvpCurrent, el('toastCurrent'));
     MVPCard('mvpPrevious', mvpPrevious, el('toastPrevious'));
-    PromotionList('promotionList', promotionCandidates, el('toastPromotions'), el('promotionDetail'));
+    setPromotionWindow(selectedPromotionWindow);
+    DemotionList(
+      'demotionList',
+      demotionCandidates,
+      el('toastDemotions'),
+      el('demotionDetail')
+    );
 
     const ratioRows = data.ratio_scores || [];
+    playerTagByName = Object.fromEntries(
+      ratioRows.map((row) => [
+        normalizeName(row.player),
+        normalizeRoyalApiPlayerTag(row.player_tag),
+      ])
+    );
     ratioData = ratioRows.map((row) => buildRatioRow(row));
 
     const ratioHeaders = ['Player', 'Role', 'Weeks played', 'Attacks done', 'Missed attacks', 'Penalty points', 'avg points', 'Reliability %'];
@@ -1300,6 +1678,21 @@
     copyTable(['Player', 'Streak', 'Gemiddelde score'], rows, el('toastPromotions'));
   });
 
+  el('copyDemotions').addEventListener('click', () => {
+    if (!demotionCandidates || !demotionCandidates.length) return;
+    const rows = demotionCandidates.map((row) => [
+      row.player,
+      row.missed_attacks,
+      `${row.observed_weeks}/10`,
+      row.reason,
+    ]);
+    copyTable(
+      ['Player', 'Gemiste aanvallen', 'Meegetelde weken', 'Reden'],
+      rows,
+      el('toastDemotions')
+    );
+  });
+
   el('copyRatio').addEventListener('click', () => {
     if (ratioComponent) {
       copyTable(ratioComponent.getHeaders(), ratioComponent.getVisibleRows(), el('toastRatio'));
@@ -1354,6 +1747,8 @@
   el('infoCurrent').addEventListener('click', () => showInfoOverlay('current'));
   el('infoPrevious').addEventListener('click', () => showInfoOverlay('previous'));
   el('infoPromotions').addEventListener('click', () => showInfoOverlay('promotions'));
+  el('infoDemotions').addEventListener('click', () => showInfoOverlay('demotions'));
+  el('infoScouting').addEventListener('click', () => showInfoOverlay('scouting'));
   el('infoRatio').addEventListener('click', () => showInfoOverlay('ratio'));
   el('infoUnderperformers').addEventListener('click', () => showInfoOverlay('underperformers'));
   el('infoWatchlistA').addEventListener('click', () => showInfoOverlay('watchlistA'));
@@ -1367,9 +1762,25 @@
   el('closeInfo').addEventListener('click', () => {
     el('infoOverlay').style.display = 'none';
   });
+  document.querySelectorAll('[data-promotion-window]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setPromotionWindow(button.dataset.promotionWindow);
+    });
+  });
+  el('manageWeeks').addEventListener('click', () => {
+    if (sessionStorage.getItem('analyticsAdminKey')) {
+      const shouldLock = window.confirm('Weekbeheer weer vergrendelen?');
+      if (shouldLock) sessionStorage.removeItem('analyticsAdminKey');
+    } else {
+      requestAdminKey(true);
+    }
+    updateManageButton();
+  });
+  el('scoutingForm').addEventListener('submit', runScouting);
 
   function init() {
     renderClanButtons();
+    updateManageButton();
     const params = new URLSearchParams(window.location.search);
     const desired = params.get('clan') || DEFAULT_CLAN;
     setClan(desired, true);

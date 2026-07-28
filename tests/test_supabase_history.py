@@ -5,6 +5,7 @@ from supabase_history import (
     _supabase_headers,
     build_snapshot_rows,
     fetch_history_rows,
+    fetch_week_exclusions,
     history_rows_to_races,
     upsert_snapshot_rows,
 )
@@ -108,6 +109,24 @@ class SupabaseHistoryTests(unittest.TestCase):
             mocked_get.call_args_list[1].kwargs["headers"]["Range"],
             "2-3",
         )
+
+    @patch("supabase_history.requests.get")
+    def test_week_exclusion_read_filters_by_clan_and_player(self, mocked_get):
+        response = Mock(status_code=200, content=b"[]")
+        response.json.return_value = [{"reason": "Afwezig"}]
+        mocked_get.return_value = response
+
+        rows = fetch_week_exclusions(
+            "9YP8UY",
+            player_tag="#PLAYER1",
+            supabase_url="https://example.supabase.co",
+            api_key="sb_publishable_example",
+        )
+
+        self.assertEqual(rows[0]["reason"], "Afwezig")
+        params = mocked_get.call_args.kwargs["params"]
+        self.assertEqual(params["clan_tag"], "eq.9YP8UY")
+        self.assertEqual(params["player_tag"], "eq.PLAYER1")
 
     @patch("supabase_history.requests.post")
     def test_snapshot_upsert_uses_natural_conflict_key(self, mocked_post):
