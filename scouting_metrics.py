@@ -187,6 +187,10 @@ def classify_fit(
             label = "Sterke clan-fit"
         elif reliability >= 90 and average_contribution >= 2400:
             label = "Goede clan-fit"
+        elif reliability >= 95:
+            label = "Betrouwbaar, lagere war-output"
+        elif reliability >= 90:
+            label = "Gemengde clan-fit"
         else:
             label = "Verhoogd war-risico"
         reasons.extend(
@@ -258,4 +262,3 @@ def build_fit_payload(
             "worden afgeleid.",
         ],
     }
-

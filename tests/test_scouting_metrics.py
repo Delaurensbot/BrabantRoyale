@@ -69,7 +69,31 @@ class ScoutingMetricsTests(unittest.TestCase):
         self.assertEqual(payload["fit"]["confidence"], "laag")
         self.assertIn("proefperiode", payload["fit"]["label"].lower())
 
+    def test_reliable_lower_output_is_not_labeled_high_risk(self):
+        payload = build_fit_payload(
+            {
+                "tag": "#PLAYER",
+                "name": "Alice",
+                "clan": {"tag": "#9YP8UY", "name": "Brabant Royale"},
+                "cards": [{"level": 15, "maxLevel": 16}] * 40,
+                "bestTrophies": 8500,
+                "challengeMaxWins": 10,
+            },
+            [
+                {
+                    "race_created_at": f"2026-0{month}-20T09:42:06Z",
+                    "contribution": 2300,
+                    "decks_used": 16,
+                }
+                for month in range(1, 7)
+            ],
+            clan_tag="9YP8UY",
+        )
+
+        self.assertEqual(
+            payload["fit"]["label"], "Betrouwbaar, lagere war-output"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-
