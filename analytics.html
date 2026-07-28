@@ -689,7 +689,7 @@
         <ul>
           <li>Reliability % ≥ 95%</li>
           <li>Avg points &lt; 2400</li>
-          <li>Niet protected (10 weken 16/16 en avg ≥ 2200)</li>
+          <li>Niet protected (10+ weken 16/16 en avg ≥ 2200)</li>
         </ul>
         <p><strong>Watchlist C (Newbies)</strong></p>
         <ul>
@@ -927,7 +927,7 @@
       const items = [
         `Average score with all attacks played (D=16): ${avgAllAttacks === null ? '-' : avgAllAttacks}`,
         `Longest streak of 16 attacks: ${longestStreak}`,
-        `Highest score in last 10 weeks: ${Number.isFinite(highestScore) ? highestScore : '-'}`,
+        `Highest score in history: ${Number.isFinite(highestScore) ? highestScore : '-'}`,
         `Player account level: ${accountLevel}`,
         `Player ID: ${displayTag}`,
       ];
@@ -1174,7 +1174,7 @@
     watchlistAData = watchlistA.map((row) => buildReliabilityRow(row, 'Watchlist A: high avg but unreliable', 'A', 'pill--A'));
     watchlistAComponent = renderTable('watchlistAWrap', reliabilityHeaders, watchlistAData);
 
-    const protectedPlayer = (row) => Number(row.weeks_played) === 10 && Number(row.missed_attacks) === 0 && Number(row.avg_points) >= 2200;
+    const protectedPlayer = (row) => Number(row.weeks_played) >= 10 && Number(row.missed_attacks) === 0 && Number(row.avg_points) >= 2200;
     const watchlistB = ratioRows.filter(
       (row) =>
         hasMeaningfulStats(row) &&
@@ -1252,7 +1252,11 @@
       if (!json.ok) throw new Error(json.error || 'Onbekende fout');
       renderAnalytics(json);
       el('status').textContent = '';
-      el('updated').textContent = `Laatste refresh: ${new Date().toLocaleString()}`;
+      const historyWeeks = Number(json.history?.available_weeks || 0);
+      const historyLabel = historyWeeks
+        ? ` • ${historyWeeks} weken beschikbaar`
+        : '';
+      el('updated').textContent = `Laatste refresh: ${new Date().toLocaleString()}${historyLabel}`;
     } catch (e) {
       console.error(e);
       showError(e.message);

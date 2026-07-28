@@ -23,7 +23,7 @@ The official API does not expose the same RoyaleAPI analytics table format. We t
 - `contribution = fame + repairPoints`
 - `decks_used = clamp(decksUsed, 0..16)`
 - include only players that are in current clan members list
-- use latest 10 race snapshots (river race log + current race when available)
+- combine live race snapshots with the full stored Supabase history
 - dedupe overlapping snapshots on `(seasonId, createdDate)` before numbering weeks
 - assign week numbers sequentially per season based on chronological `createdDate`
 
@@ -86,7 +86,7 @@ Watchlist B:
 - `weeks_played >= 5`
 - `reliability >= 95`
 - `avg_points < 2400`
-- exclude protected player: `weeks_played == 10 && missed_attacks == 0 && avg_points >= 2200`
+- exclude protected player: `weeks_played >= 10 && missed_attacks == 0 && avg_points >= 2200`
 
 Watchlist C (NEW):
 - `weeks_played < 5`
@@ -112,3 +112,4 @@ Watchlist C (NEW):
 ## Known limitation
 - The official endpoints do not provide the same RoyaleAPI war/analytics HTML history layout.
 - We therefore derive stable week columns from chronologically ordered race snapshots per season, instead of trusting the raw API `sectionIndex`.
+- The first Supabase snapshot can only backfill races still returned by the Clash API. Older races that have already disappeared cannot be reconstructed; retention grows from the first successful scheduled snapshot onward.
