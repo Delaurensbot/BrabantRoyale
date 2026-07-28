@@ -18,6 +18,7 @@
     button:hover { border-color: rgba(116, 255, 141, 0.85); background: linear-gradient(145deg, rgba(177, 92, 255, 0.34), rgba(116, 255, 141, 0.18)); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: start; }
     .fullRow { grid-column: 1 / -1; }
+    .decisionGrid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
     .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
     .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; gap: 10px; }
     .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
@@ -93,7 +94,9 @@
     .excludedCopyRow { opacity: 0.45; }
     .excludedCopyRow td { text-decoration: line-through; }
     @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) {
+      .grid, .decisionGrid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -133,6 +136,7 @@
       <div id="mvpPrevious">(laden...)</div>
     </div>
 
+    <div class="decisionGrid">
     <div class="card">
       <div class="cardHead">
         <div class="title">Promotie naar Elder</div>
@@ -162,6 +166,7 @@
       <div class="toast" id="toastDemotions"></div>
       <div class="promotionDetail muted" id="demotionDetail">Klik op een speler om de reden voor degradatie te zien.</div>
       <div id="demotionList">(laden...)</div>
+    </div>
     </div>
 
     <div class="card fullRow">
