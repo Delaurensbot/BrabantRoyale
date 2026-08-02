@@ -1061,6 +1061,72 @@
     container.appendChild(table);
   }
 
+  function displayClanRole(role) {
+    const labels = {
+      leader: "Leader",
+      coLeader: "Co-leader",
+      elder: "Elder",
+      member: "Member",
+    };
+    return labels[role] || role || "-";
+  }
+
+  function renderOfficialPlayersTable(players) {
+    if (!Array.isArray(players) || !players.length) return false;
+
+    const container = el("players");
+    container.innerHTML = "";
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "playersTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["#", "Name", "Role", "Today/Total", "Boat", "Medals (API)"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const sortedPlayers = [...players].sort((a, b) => {
+      const fameDifference = Number(b?.fame || 0) - Number(a?.fame || 0);
+      if (fameDifference) return fameDifference;
+
+      const decksDifference = Number(b?.decks_used_today || 0) - Number(a?.decks_used_today || 0);
+      if (decksDifference) return decksDifference;
+
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+
+    const tbody = document.createElement("tbody");
+    sortedPlayers.forEach((player, index) => {
+      const tr = document.createElement("tr");
+      const values = [
+        String(index + 1),
+        stripPlayerTag(player?.name) || "-",
+        displayClanRole(player?.role),
+        `${Number(player?.decks_used_today || 0)}/${Number(player?.decks_total_so_far || 0)}`,
+        String(Number(player?.boat_attacks || 0)),
+        String(Number(player?.fame || 0)),
+      ];
+
+      values.forEach((value, cellIndex) => {
+        const td = document.createElement("td");
+        if (cellIndex === 0) td.className = "role";
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+    return true;
+  }
+
   function renderDay1HighFameTable(players, text) {
     const card = el("day1Card");
     const container = el("day1HighFameWrap");
@@ -1271,6 +1337,7 @@
     }
 
     let mergedOverviewText = data.race_overview_text || "";
+    let officialPlayers = [];
     try {
       const prototypeRes = await fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
       if (prototypeRes.ok) {
@@ -1280,10 +1347,11 @@
             mergedOverviewText,
             prototypeData.overview_rows || []
           );
+          officialPlayers = Array.isArray(prototypeData.players) ? prototypeData.players : [];
         }
       }
     } catch (_) {
-      // Silent fallback: keep original cwstats overview when prototype API is unavailable.
+      // Silent fallback: keep the scraped data when the official API is unavailable.
     }
 
     renderWarPhase(data);
@@ -1294,7 +1362,9 @@
     renderFinishOutlook(data);
     const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
     el("clanAvg").textContent = formattedClanAvg;
-    renderPlayersTable(data.players_text || "");
+    if (!renderOfficialPlayersTable(officialPlayers)) {
+      renderPlayersTable(data.players_text || "");
+    }
     const battlesText = stripPlayerTagsInTableText(data.battles_left_text || "");
     const riskText = stripPlayerTagsInTableText(data.risk_left_text || "");
     el("battles").textContent = battlesText || "(geen data)";
