@@ -45,9 +45,12 @@ def build_overview_rows(clans):
         decks_total = MAX_CLAN_DECKS_PER_DAY
         decks_remaining = max(0, decks_total - decks_used)
 
-        fame = int_value(row.get("fame"))
-        repair = int_value(row.get("repairPoints"))
-        medals = fame + repair
+        medals = sum(
+            int_value(p.get("fame"))
+            for p in participants
+            if int_value(p.get("decksUsedToday")) > 0
+        )
+        boat_points = int_value(row.get("repairPoints"))
 
         avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
         projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
@@ -56,8 +59,8 @@ def build_overview_rows(clans):
             {
                 "name": row.get("name", "-"),
                 "tag": row.get("tag", "-"),
-                "fame": fame,
-                "repair_points": repair,
+                "fame": medals,
+                "boat_points": boat_points,
                 "medals": medals,
                 "decks_used_today": decks_used,
                 "decks_total_today": decks_total,
@@ -197,7 +200,7 @@ class handler(BaseHTTPRequestHandler):
                         "section_index": race_data.get("sectionIndex"),
                         "period_index": race_data.get("periodIndex"),
                         "fame": int_value(own_clan.get("fame")),
-                        "repair_points": int_value(own_clan.get("repairPoints")),
+                        "boat_points": int_value(own_clan.get("repairPoints")),
                         "participants": len(participant_rows),
                         "decks_used_today": sum(int_value(p.get("decksUsedToday")) for p in participant_rows),
                     },
