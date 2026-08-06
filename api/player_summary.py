@@ -41,10 +41,83 @@ def fetch_player_summary(pid: str) -> dict:
         raise RuntimeError(f"Clash API error {response.status_code} for /players/%23{clean_pid}")
 
     data = response.json() if response.content else {}
+    cards = data.get("cards") or []
+    level_15_cards = 0
+    level_16_cards = 0
+
+    for card in cards:
+        display_level = card.get("level") or 0
+        max_level = card.get("maxLevel")
+        elite_level = card.get("eliteLevel")
+
+        try:
+            display_level = int(display_level)
+        except Exception:
+            display_level = 0
+
+        try:
+            max_level_int = int(max_level)
+            display_level = display_level + (14 - max_level_int)
+        except Exception:
+            pass
+
+        try:
+            elite_level_int = int(elite_level)
+            if elite_level_int > 0:
+                display_level = 15 + elite_level_int
+        except Exception:
+            pass
+
+        if display_level == 15:
+            level_15_cards += 1
+        elif display_level >= 16:
+            level_16_cards += 1
+
+    history = []
+    history_endpoint = f"{ROYAL_API_BASE_URL}/players/%23{clean_pid}/history"
+    history_response = requests.get(
+        history_endpoint,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=25,
+    )
+
+    if history_response.status_code == 200:
+        history_data = history_response.json() if history_response.content else {}
+        events = history_data if isinstance(history_data, list) else history_data.get("items") or []
+
+        for item in events:
+            clan = item.get("clan") or {}
+            tag = normalize_player_tag(str(clan.get("tag") or item.get("tag") or ""))
+            name = str(clan.get("name") or item.get("name") or "").strip()
+            joined_at = item.get("startTime") or item.get("joined") or item.get("joinedAt") or ""
+            left_at = item.get("endTime") or item.get("left") or item.get("leftAt") or ""
+            if not tag and not name:
+                continue
+            history.append(
+                {
+                    "tag": tag,
+                    "name": name,
+                    "joined_at": joined_at,
+                    "left_at": left_at,
+                }
+            )
+
+    seen = set()
+    unique_history = []
+    for row in history:
+        key = (row.get("tag"), row.get("name"), row.get("joined_at"), row.get("left_at"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_history.append(row)
+
     return {
         "pid": clean_pid,
         "acc_lvl": str(data.get("expLevel") or "-"),
         "cw2_wins": str(data.get("warDayWins") or 0),
+        "cards_lvl_15": level_15_cards,
+        "cards_lvl_16": level_16_cards,
+        "clan_history": unique_history,
         "url": f"https://royaleapi.com/player/{clean_pid}",
     }
 
