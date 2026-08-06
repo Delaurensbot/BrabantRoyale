@@ -119,6 +119,7 @@
     <div class="muted" id="status"></div>
     <a class="ctaLink" id="analyticsLink" href="/analytics.html">Analytics <span aria-hidden="true">→</span></a>
     <a class="ctaLink" id="joinLink" href="/join.html">Recent joins <span aria-hidden="true">→</span></a>
+    <a class="ctaLink" id="playerInsightsLink" href="/player-insights.html">Speler insights <span aria-hidden="true">→</span></a>
     <!-- Temporary placeholder link to quickly open the clan-member test page. -->
     <a class="ctaLink" id="testClanLink" href="/test-clan.html">Temp test page <span aria-hidden="true">→</span></a>
   </div>
@@ -347,9 +348,11 @@
     const analyticsLink = el("analyticsLink");
     const joinLink = el("joinLink");
     const testClanLink = el("testClanLink");
+    const playerInsightsLink = el("playerInsightsLink");
     if (analyticsLink) analyticsLink.href = `/analytics.html${query}`;
     if (joinLink) joinLink.href = `/join.html${query}`;
     if (testClanLink) testClanLink.href = `/test-clan.html${query}`;
+    if (playerInsightsLink) playerInsightsLink.href = `/player-insights.html${query}`;
   }
 
   function updateClanLabel() {
