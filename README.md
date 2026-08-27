@@ -87,6 +87,17 @@ controleert uitsluitend een SHA-256-hash via RLS. De key geeft geen algemene
 database- of Supabase-beheerrechten en er staat nooit een Supabase secret key in
 de frontend.
 
+### Configureerbaar clanbeleid en leidersbesluiten (T13)
+
+T13 voegt `public.clan_policy_settings` en het admin-only auditlog
+`public.leader_decisions` toe. Beleid is server-side leesbaar via
+`GET /api/clan_policy?clan=<CLAN_TAG>` en schrijfbaar met het bestaande
+`X-Analytics-Admin-Key` via `POST`, `PUT` of `PATCH /api/clan_policy`.
+Leidersbesluiten worden uitsluitend via `/api/leader_decisions` met diezelfde
+admin-key gelezen of toegevoegd; actor, reden en individuele besluiten komen
+niet in publieke responses. Defaults, bounds, responsevorm en aannames staan
+in [`CLAN_POLICY_CONTRACT.md`](CLAN_POLICY_CONTRACT.md).
+
 ### Nieuwe spelers screenen
 
 `/api/scouting?tag=<PLAYER_TAG>&clan=<CLAN_TAG>` haalt een officieel
