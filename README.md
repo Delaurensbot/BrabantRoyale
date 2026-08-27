@@ -95,3 +95,22 @@ war-historie. Profieldata is alleen een voorselectie; externe spelers houden
 altijd een proefperiodeadvies totdat minimaal twee eigen war-weken zijn
 waargenomen. De berekening en beperkingen staan in
 `SCOUTING_FRAMEWORK_REPORT.md`.
+
+## Live war monitor
+
+`.github/workflows/live-war-monitor.yml` roept de beveiligde productie-route
+`POST /api/war_monitor` iedere vijf minuten aan en kan ook handmatig worden
+gestart. Stel onder **Repository settings > Secrets and variables > Actions**
+het secret `WAR_MONITOR_SECRET` in met dezelfde waarde als de Vercel-variable
+voor T08. De waarde staat niet in de repository en wordt alleen als
+`X-War-Monitor-Secret`-header verstuurd.
+
+De workflow gebruikt standaard
+`https://brabant-royale.vercel.app/api/war_monitor`. Een andere productie-URL
+kan veilig als niet-geheime Actions-repositoryvariable `WAR_MONITOR_URL` worden
+ingesteld. GitHub Actions schedules zijn best-effort en kunnen vertraagd
+starten; `*/5` is de minimale praktische intervalgrens van het platform, geen
+garantie op exacte uitvoering. Vercel Hobby past niet bij deze frequentie.
+Geplande en handmatige monitorruns worden geserialiseerd en een lopende run
+wordt niet geannuleerd. De bestaande maandagworkflow
+`.github/workflows/snapshot-clan-history.yml` blijft de weekhistory opslaan.
