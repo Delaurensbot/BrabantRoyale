@@ -24,12 +24,14 @@ class ScoutingApiTests(unittest.TestCase):
         mocked_history.return_value = [
             {
                 "race_created_at": "2026-07-20T09:42:06Z",
+                "clan_tag": "9YP8UY",
                 "player_tag": "PLAYER1",
                 "contribution": 1000,
                 "decks_used": 7,
             },
             {
                 "race_created_at": "2026-07-27T09:43:01Z",
+                "clan_tag": "9YP8UY",
                 "player_tag": "PLAYER1",
                 "contribution": 2600,
                 "decks_used": 16,
@@ -38,6 +40,7 @@ class ScoutingApiTests(unittest.TestCase):
         mocked_exclusions.return_value = [
             {
                 "race_created_at": "2026-07-20T09:42:06Z",
+                "clan_tag": "9YP8UY",
                 "player_tag": "PLAYER1",
             }
         ]
