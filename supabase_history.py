@@ -1,10 +1,22 @@
-"""Supabase-backed history for Clash Royale clan-war analytics."""
+"""Supabase-backed history and server-only live storage for clan-war analytics.
+
+The raw live tables intentionally have no automatic retention delete here.  A
+short-retention policy needs a scheduler or a database-side retention job; this
+small I/O layer cannot safely prove that such a job is present.  It therefore
+keeps writes idempotent and leaves retention operations to a separately
+approved operational change.
+"""
 
 from __future__ import annotations
 
+import base64
+import json
+import math
 import os
+import time
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
@@ -12,12 +24,97 @@ import requests
 ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 HISTORY_TABLE = "clan_war_player_weeks"
 EXCLUSIONS_TABLE = "clan_war_week_exclusions"
+LIVE_SNAPSHOT_TABLE = "river_race_live_snapshots"
+DAY_EVENTS_TABLE = "war_player_day_events"
+NOTIFICATION_LOG_TABLE = "notification_log"
 DEFAULT_PAGE_SIZE = 1000
 DEFAULT_WRITE_BATCH_SIZE = 500
+DEFAULT_RAW_STORAGE_TIMEOUT = 25
+DEFAULT_RAW_STORAGE_MAX_RETRIES = 2
+DEFAULT_RAW_STORAGE_BACKOFF_SECONDS = 0.25
+DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS = 5.0
 DEFAULT_SUPABASE_URL = "https://upbjlamddxooxhxhkivg.supabase.co"
 DEFAULT_SUPABASE_PUBLISHABLE_KEY = (
     "sb_publishable_gWj42LLCw4odVjLdRecWrw_4xeQlF9i"
 )
+
+LIVE_SNAPSHOT_CONFLICT_COLUMNS = (
+    "clan_tag",
+    "race_created_at",
+    "period_index",
+    "player_tag",
+    "capture_bucket",
+)
+DAY_EVENT_CONFLICT_COLUMNS = (
+    "clan_tag",
+    "race_created_at",
+    "period_index",
+    "player_tag",
+    "event_type",
+)
+NOTIFICATION_LOG_CONFLICT_COLUMNS = ("event_key", "channel")
+
+LIVE_SNAPSHOT_SELECT_COLUMNS = (
+    "id,clan_tag,season_id,section_index,period_index,period_type,"
+    "race_created_at,player_tag,player_name,player_role,decks_used,"
+    "decks_used_today,fame,repair_points,boat_attacks,boat_attacks_today,"
+    "boat_defenses,boat_defenses_today,captured_at,source,payload_version,"
+    "capture_bucket"
+)
+DAY_EVENT_SELECT_COLUMNS = (
+    "id,clan_tag,race_created_at,period_index,player_tag,event_type,"
+    "observed_decks_used_today,confidence,observed_at,details,created_at"
+)
+
+STORAGE_STATUS_OK = "ok"
+STORAGE_STATUS_EMPTY = "empty"
+STORAGE_STATUS_FRESH = "fresh"
+STORAGE_STATUS_STALE = "stale"
+STORAGE_STATUS_ERROR = "error"
+
+_MISSING = object()
+_RETRYABLE_STORAGE_STATUSES = frozenset({408, 425, 429})
+
+
+class SupabaseStorageError(RuntimeError):
+    """Safe metadata for a failed raw-table request.
+
+    The exception deliberately stores no URL, headers, JWT, response body, or
+    request payload.  Public write/read functions convert it to a small result
+    dictionary so future monitor code can branch on ``status`` and ``error``.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        status_code: Optional[int] = None,
+        attempts: int = 0,
+    ) -> None:
+        self.code = code
+        self.status_code = status_code
+        self.attempts = attempts
+        super().__init__(_safe_storage_message(code))
+
+
+def _safe_storage_message(code: str) -> str:
+    return {
+        "configuration_error": (
+            "Supabase server configuration is missing or invalid."
+        ),
+        "server_key_required": (
+            "A Supabase server key is required for raw monitoring storage."
+        ),
+        "timeout": "Supabase storage request timed out.",
+        "transport_error": "Supabase storage request failed temporarily.",
+        "rate_limited": "Supabase storage is rate limited.",
+        "upstream_server_error": (
+            "Supabase storage is temporarily unavailable."
+        ),
+        "supabase_http_error": "Supabase storage request was rejected.",
+        "invalid_response": "Supabase storage returned an invalid response.",
+        "invalid_payload": "Supabase storage payload is not JSON serializable.",
+    }.get(code, "Supabase storage request failed.")
 
 
 def normalize_tag(value: object) -> str:
@@ -46,6 +143,34 @@ def _supabase_headers(
     return headers
 
 
+def _jwt_role(api_key: str) -> Optional[str]:
+    """Read a JWT role without retaining or exposing the token."""
+
+    parts = api_key.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        padded_payload = parts[1] + ("=" * (-len(parts[1]) % 4))
+        payload = json.loads(
+            base64.urlsafe_b64decode(padded_payload.encode("ascii"))
+        )
+    except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        return None
+    role = payload.get("role") if isinstance(payload, dict) else None
+    return str(role).strip().lower() if role else None
+
+
+def _is_public_supabase_key(api_key: str) -> bool:
+    normalized = api_key.strip().lower()
+    if normalized.startswith(("sb_publishable_", "sb_anon_")):
+        return True
+    if normalized in {"anon", "authenticated", "publishable"}:
+        return True
+    if normalized.startswith("anon_"):
+        return True
+    return _jwt_role(api_key) in {"anon", "authenticated"}
+
+
 def get_supabase_read_config() -> Optional[Tuple[str, str]]:
     url = (
         os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
@@ -59,6 +184,26 @@ def get_supabase_read_config() -> Optional[Tuple[str, str]]:
         or DEFAULT_SUPABASE_PUBLISHABLE_KEY
     )
     return (url, api_key) if url and api_key else None
+
+
+def get_supabase_server_config() -> Optional[Tuple[str, str]]:
+    """Return the server-only Supabase URL/key pair, if configured.
+
+    This resolver intentionally never falls back to publishable or anon keys.
+    ``SUPABASE_SECRET_KEY`` is preferred for current Supabase projects, while
+    ``SUPABASE_SERVICE_ROLE_KEY`` keeps legacy deployments compatible with the
+    service_role grants in the T05 migration.
+    """
+
+    url = (
+        os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+        or DEFAULT_SUPABASE_URL
+    )
+    for env_name in ("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"):
+        api_key = os.environ.get(env_name, "").strip()
+        if api_key and not _is_public_supabase_key(api_key):
+            return (url, api_key) if url else None
+    return None
 
 
 def get_supabase_write_config() -> Tuple[str, str, Optional[str]]:
@@ -428,6 +573,1104 @@ def _chunks(
 ) -> Iterable[List[Dict[str, object]]]:
     for start in range(0, len(rows), size):
         yield rows[start : start + size]
+
+
+def _payload_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+) -> Tuple[object, bool]:
+    for candidate in (name, *aliases):
+        if candidate in payload:
+            return payload[candidate], True
+    return _MISSING, False
+
+
+def _required_payload_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+) -> object:
+    value, present = _payload_value(payload, name, *aliases)
+    if not present or value is None:
+        raise ValueError(f"{name} is required.")
+    return value
+
+
+def _text_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+    default: object = _MISSING,
+    allow_empty: bool = True,
+    max_length: Optional[int] = None,
+) -> str:
+    value, present = _payload_value(payload, name, *aliases)
+    if not present:
+        if default is _MISSING:
+            raise ValueError(f"{name} is required.")
+        value = default
+    if value is None:
+        raise ValueError(f"{name} must not be null.")
+    result = str(value).strip()
+    if not allow_empty and not result:
+        raise ValueError(f"{name} must not be empty.")
+    if max_length is not None and len(result) > max_length:
+        raise ValueError(f"{name} is too long.")
+    return result
+
+
+def _tag_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+) -> str:
+    value = _required_payload_value(payload, name, *aliases)
+    result = normalize_tag(value)
+    if not result:
+        raise ValueError(f"{name} must not be empty.")
+    return result
+
+
+def _int_value(
+    value: object,
+    name: str,
+    *,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
+    if value is None or isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer.")
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
+        raise ValueError(f"{name} must be an integer.")
+    try:
+        result = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{name} must be an integer.") from None
+    if minimum is not None and result < minimum:
+        raise ValueError(f"{name} is below its minimum.")
+    if maximum is not None and result > maximum:
+        raise ValueError(f"{name} is above its maximum.")
+    return result
+
+
+def _required_int_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> int:
+    value = _required_payload_value(payload, name, *aliases)
+    return _int_value(value, name, minimum=minimum, maximum=maximum)
+
+
+def _set_optional_int(
+    payload: Mapping[str, object],
+    row: Dict[str, object],
+    name: str,
+    *aliases: str,
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> None:
+    value, present = _payload_value(payload, name, *aliases)
+    if present:
+        row[name] = (
+            None
+            if value is None
+            else _int_value(
+                value,
+                name,
+                minimum=minimum,
+                maximum=maximum,
+            )
+        )
+
+
+def _timestamp_value(value: object, name: str) -> str:
+    try:
+        return clash_date_to_iso(value)
+    except Exception:
+        raise ValueError(f"{name} must be a valid timestamp.") from None
+
+
+def _set_optional_timestamp(
+    payload: Mapping[str, object],
+    row: Dict[str, object],
+    name: str,
+    *aliases: str,
+    allow_none: bool = False,
+) -> None:
+    value, present = _payload_value(payload, name, *aliases)
+    if not present:
+        return
+    if value is None and allow_none:
+        row[name] = None
+        return
+    if value is None:
+        raise ValueError(f"{name} must be a valid timestamp.")
+    row[name] = _timestamp_value(value, name)
+
+
+def _details_value(
+    payload: Mapping[str, object],
+    name: str = "details",
+    *aliases: str,
+) -> Dict[str, object]:
+    value, present = _payload_value(payload, name, *aliases)
+    if not present:
+        return {}
+    if value is None or not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a JSON object.")
+    return dict(value)
+
+
+def _map_live_snapshot(payload: Mapping[str, object]) -> Dict[str, object]:
+    if not isinstance(payload, Mapping):
+        raise TypeError("Live snapshot must be an object.")
+
+    payload_version, payload_version_present = _payload_value(
+        payload,
+        "payload_version",
+        "payloadVersion",
+    )
+    if not payload_version_present:
+        payload_version = 1
+    row: Dict[str, object] = {
+        "clan_tag": _tag_value(payload, "clan_tag", "clanTag"),
+        "season_id": _required_int_value(
+            payload,
+            "season_id",
+            "seasonId",
+            minimum=0,
+        ),
+        "period_index": _required_int_value(
+            payload,
+            "period_index",
+            "periodIndex",
+            minimum=0,
+        ),
+        "race_created_at": _timestamp_value(
+            _required_payload_value(
+                payload,
+                "race_created_at",
+                "raceCreatedAt",
+            ),
+            "race_created_at",
+        ),
+        "player_tag": _tag_value(payload, "player_tag", "playerTag"),
+        "player_name": _text_value(
+            payload,
+            "player_name",
+            "playerName",
+            allow_empty=False,
+        ),
+        "player_role": _text_value(
+            payload,
+            "player_role",
+            "playerRole",
+            default="",
+            max_length=32,
+        ),
+        "period_type": _text_value(
+            payload,
+            "period_type",
+            "periodType",
+            default="unknown",
+            allow_empty=False,
+            max_length=32,
+        ),
+        "source": _text_value(
+            payload,
+            "source",
+            default="unknown",
+            allow_empty=False,
+            max_length=64,
+        ),
+        "payload_version": _int_value(
+            payload_version,
+            "payload_version",
+            minimum=1,
+        ),
+    }
+    _set_optional_int(payload, row, "section_index", "sectionIndex", minimum=0)
+    _set_optional_int(payload, row, "decks_used", "decksUsed", minimum=0, maximum=16)
+    _set_optional_int(payload, row, "decks_used_today", "decksUsedToday", minimum=0)
+    _set_optional_int(payload, row, "fame", minimum=0)
+    _set_optional_int(payload, row, "repair_points", "repairPoints", minimum=0)
+    _set_optional_int(payload, row, "boat_attacks", "boatAttacks", minimum=0)
+    _set_optional_int(
+        payload,
+        row,
+        "boat_attacks_today",
+        "boatAttacksToday",
+        minimum=0,
+    )
+    _set_optional_int(payload, row, "boat_defenses", "boatDefenses", minimum=0)
+    _set_optional_int(
+        payload,
+        row,
+        "boat_defenses_today",
+        "boatDefensesToday",
+        minimum=0,
+    )
+    _set_optional_timestamp(payload, row, "captured_at", "capturedAt")
+    return row
+
+
+def _map_day_event(payload: Mapping[str, object]) -> Dict[str, object]:
+    if not isinstance(payload, Mapping):
+        raise TypeError("Day event must be an object.")
+
+    row: Dict[str, object] = {
+        "clan_tag": _tag_value(payload, "clan_tag", "clanTag"),
+        "race_created_at": _timestamp_value(
+            _required_payload_value(
+                payload,
+                "race_created_at",
+                "raceCreatedAt",
+            ),
+            "race_created_at",
+        ),
+        "period_index": _required_int_value(
+            payload,
+            "period_index",
+            "periodIndex",
+            minimum=0,
+        ),
+        "player_tag": _tag_value(payload, "player_tag", "playerTag"),
+        "event_type": _text_value(
+            payload,
+            "event_type",
+            "eventType",
+            allow_empty=False,
+            max_length=64,
+        ),
+        "confidence": _text_value(
+            payload,
+            "confidence",
+            default="unknown",
+            allow_empty=False,
+        ),
+        "details": _details_value(payload),
+    }
+    if row["confidence"] not in {"unknown", "low", "medium", "high"}:
+        raise ValueError("confidence has an unsupported value.")
+    _set_optional_int(
+        payload,
+        row,
+        "observed_decks_used_today",
+        "observedDecksUsedToday",
+        minimum=0,
+    )
+    _set_optional_timestamp(payload, row, "observed_at", "observedAt")
+    _set_optional_timestamp(payload, row, "created_at", "createdAt")
+    return row
+
+
+def _map_notification_log(payload: Mapping[str, object]) -> Dict[str, object]:
+    if not isinstance(payload, Mapping):
+        raise TypeError("Notification log entry must be an object.")
+
+    row: Dict[str, object] = {
+        "event_key": _text_value(
+            payload,
+            "event_key",
+            "eventKey",
+            allow_empty=False,
+            max_length=256,
+        ),
+        "channel": _text_value(
+            payload,
+            "channel",
+            allow_empty=False,
+            max_length=64,
+        ),
+        "status": _text_value(
+            payload,
+            "status",
+            default="pending",
+            allow_empty=False,
+            max_length=32,
+        ),
+        "details": _details_value(payload),
+    }
+    _set_optional_int(
+        payload,
+        row,
+        "response_code",
+        "responseCode",
+        minimum=100,
+        maximum=599,
+    )
+    _set_optional_timestamp(payload, row, "sent_at", "sentAt", allow_none=True)
+    return row
+
+
+def _clean_server_url(value: object) -> str:
+    url = str(value or "").strip().rstrip("/")
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SupabaseStorageError("configuration_error")
+    return url
+
+
+def _resolve_raw_storage_config(
+    *,
+    supabase_url: Optional[str],
+    api_key: Optional[str],
+    supabase_api_key: Optional[str],
+) -> Tuple[str, str]:
+    explicit_keys = [
+        str(value).strip()
+        for value in (api_key, supabase_api_key)
+        if value is not None and str(value).strip()
+    ]
+    if len(explicit_keys) > 1 and explicit_keys[0] != explicit_keys[1]:
+        raise SupabaseStorageError("configuration_error")
+
+    if explicit_keys:
+        selected_key = explicit_keys[0]
+        if _is_public_supabase_key(selected_key):
+            raise SupabaseStorageError("server_key_required")
+        configured_url = supabase_url or os.environ.get("SUPABASE_URL", "")
+        configured_url = configured_url.strip() or DEFAULT_SUPABASE_URL
+        return _clean_server_url(configured_url), selected_key
+
+    configured = get_supabase_server_config()
+    if not configured:
+        raise SupabaseStorageError("configuration_error")
+    configured_url, selected_key = configured
+    if _is_public_supabase_key(selected_key):
+        raise SupabaseStorageError("server_key_required")
+    return _clean_server_url(configured_url), selected_key
+
+
+def _validate_request_options(
+    *,
+    timeout: float,
+    max_retries: int,
+    backoff_factor: float,
+    max_backoff: float,
+) -> None:
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a positive finite number.")
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or not 0 <= max_retries <= 3
+    ):
+        raise ValueError("max_retries must be between 0 and 3.")
+    for name, value in (
+        ("backoff_factor", backoff_factor),
+        ("max_backoff", max_backoff),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or value < 0
+        ):
+            raise ValueError(f"{name} must be a finite non-negative number.")
+    if backoff_factor > max_backoff:
+        raise ValueError("backoff_factor must not exceed max_backoff.")
+
+
+def _validate_batch_size(batch_size: int) -> None:
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer.")
+
+
+def _validate_stale_after(stale_after_seconds: Optional[float]) -> None:
+    if stale_after_seconds is None:
+        return
+    if (
+        isinstance(stale_after_seconds, bool)
+        or not isinstance(stale_after_seconds, (int, float))
+        or not math.isfinite(float(stale_after_seconds))
+        or stale_after_seconds < 0
+    ):
+        raise ValueError(
+            "stale_after_seconds must be a finite non-negative number or None."
+        )
+
+
+def _retry_delay(
+    response: Any,
+    *,
+    attempt: int,
+    backoff_factor: float,
+    max_backoff: float,
+) -> float:
+    retry_after = None
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        try:
+            raw_retry_after = headers.get("Retry-After")
+            if raw_retry_after is not None:
+                retry_after = float(raw_retry_after)
+        except (TypeError, ValueError, OverflowError):
+            retry_after = None
+    if retry_after is not None and math.isfinite(retry_after):
+        return min(max_backoff, max(0.0, retry_after))
+    return min(max_backoff, backoff_factor * (2 ** max(0, attempt - 1)))
+
+
+def _storage_request(
+    method: str,
+    endpoint: str,
+    *,
+    table: str,
+    headers: Dict[str, str],
+    params: Optional[Dict[str, str]] = None,
+    payload: Optional[List[Dict[str, object]]] = None,
+    timeout: float,
+    max_retries: int,
+    backoff_factor: float,
+    max_backoff: float,
+    sleep: Optional[Callable[[float], None]],
+) -> Tuple[Any, int]:
+    sleep_fn = sleep or time.sleep
+    request_method = method.upper()
+    for attempt in range(1, max_retries + 2):
+        try:
+            if request_method == "GET":
+                response = requests.get(
+                    endpoint,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            elif request_method == "POST":
+                response = requests.post(
+                    endpoint,
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            else:
+                raise SupabaseStorageError("configuration_error", attempts=attempt)
+        except requests.exceptions.RequestException as exc:
+            code = (
+                "timeout"
+                if isinstance(exc, requests.exceptions.Timeout)
+                else "transport_error"
+            )
+            if attempt <= max_retries:
+                delay = min(
+                    max_backoff,
+                    backoff_factor * (2 ** max(0, attempt - 1)),
+                )
+                if delay > 0:
+                    sleep_fn(delay)
+                continue
+            raise SupabaseStorageError(code, attempts=attempt) from None
+
+        try:
+            status_code = int(response.status_code)
+        except (TypeError, ValueError, AttributeError):
+            raise SupabaseStorageError(
+                "invalid_response",
+                attempts=attempt,
+            ) from None
+
+        if 200 <= status_code < 300:
+            return response, attempt
+
+        retryable = (
+            status_code in _RETRYABLE_STORAGE_STATUSES
+            or 500 <= status_code <= 599
+        )
+        if retryable and attempt <= max_retries:
+            delay = _retry_delay(
+                response,
+                attempt=attempt,
+                backoff_factor=backoff_factor,
+                max_backoff=max_backoff,
+            )
+            if delay > 0:
+                sleep_fn(delay)
+            continue
+
+        code = (
+            "rate_limited"
+            if status_code == 429
+            else "upstream_server_error"
+            if 500 <= status_code <= 599
+            else "supabase_http_error"
+        )
+        raise SupabaseStorageError(
+            code,
+            status_code=status_code,
+            attempts=attempt,
+        ) from None
+
+    raise SupabaseStorageError("transport_error", attempts=max_retries + 1)
+
+
+def _storage_error_result(
+    table: str,
+    error: SupabaseStorageError,
+    *,
+    row_key: Optional[str] = None,
+    rows_written: int = 0,
+    batches: int = 0,
+    attempts: Optional[int] = None,
+) -> Dict[str, object]:
+    result: Dict[str, object] = {
+        "ok": False,
+        "status": STORAGE_STATUS_ERROR,
+        "data_status": STORAGE_STATUS_ERROR,
+        "table": table,
+        "error": error.code,
+        "message": _safe_storage_message(error.code),
+        "rows_written": rows_written,
+        "rows_upserted": rows_written,
+        "batches": batches,
+        "attempts": error.attempts if attempts is None else attempts,
+    }
+    if error.status_code is not None:
+        result["status_code"] = error.status_code
+    if row_key:
+        result[row_key] = None
+        result["stale"] = False
+        result["is_stale"] = False
+    return result
+
+
+def _raw_endpoint(supabase_url: str, table: str, conflict_columns: Tuple[str, ...]) -> str:
+    return (
+        f"{supabase_url}/rest/v1/{table}?on_conflict="
+        + ",".join(conflict_columns)
+    )
+
+
+def _write_raw_rows(
+    rows: List[Dict[str, object]],
+    *,
+    table: str,
+    conflict_columns: Tuple[str, ...],
+    supabase_url: Optional[str],
+    api_key: Optional[str],
+    supabase_api_key: Optional[str],
+    batch_size: int,
+    timeout: float,
+    max_retries: int,
+    backoff_factor: float,
+    max_backoff: float,
+    sleep: Optional[Callable[[float], None]],
+) -> Dict[str, object]:
+    _validate_batch_size(batch_size)
+    _validate_request_options(
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+    )
+    if not rows:
+        return {
+            "ok": True,
+            "status": STORAGE_STATUS_EMPTY,
+            "data_status": STORAGE_STATUS_EMPTY,
+            "table": table,
+            "rows_written": 0,
+            "rows_upserted": 0,
+            "batches": 0,
+            "attempts": 0,
+        }
+
+    written = 0
+    batches = 0
+    attempts = 0
+    try:
+        json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+        configured_url, configured_key = _resolve_raw_storage_config(
+            supabase_url=supabase_url,
+            api_key=api_key,
+            supabase_api_key=supabase_api_key,
+        )
+        endpoint = _raw_endpoint(configured_url, table, conflict_columns)
+        headers = _supabase_headers(configured_key, write=True)
+        for batch in _chunks(rows, batch_size):
+            _, batch_attempts = _storage_request(
+                "POST",
+                endpoint,
+                table=table,
+                headers=headers,
+                payload=batch,
+                timeout=timeout,
+                max_retries=max_retries,
+                backoff_factor=backoff_factor,
+                max_backoff=max_backoff,
+                sleep=sleep,
+            )
+            attempts += batch_attempts
+            written += len(batch)
+            batches += 1
+    except SupabaseStorageError as error:
+        return _storage_error_result(
+            table,
+            error,
+            rows_written=written,
+            batches=batches,
+            attempts=attempts + error.attempts,
+        )
+    except (TypeError, ValueError, OverflowError):
+        return _storage_error_result(
+            table,
+            SupabaseStorageError("invalid_payload"),
+            rows_written=written,
+            batches=batches,
+            attempts=attempts,
+        )
+
+    return {
+        "ok": True,
+        "status": STORAGE_STATUS_OK,
+        "data_status": STORAGE_STATUS_OK,
+        "table": table,
+        "rows_written": written,
+        "rows_upserted": written,
+        "batches": batches,
+        "attempts": attempts,
+    }
+
+
+def write_live_snapshots(
+    snapshots: Iterable[Mapping[str, object]],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert live snapshot rows using the T05 natural key.
+
+    The input may use T05 snake_case names or the corresponding Clash-style
+    camelCase names.  Only T05 writable columns are sent.  The result has
+    ``status`` ``ok``, ``empty``, or ``error`` and never substitutes metric
+    defaults for unavailable data.
+    """
+
+    rows = [_map_live_snapshot(snapshot) for snapshot in snapshots]
+    return _write_raw_rows(
+        rows,
+        table=LIVE_SNAPSHOT_TABLE,
+        conflict_columns=LIVE_SNAPSHOT_CONFLICT_COLUMNS,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_live_snapshot(
+    snapshot: Mapping[str, object],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert one live player snapshot and return a safe storage result."""
+
+    return write_live_snapshots(
+        [snapshot],
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def _read_raw_row(
+    *,
+    table: str,
+    result_key: str,
+    select_columns: str,
+    params: Dict[str, str],
+    timestamp_field: str,
+    stale_after_seconds: Optional[float],
+    supabase_url: Optional[str],
+    api_key: Optional[str],
+    supabase_api_key: Optional[str],
+    timeout: float,
+    max_retries: int,
+    backoff_factor: float,
+    max_backoff: float,
+    sleep: Optional[Callable[[float], None]],
+) -> Dict[str, object]:
+    _validate_stale_after(stale_after_seconds)
+    _validate_request_options(
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+    )
+    attempts = 0
+    try:
+        configured_url, configured_key = _resolve_raw_storage_config(
+            supabase_url=supabase_url,
+            api_key=api_key,
+            supabase_api_key=supabase_api_key,
+        )
+        endpoint = f"{configured_url}/rest/v1/{table}"
+        response, attempts = _storage_request(
+            "GET",
+            endpoint,
+            table=table,
+            headers=_supabase_headers(configured_key),
+            params={"select": select_columns, **params},
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+            max_backoff=max_backoff,
+            sleep=sleep,
+        )
+        content = getattr(response, "content", b"")
+        raw_rows = response.json() if content else []
+        if not isinstance(raw_rows, list):
+            raise SupabaseStorageError("invalid_response", attempts=attempts)
+        if not raw_rows:
+            return {
+                "ok": True,
+                "status": STORAGE_STATUS_EMPTY,
+                "data_status": STORAGE_STATUS_EMPTY,
+                "table": table,
+                result_key: None,
+                "stale": False,
+                "is_stale": False,
+                "attempts": attempts,
+            }
+        if not isinstance(raw_rows[0], Mapping):
+            raise SupabaseStorageError("invalid_response", attempts=attempts)
+        row = dict(raw_rows[0])
+        stale = False
+        if stale_after_seconds is not None:
+            timestamp = row.get(timestamp_field)
+            if timestamp is None:
+                raise SupabaseStorageError("invalid_response", attempts=attempts)
+            try:
+                observed_at = clash_date_to_datetime(timestamp)
+            except Exception:
+                raise SupabaseStorageError(
+                    "invalid_response",
+                    attempts=attempts,
+                ) from None
+            age_seconds = max(
+                0.0,
+                (datetime.now(timezone.utc) - observed_at).total_seconds(),
+            )
+            stale = age_seconds > float(stale_after_seconds)
+        result: Dict[str, object] = {
+            "ok": True,
+            "status": STORAGE_STATUS_STALE if stale else STORAGE_STATUS_FRESH,
+            "data_status": (
+                STORAGE_STATUS_STALE if stale else STORAGE_STATUS_FRESH
+            ),
+            "table": table,
+            result_key: row,
+            "stale": stale,
+            "is_stale": stale,
+            "attempts": attempts,
+        }
+        if stale:
+            result["stale_reason"] = "age"
+        return result
+    except SupabaseStorageError as error:
+        return _storage_error_result(
+            table,
+            error,
+            row_key=result_key,
+            attempts=attempts + error.attempts,
+        )
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return _storage_error_result(
+            table,
+            SupabaseStorageError("invalid_response"),
+            row_key=result_key,
+            attempts=attempts,
+        )
+
+
+def read_previous_player_snapshot(
+    clan_tag: str,
+    race_created_at: object,
+    period_index: object,
+    player_tag: str,
+    *,
+    before_captured_at: Optional[object] = None,
+    stale_after_seconds: Optional[float] = None,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Read the latest earlier player snapshot without zero-filling missing data."""
+
+    normalized_clan_tag = normalize_tag(clan_tag)
+    normalized_player_tag = normalize_tag(player_tag)
+    if not normalized_clan_tag or not normalized_player_tag:
+        raise ValueError("clan_tag and player_tag are required.")
+    normalized_race_created_at = _timestamp_value(
+        race_created_at,
+        "race_created_at",
+    )
+    normalized_period_index = _int_value(
+        period_index,
+        "period_index",
+        minimum=0,
+    )
+    params = {
+        "clan_tag": f"eq.{normalized_clan_tag}",
+        "race_created_at": f"eq.{normalized_race_created_at}",
+        "period_index": f"eq.{normalized_period_index}",
+        "player_tag": f"eq.{normalized_player_tag}",
+        "order": "captured_at.desc",
+        "limit": "1",
+    }
+    if before_captured_at is not None:
+        params["captured_at"] = (
+            "lt." + _timestamp_value(before_captured_at, "before_captured_at")
+        )
+    return _read_raw_row(
+        table=LIVE_SNAPSHOT_TABLE,
+        result_key="snapshot",
+        select_columns=LIVE_SNAPSHOT_SELECT_COLUMNS,
+        params=params,
+        timestamp_field="captured_at",
+        stale_after_seconds=stale_after_seconds,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_day_events(
+    events: Iterable[Mapping[str, object]],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert day events using the T05 event idempotency key."""
+
+    rows = [_map_day_event(event) for event in events]
+    return _write_raw_rows(
+        rows,
+        table=DAY_EVENTS_TABLE,
+        conflict_columns=DAY_EVENT_CONFLICT_COLUMNS,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_day_event(
+    event: Mapping[str, object],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert one day event and return a safe storage result."""
+
+    return write_day_events(
+        [event],
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def read_day_event(
+    clan_tag: str,
+    race_created_at: object,
+    period_index: object,
+    player_tag: str,
+    event_type: str,
+    *,
+    stale_after_seconds: Optional[float] = None,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Read one idempotent day event and expose fresh/stale/error explicitly."""
+
+    normalized_clan_tag = normalize_tag(clan_tag)
+    normalized_player_tag = normalize_tag(player_tag)
+    if not normalized_clan_tag or not normalized_player_tag:
+        raise ValueError("clan_tag and player_tag are required.")
+    normalized_race_created_at = _timestamp_value(
+        race_created_at,
+        "race_created_at",
+    )
+    normalized_period_index = _int_value(
+        period_index,
+        "period_index",
+        minimum=0,
+    )
+    normalized_event_type = str(event_type or "").strip()
+    if not normalized_event_type:
+        raise ValueError("event_type must not be empty.")
+    if len(normalized_event_type) > 64:
+        raise ValueError("event_type is too long.")
+    params = {
+        "clan_tag": f"eq.{normalized_clan_tag}",
+        "race_created_at": f"eq.{normalized_race_created_at}",
+        "period_index": f"eq.{normalized_period_index}",
+        "player_tag": f"eq.{normalized_player_tag}",
+        "event_type": f"eq.{normalized_event_type}",
+        "order": "observed_at.desc",
+        "limit": "1",
+    }
+    return _read_raw_row(
+        table=DAY_EVENTS_TABLE,
+        result_key="event",
+        select_columns=DAY_EVENT_SELECT_COLUMNS,
+        params=params,
+        timestamp_field="observed_at",
+        stale_after_seconds=stale_after_seconds,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_notification_logs(
+    entries: Iterable[Mapping[str, object]],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert notification delivery audit rows using event_key and channel."""
+
+    rows = [_map_notification_log(entry) for entry in entries]
+    return _write_raw_rows(
+        rows,
+        table=NOTIFICATION_LOG_TABLE,
+        conflict_columns=NOTIFICATION_LOG_CONFLICT_COLUMNS,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_notification_log(
+    entry: Mapping[str, object],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert one notification audit row and return a safe storage result."""
+
+    return write_notification_logs(
+        [entry],
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
 
 
 def upsert_snapshot_rows(
