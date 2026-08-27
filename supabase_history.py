@@ -17,7 +17,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import requests
 
@@ -135,6 +135,24 @@ def _safe_storage_message(code: str) -> str:
 
 def normalize_tag(value: object) -> str:
     return str(value or "").strip().replace("%23", "").replace("#", "").upper()
+
+
+def _strict_roster_tag(value: object) -> Optional[str]:
+    """Normalize a roster identity without silently merging malformed tags."""
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    for _ in range(2):
+        decoded = unquote(candidate)
+        if decoded == candidate:
+            break
+        candidate = decoded
+    if candidate.startswith("#"):
+        candidate = candidate[1:]
+    if not re.fullmatch(r"[A-Za-z0-9]{1,32}", candidate):
+        return None
+    return candidate.upper()
 
 
 def _supabase_headers(
@@ -844,9 +862,8 @@ def _roster_tag_value(
     """Normalize a roster identity and reject values the SQL check rejects."""
 
     value = _required_payload_value(payload, name, *aliases)
-    candidate = normalize_tag(value)
-    candidate = re.sub(r"[^A-Z0-9]", "", candidate)
-    if not re.fullmatch(r"[A-Z0-9]{1,32}", candidate or ""):
+    candidate = _strict_roster_tag(value)
+    if candidate is None:
         raise ValueError(f"{name} must be a valid tag.")
     return candidate
 
@@ -1639,10 +1656,8 @@ def _normalize_roster_read_row(
     """
 
     try:
-        row_clan = normalize_tag(raw.get("clan_tag", raw.get("clanTag")))
-        row_player = normalize_tag(raw.get("player_tag", raw.get("playerTag")))
-        row_clan = re.sub(r"[^A-Z0-9]", "", row_clan)
-        row_player = re.sub(r"[^A-Z0-9]", "", row_player)
+        row_clan = _strict_roster_tag(raw.get("clan_tag", raw.get("clanTag")))
+        row_player = _strict_roster_tag(raw.get("player_tag", raw.get("playerTag")))
     except Exception:
         return None
     if row_clan != clan_tag or not row_player:
@@ -1711,13 +1726,13 @@ def read_roster_snapshots(
 ) -> Dict[str, object]:
     """Read a bounded, server-side roster history with explicit data status."""
 
-    normalized_clan = re.sub(r"[^A-Z0-9]", "", normalize_tag(clan_tag))
-    if not re.fullmatch(r"[A-Z0-9]{1,32}", normalized_clan or ""):
+    normalized_clan = _strict_roster_tag(clan_tag)
+    if normalized_clan is None:
         raise ValueError("clan_tag is required and must be a valid tag.")
     normalized_player = None
     if player_tag is not None:
-        normalized_player = re.sub(r"[^A-Z0-9]", "", normalize_tag(player_tag))
-        if not re.fullmatch(r"[A-Z0-9]{1,32}", normalized_player or ""):
+        normalized_player = _strict_roster_tag(player_tag)
+        if normalized_player is None:
             raise ValueError("player_tag must be a valid tag.")
     if (
         isinstance(max_rows, bool)
@@ -1789,15 +1804,11 @@ def read_roster_snapshots(
             # treated as partial roster data.  PostgREST already filters this
             # server-side, but the second check prevents cross-clan leakage
             # if an upstream response is broader than requested.
-            raw_clan = re.sub(
-                r"[^A-Z0-9]",
-                "",
-                normalize_tag(raw.get("clan_tag", raw.get("clanTag"))),
+            raw_clan = _strict_roster_tag(
+                raw.get("clan_tag", raw.get("clanTag"))
             )
-            raw_player = re.sub(
-                r"[^A-Z0-9]",
-                "",
-                normalize_tag(raw.get("player_tag", raw.get("playerTag"))),
+            raw_player = _strict_roster_tag(
+                raw.get("player_tag", raw.get("playerTag"))
             )
             if raw_clan != normalized_clan:
                 continue

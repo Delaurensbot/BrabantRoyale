@@ -73,7 +73,8 @@ def test_tag_normalization_and_name_changes_keep_one_identity():
         captured_at="2026-08-01T12:00:00Z",
     )
 
-    assert join_data.normalize_player_tag("%23p-layer1") == "PLAYER1"
+    assert join_data.normalize_player_tag("%23PLAYER1") == "PLAYER1"
+    assert join_data.normalize_player_tag("%23p-layer1") == ""
     assert len(rows) == 1
     assert rows[0]["player_tag"] == "PLAYER1"
     assert rows[0]["player_name"] == "New name"
@@ -204,6 +205,27 @@ def test_roster_storage_rejects_public_key_for_server_only_reads_and_writes():
     assert read_result["error"] == "server_key_required"
     mocked_post.assert_not_called()
     mocked_get.assert_not_called()
+
+
+def test_roster_storage_rejects_malformed_identity_instead_of_stripping_it():
+    with pytest.raises(ValueError):
+        supabase_history.write_roster_snapshot(
+            roster_row(player="PLAYER-1"),
+            supabase_url=SUPABASE_URL,
+            api_key=SERVER_KEY,
+        )
+
+
+def test_api_get_uses_central_clash_client_for_member_requests():
+    response = Mock(data={"items": []})
+    with patch.object(join_data, "ClashRoyaleClient") as mocked_client:
+        mocked_client.return_value.get_members.return_value = response
+        assert join_data.api_get("/clans/%239YP8UY/members", "clash-test-key") == {
+            "items": []
+        }
+
+    mocked_client.assert_called_once_with(api_key="clash-test-key")
+    mocked_client.return_value.get_members.assert_called_once_with("9YP8UY")
 
 
 def test_roster_storage_marks_old_history_stale():

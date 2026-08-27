@@ -18,9 +18,12 @@ import re
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
-import requests
-
 from Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
+
+try:
+    from api.clash_client import ClashClientError, ClashRoyaleClient
+except ImportError:  # pragma: no cover - convenient for loose-file deployment.
+    from clash_client import ClashClientError, ClashRoyaleClient
 
 try:
     from supabase_history import read_roster_snapshots, write_roster_snapshots
@@ -85,9 +88,9 @@ def parse_clan_from_query(path: str) -> str:
 def normalize_player_tag(raw_tag: object) -> str:
     """Return the canonical stable identity used for roster comparisons."""
 
-    if raw_tag is None:
+    if not isinstance(raw_tag, str):
         return ""
-    clean = str(raw_tag).strip()
+    clean = raw_tag.strip()
     for _ in range(2):
         decoded = unquote(clean)
         if decoded == clean:
@@ -95,7 +98,9 @@ def normalize_player_tag(raw_tag: object) -> str:
         clean = decoded
     if clean.startswith("#"):
         clean = clean[1:]
-    return re.sub(r"[^A-Za-z0-9]", "", clean).upper()
+    if not re.fullmatch(r"[A-Za-z0-9]{1,32}", clean):
+        return ""
+    return clean.upper()
 
 
 def _timestamp_to_iso(value: object) -> Optional[str]:
@@ -260,18 +265,21 @@ def build_roster_snapshot_rows(
 
 
 def api_get(path: str, api_key: str) -> dict:
-    url = f"{ROYAL_API_BASE_URL}{path}"
-    response = requests.get(
-        url,
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=25,
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Clash API error {response.status_code} for {path}")
-    payload = response.json() if response.content else {}
-    if not isinstance(payload, dict):
+    """Fetch members through the central T01 client.
+
+    The narrow path check preserves the old injectable ``api_get`` seam for
+    tests while preventing this route from growing a second authentication or
+    retry implementation.
+    """
+
+    match = re.fullmatch(r"/clans/%23([A-Za-z0-9]{1,32})/members", path or "")
+    if not match:
+        raise ValueError("Unsupported roster API endpoint.")
+    response = ClashRoyaleClient(api_key=api_key).get_members(match.group(1))
+    payload = response.data
+    if not isinstance(payload, Mapping):
         raise RuntimeError("Official Clash API returned invalid JSON.")
-    return payload
+    return dict(payload)
 
 
 def _observed_interval(start: object, end: object) -> Optional[Dict[str, object]]:
@@ -965,6 +973,10 @@ def collect_join_data(
 def classify_error(exc: Exception) -> Tuple[int, str]:
     """Map failures to messages that cannot contain keys or upstream payloads."""
 
+    if isinstance(exc, ClashClientError):
+        if getattr(exc, "code", "") == "configuration_error":
+            return 500, "Server configuration is incomplete."
+        return 502, "Official Clash API request failed. Try again shortly."
     message = str(exc).lower()
     if "missing clash_royale_api_key" in message:
         return 500, "Server configuration is incomplete."
