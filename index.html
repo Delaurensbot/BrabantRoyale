@@ -98,6 +98,84 @@
     .strategyReasons { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.5; }
     .dataQuality { color: var(--muted); font-size: 13px; line-height: 1.5; }
     .hiddenCopy { display: none; }
+    .warRoom, .warRoom * { box-sizing: border-box; }
+    .warRoom { min-width: 0; overflow: hidden; margin: 22px 0; padding: 18px; border-radius: 18px; background: linear-gradient(145deg, rgba(29, 35, 53, 0.96), rgba(14, 18, 30, 0.96)); border: 1px solid rgba(116, 255, 141, 0.34); box-shadow: 0 24px 70px rgba(0,0,0,0.32); }
+    .warRoom [hidden] { display: none !important; }
+    .warRoom__header { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+    .warRoom__eyebrow { margin: 0 0 4px; color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase; }
+    .warRoom__title { margin: 0; font-size: clamp(24px, 5vw, 34px); line-height: 1.05; }
+    .warRoom__intro { max-width: 680px; margin: 8px 0 0; color: var(--muted); line-height: 1.45; }
+    .warRoom__headerActions { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; }
+    .warRoom__button { white-space: nowrap; }
+    .warRoom__button:disabled { cursor: wait; opacity: 0.65; }
+    .warRoom__status { display: inline-flex; align-items: center; min-height: 38px; padding: 8px 11px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); font-size: 13px; font-weight: 800; }
+    .warRoom__status[data-state="loading"] { color: #ffe6bd; border-color: rgba(255,181,71,0.6); background: rgba(255,181,71,0.12); }
+    .warRoom__status[data-state="live"] { color: #b8ffc4; border-color: rgba(116,255,141,0.6); background: rgba(116,255,141,0.12); }
+    .warRoom__status[data-state="stale"] { color: #ffe6bd; border-color: rgba(255,181,71,0.75); background: rgba(255,181,71,0.14); }
+    .warRoom__status[data-state="error"] { color: #ffdede; border-color: rgba(255,70,70,0.72); background: rgba(255,0,0,0.16); }
+    .warRoom__status[data-state="empty"] { color: var(--muted); border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.06); }
+    .warRoom__message { margin: 0 0 14px; padding: 11px 13px; border-radius: 12px; line-height: 1.4; }
+    .warRoom__message--loading { border: 1px solid rgba(255,181,71,0.35); background: rgba(255,181,71,0.08); color: #ffe6bd; }
+    .warRoom__message--error { border: 1px solid rgba(255,70,70,0.55); background: rgba(255,0,0,0.12); color: #ffdede; }
+    .warRoom__message--empty { border: 1px dashed rgba(255,255,255,0.2); background: rgba(255,255,255,0.04); color: var(--muted); }
+    .warRoom__meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .warRoom__metaCard { min-width: 0; padding: 11px 12px; border-radius: 12px; background: rgba(12,16,27,0.62); border: 1px solid rgba(255,255,255,0.09); }
+    .warRoom__metaLabel, .warRoom__metricLabel { display: block; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.45px; text-transform: uppercase; }
+    .warRoom__metaValue { display: block; min-width: 0; margin-top: 4px; overflow-wrap: anywhere; font-size: 15px; line-height: 1.3; }
+    .warRoom__metaNote { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .warRoom__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .warRoom__card { min-width: 0; overflow: hidden; padding: 14px; border-radius: 14px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.1); }
+    .warRoom__card--wide { grid-column: 1 / -1; }
+    .warRoom__cardHeader { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    .warRoom__cardTitle { margin: 0; font-size: 17px; line-height: 1.25; }
+    .warRoom__cardHint { flex: 0 0 auto; color: var(--muted); font-size: 12px; text-align: right; }
+    .warRoom__phase { margin: 4px 0 5px; font-size: clamp(22px, 5vw, 30px); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+    .warRoom__subtle { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+    .warRoom__metric { margin: 3px 0 8px; font-size: clamp(28px, 7vw, 42px); font-weight: 850; line-height: 1.05; overflow-wrap: anywhere; }
+    .warRoom__metricNote { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+    .warRoom__filter { display: inline-flex; gap: 7px; align-items: center; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .warRoom__filter input { width: 16px; height: 16px; accent-color: var(--green); }
+    .warRoom__summary { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .warRoom__list { display: grid; gap: 8px; min-width: 0; }
+    .warRoom__actionRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; min-width: 0; padding: 10px 11px; border-radius: 10px; background: rgba(12,16,27,0.62); border: 1px solid rgba(255,255,255,0.08); }
+    .warRoom__actionMain { display: grid; gap: 3px; min-width: 0; }
+    .warRoom__actionName { overflow-wrap: anywhere; }
+    .warRoom__actionMeta, .warRoom__actionState { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+    .warRoom__actionState { text-align: right; font-weight: 800; }
+    .warRoom__actionState--needed { color: #ffe6bd; }
+    .warRoom__actionState--done { color: #b8ffc4; }
+    .warRoom__actionState--unknown { color: var(--muted); }
+    .warRoom__duelGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .warRoom__duelItem { min-width: 0; padding: 10px; border-radius: 10px; background: rgba(12,16,27,0.62); border: 1px solid rgba(255,255,255,0.08); }
+    .warRoom__duelValue { display: block; margin-top: 4px; font-size: 24px; font-weight: 850; line-height: 1; }
+    .warRoom__aggregateNote, .warRoom__forecastNote, .warRoom__privacyNote { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+    .warRoom__estimateLabel { display: inline-flex; padding: 3px 7px; border-radius: 999px; color: #ffe6bd; background: rgba(255,181,71,0.14); border: 1px solid rgba(255,181,71,0.45); font-size: 11px; font-weight: 800; letter-spacing: 0.3px; text-transform: uppercase; vertical-align: middle; }
+    .warRoom__alertList { display: grid; gap: 5px; margin-top: 10px; }
+    .warRoom__alertItem { color: #ffe6bd; font-size: 12px; line-height: 1.35; }
+    .warRoom__board { display: grid; gap: 8px; min-width: 0; }
+    .warRoom__boardCard { min-width: 0; padding: 11px; border-radius: 11px; background: rgba(12,16,27,0.62); border: 1px solid rgba(255,255,255,0.08); }
+    .warRoom__boardTop { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; min-width: 0; }
+    .warRoom__boardName { min-width: 0; font-weight: 800; overflow-wrap: anywhere; }
+    .warRoom__boardRank { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+    .warRoom__boardMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+    .warRoom__boardMetric { min-width: 0; }
+    .warRoom__boardMetricValue { display: block; margin-top: 3px; overflow-wrap: anywhere; font-size: 14px; font-weight: 750; }
+    .warRoom__privacyNote { padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
+    @media (max-width: 760px) {
+      .warRoom { padding: 14px; }
+      .warRoom__header { flex-direction: column; }
+      .warRoom__headerActions { width: 100%; flex-direction: column; align-items: stretch; }
+      .warRoom__button { width: 100%; }
+      .warRoom__status { justify-content: center; }
+      .warRoom__meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 520px) {
+      .warRoom__grid { grid-template-columns: 1fr; }
+      .warRoom__card--wide { grid-column: auto; }
+      .warRoom__boardMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .warRoom__actionRow { grid-template-columns: 1fr; gap: 5px; }
+      .warRoom__actionState { text-align: left; }
+    }
     @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
     @media (max-width: 640px) {
       body { padding: 0 12px; }
@@ -124,6 +202,111 @@
   </div>
 
   <div class="error" id="errorBox"></div>
+
+  <section id="warRoom" class="warRoom warRoom--loading" data-state="loading" aria-labelledby="warRoomTitle">
+    <div class="warRoom__header">
+      <div>
+        <p class="warRoom__eyebrow">Actuele read-only raceweergave</p>
+        <h2 id="warRoomTitle" class="warRoom__title">War Room</h2>
+        <p class="warRoom__intro">Een compacte mobiele momentopname van de geselecteerde clan. Gegevens worden rechtstreeks uit de publieke war-status read-route geladen.</p>
+      </div>
+      <div class="warRoom__headerActions">
+        <span id="warRoomStatus" class="warRoom__status" data-state="loading" role="status" aria-live="polite">Laden…</span>
+        <button id="warRoomRefresh" class="warRoom__button" type="button">Ververs War Room</button>
+      </div>
+    </div>
+
+    <p id="warRoomLoading" class="warRoom__message warRoom__message--loading">War Room wordt geladen…</p>
+    <p id="warRoomError" class="warRoom__message warRoom__message--error" role="alert" hidden>War Room kon niet worden ververst.</p>
+    <p id="warRoomEmpty" class="warRoom__message warRoom__message--empty" hidden>Geen actieve race beschikbaar. Actie, Duel-first en prognose zijn onbekend.</p>
+
+    <div class="warRoom__meta" aria-label="War Room metadata">
+      <div class="warRoom__metaCard">
+        <span class="warRoom__metaLabel">Snapshot</span>
+        <strong id="warRoomSnapshot" class="warRoom__metaValue">—</strong>
+      </div>
+      <div class="warRoom__metaCard">
+        <span class="warRoom__metaLabel">Geobserveerd</span>
+        <strong id="warRoomObservedAt" class="warRoom__metaValue">—</strong>
+      </div>
+      <div class="warRoom__metaCard">
+        <span class="warRoom__metaLabel">Bron</span>
+        <strong id="warRoomSource" class="warRoom__metaValue">onbekend</strong>
+      </div>
+      <div class="warRoom__metaCard">
+        <span class="warRoom__metaLabel">Datakwaliteit</span>
+        <strong id="warRoomDataQuality" class="warRoom__metaValue">onbekend</strong>
+        <small id="warRoomQualityNote" class="warRoom__metaNote">Ontbrekende velden: onbekend</small>
+      </div>
+    </div>
+
+    <div class="warRoom__grid">
+      <article class="warRoom__card">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Racefase</h3>
+        </div>
+        <p id="warRoomPhase" class="warRoom__phase">onbekend</p>
+        <p id="warRoomPhaseMeta" class="warRoom__subtle">Periode en status: onbekend</p>
+      </article>
+
+      <article class="warRoom__card">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Wie moet nog?</h3>
+          <label class="warRoom__filter" for="warRoomActionOnly">
+            <input id="warRoomActionOnly" type="checkbox" />
+            <span>Alleen actie nodig</span>
+          </label>
+        </div>
+        <p id="warRoomActionSummary" class="warRoom__summary">Spelerdata wordt geladen…</p>
+        <div id="warRoomActionList" class="warRoom__list" aria-live="polite"></div>
+      </article>
+
+      <article class="warRoom__card">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Resterende decks</h3>
+        </div>
+        <p id="warRoomDecksRemaining" class="warRoom__metric">—</p>
+        <p id="warRoomDecksNote" class="warRoom__metricNote">Nog geen actuele spelerdata.</p>
+      </article>
+
+      <article class="warRoom__card">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Duel-first-overzicht</h3>
+          <span class="warRoom__cardHint">Publiek aggregaat</span>
+        </div>
+        <div id="warRoomDuelSummary" class="warRoom__duelGrid"></div>
+        <p id="warRoomDuelNote" class="warRoom__aggregateNote">Alleen openbare totalen; individuele Duel-first-statussen worden niet getoond.</p>
+        <div id="warRoomAlertList" class="warRoom__alertList"></div>
+      </article>
+
+      <article class="warRoom__card">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Prognose</h3>
+          <span class="warRoom__estimateLabel">schatting</span>
+        </div>
+        <p id="warRoomForecast" class="warRoom__metric">—</p>
+        <p id="warRoomForecastNote" class="warRoom__forecastNote">Alleen beschikbaar wanneer de actuele velden hiervoor compleet genoeg zijn.</p>
+      </article>
+
+      <article id="warRoomBoatCard" class="warRoom__card" hidden>
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Bootinformatie</h3>
+          <span class="warRoom__cardHint">Alleen indien aangeleverd</span>
+        </div>
+        <div id="warRoomBoatInfo" class="warRoom__board"></div>
+      </article>
+
+      <article class="warRoom__card warRoom__card--wide">
+        <div class="warRoom__cardHeader">
+          <h3 class="warRoom__cardTitle">Opponent board</h3>
+          <span id="warRoomOpponentCount" class="warRoom__cardHint">Aantal: —</span>
+        </div>
+        <div id="warRoomOpponentBoard" class="warRoom__board"></div>
+      </article>
+    </div>
+
+    <p class="warRoom__privacyNote">Publieke weergave: Duel-first-signalen blijven geaggregeerd. Deze War Room maakt geen individuele overtredings- of beschuldigingslijst.</p>
+  </section>
 
   <div class="grid">
     <div class="card fullRow">
@@ -397,6 +580,636 @@
   let overviewData = { headCells: [], rows: [] };
   let overviewSortState = { index: -1, direction: "desc" };
   let currentClanTag = DEFAULT_CLAN;
+  let warRoomCurrentData = null;
+  let warRoomActionOnly = false;
+  let warRoomRequestSequence = 0;
+
+  function warRoomClear(id) {
+    const node = el(id);
+    if (!node) return;
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function warRoomSetHidden(id, hidden) {
+    const node = el(id);
+    if (node) node.hidden = Boolean(hidden);
+  }
+
+  function warRoomText(value, fallback = "onbekend") {
+    if (value == null) return fallback;
+    if (typeof value === "string") {
+      const text = value.trim();
+      return text || fallback;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "boolean") return value ? "ja" : "nee";
+    return fallback;
+  }
+
+  function warRoomSetText(id, value, fallback = "—") {
+    const node = el(id);
+    if (node) node.textContent = warRoomText(value, fallback);
+  }
+
+  function warRoomNumber(value) {
+    if (value == null || value === "" || typeof value === "boolean") return null;
+    if (typeof value !== "number" && typeof value !== "string") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function warRoomNumberText(value) {
+    const number = warRoomNumber(value);
+    if (number == null) return "—";
+    return new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 2 }).format(number);
+  }
+
+  function warRoomFormatTimestamp(value) {
+    if (value == null || value === "") return "—";
+    const raw = String(value).trim();
+    if (!raw) return "—";
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return "onbekend";
+    try {
+      return new Intl.DateTimeFormat("nl-NL", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(date);
+    } catch (_) {
+      return date.toLocaleString("nl-NL");
+    }
+  }
+
+  function warRoomStatusFromData(data) {
+    const candidate = String(
+      data?.status || data?.data_quality?.status || data?.data_status || ""
+    ).toLowerCase();
+    if (["live", "stale", "error", "empty"].includes(candidate)) return candidate;
+    if (["fresh", "partial", "ok"].includes(candidate)) return "live";
+    return null;
+  }
+
+  function warRoomStatusLabel(status) {
+    return {
+      loading: "Laden…",
+      live: "Live",
+      stale: "Stale",
+      error: "Fout",
+      empty: "Geen data",
+    }[status] || "Onbekend";
+  }
+
+  function warRoomSetState(state) {
+    const root = el("warRoom");
+    const badge = el("warRoomStatus");
+    const knownStates = ["loading", "live", "stale", "error", "empty"];
+    const safeState = knownStates.includes(state) ? state : "error";
+
+    if (root) {
+      knownStates.forEach((item) => root.classList.remove(`warRoom--${item}`));
+      root.classList.add(`warRoom--${safeState}`);
+      root.dataset.state = safeState;
+    }
+    if (badge) {
+      badge.dataset.state = safeState;
+      badge.textContent = warRoomStatusLabel(safeState);
+    }
+    warRoomSetHidden("warRoomLoading", safeState !== "loading");
+    warRoomSetHidden("warRoomError", safeState !== "error");
+    warRoomSetHidden("warRoomEmpty", safeState !== "empty");
+
+    const refreshButton = el("warRoomRefresh");
+    if (refreshButton) refreshButton.disabled = safeState === "loading";
+  }
+
+  function warRoomHumanizeQuality(value) {
+    return {
+      high: "hoog",
+      medium: "gemiddeld",
+      low: "laag",
+      fresh: "actueel",
+      partial: "gedeeltelijk",
+      stale: "stale",
+      live: "live",
+      empty: "leeg",
+      error: "fout",
+    }[String(value || "").toLowerCase()] || warRoomText(value, "onbekend");
+  }
+
+  function warRoomHumanizeField(value) {
+    const labels = {
+      clan: "clan",
+      members: "leden",
+      race: "race",
+      race_context: "racecontext",
+      "race_context.season_id": "seizoen",
+      "race_context.section_index": "sectie",
+      "race_context.period_index": "periode",
+      "race_context.race_created_at": "race-snapshot",
+      decks_used_today: "gebruikte decks",
+      decks_remaining_today: "resterende decks",
+    };
+    return labels[String(value)] || warRoomText(value, "onbekend");
+  }
+
+  function warRoomRenderMetadata(data) {
+    const payload = data && typeof data === "object" ? data : {};
+    const context = payload.race_context && typeof payload.race_context === "object"
+      ? payload.race_context
+      : {};
+    const freshness = payload.freshness && typeof payload.freshness === "object"
+      ? payload.freshness
+      : {};
+    const raceFreshness = freshness.race || freshness.current_river_race || {};
+    const quality = payload.data_quality && typeof payload.data_quality === "object"
+      ? payload.data_quality
+      : {};
+    const observedAt = context.observed_at
+      || context.route_observed_at
+      || raceFreshness.fetched_at
+      || payload.generated_at;
+    const source = context.source
+      || raceFreshness.source
+      || (Array.isArray(quality.sources) && quality.sources.length ? quality.sources[0] : null);
+    const status = warRoomStatusFromData(payload);
+    const confidence = quality.confidence;
+    const qualityLabel = confidence
+      ? `${warRoomHumanizeQuality(status)} · ${warRoomHumanizeQuality(confidence)}`
+      : warRoomHumanizeQuality(status);
+    const missing = Array.isArray(quality.missing_fields)
+      ? quality.missing_fields
+      : Array.isArray(quality.missingFields)
+        ? quality.missingFields
+        : [];
+
+    warRoomSetText("warRoomSnapshot", warRoomFormatTimestamp(context.race_created_at), "—");
+    warRoomSetText("warRoomObservedAt", warRoomFormatTimestamp(observedAt), "—");
+    warRoomSetText("warRoomSource", source, "onbekend");
+    warRoomSetText("warRoomDataQuality", qualityLabel, "onbekend");
+    warRoomSetText(
+      "warRoomQualityNote",
+      missing.length
+        ? `Ontbrekende velden: ${missing.map(warRoomHumanizeField).join(", ")}`
+        : "Geen bekende ontbrekende velden.",
+      "Ontbrekende velden: onbekend"
+    );
+  }
+
+  function warRoomRenderPhase(data) {
+    const context = data?.race_context && typeof data.race_context === "object"
+      ? data.race_context
+      : {};
+    const state = String(context.state || "").trim();
+    const periodType = String(context.period_type || "").trim();
+    const stateLabels = {
+      warDay: "Oorlogsdag",
+      collectionDay: "Verzamelingsdag",
+      war: "Oorlog",
+      riverRace: "Riverrace",
+      colosseum: "Colosseum",
+    };
+    const periodLabels = {
+      war: "oorlog",
+      collection: "verzameling",
+      colosseum: "colosseum",
+    };
+    const phase = stateLabels[state] || state || periodLabels[periodType] || periodType || "onbekend";
+    const details = [];
+    if (periodType) details.push(`Type: ${periodLabels[periodType] || periodType}`);
+    if (warRoomNumber(context.period_index) != null) {
+      details.push(`Periode: ${warRoomNumberText(context.period_index)}`);
+    }
+    if (warRoomNumber(context.season_id) != null) {
+      details.push(`Seizoen: ${warRoomNumberText(context.season_id)}`);
+    }
+    warRoomSetText("warRoomPhase", phase, "onbekend");
+    warRoomSetText(
+      "warRoomPhaseMeta",
+      details.length ? details.join(" · ") : "Periode en status: onbekend",
+      "Periode en status: onbekend"
+    );
+  }
+
+  function warRoomShowMessage(id, message) {
+    warRoomClear(id);
+    const container = el(id);
+    if (!container) return;
+    const paragraph = document.createElement("p");
+    paragraph.className = "warRoom__subtle";
+    paragraph.textContent = message;
+    container.appendChild(paragraph);
+  }
+
+  function warRoomRemaining(row) {
+    const remaining = warRoomNumber(row?.decks_remaining_today);
+    return remaining != null && remaining >= 0 ? remaining : null;
+  }
+
+  function warRoomBuildActionRow(row, remaining) {
+    const item = document.createElement("div");
+    item.className = "warRoom__actionRow";
+
+    const main = document.createElement("div");
+    main.className = "warRoom__actionMain";
+    const name = document.createElement("strong");
+    name.className = "warRoom__actionName";
+    name.textContent = warRoomText(row?.name, "Onbekende speler");
+    const role = document.createElement("span");
+    role.className = "warRoom__actionMeta";
+    role.textContent = `Rol: ${warRoomText(row?.role, "onbekend")}`;
+    main.appendChild(name);
+    main.appendChild(role);
+
+    const state = document.createElement("span");
+    state.className = "warRoom__actionState";
+    if (remaining == null) {
+      state.classList.add("warRoom__actionState--unknown");
+      state.textContent = "Resterende decks: onbekend";
+    } else if (remaining > 0) {
+      state.classList.add("warRoom__actionState--needed");
+      state.textContent = `${warRoomNumberText(remaining)} deck${remaining === 1 ? "" : "s"} nodig`;
+    } else {
+      state.classList.add("warRoom__actionState--done");
+      state.textContent = "Geen decks open";
+    }
+
+    item.appendChild(main);
+    item.appendChild(state);
+    return item;
+  }
+
+  function warRoomRenderActionPanel(data) {
+    const rows = Array.isArray(data?.player_rows) ? data.player_rows : [];
+    const list = el("warRoomActionList");
+    warRoomClear("warRoomActionList");
+
+    if (!rows.length) {
+      warRoomSetText("warRoomActionSummary", "Spelerdata: onbekend", "Spelerdata: onbekend");
+      warRoomShowMessage("warRoomActionList", "Geen actuele spelerdata beschikbaar.");
+      return;
+    }
+
+    const annotated = rows.map((row) => ({ row, remaining: warRoomRemaining(row) }));
+    const actionRows = annotated.filter((item) => item.remaining != null && item.remaining > 0);
+    const completeRows = annotated.filter((item) => item.remaining === 0);
+    const unknownRows = annotated.filter((item) => item.remaining == null);
+    const visibleRows = warRoomActionOnly ? actionRows : annotated;
+    const summaryParts = [
+      `${actionRows.length} actie nodig`,
+      `${completeRows.length} klaar`,
+    ];
+    if (unknownRows.length) summaryParts.push(`${unknownRows.length} onbekend`);
+    warRoomSetText("warRoomActionSummary", summaryParts.join(" · "), "Spelerdata: onbekend");
+
+    if (!visibleRows.length) {
+      warRoomShowMessage(
+        "warRoomActionList",
+        warRoomActionOnly ? "Geen bekende speler heeft nog actie nodig." : "Geen spelers beschikbaar."
+      );
+      return;
+    }
+
+    visibleRows.forEach(({ row, remaining }) => {
+      list.appendChild(warRoomBuildActionRow(row, remaining));
+    });
+  }
+
+  function warRoomRenderDecks(data) {
+    const rows = Array.isArray(data?.player_rows) ? data.player_rows : [];
+    const known = rows
+      .map((row) => warRoomRemaining(row))
+      .filter((value) => value != null);
+    const unknownCount = rows.length - known.length;
+
+    if (!rows.length || !known.length) {
+      warRoomSetText("warRoomDecksRemaining", "—", "—");
+      warRoomSetText("warRoomDecksNote", "Resterende decks: onbekend.", "Resterende decks: onbekend.");
+      return;
+    }
+
+    const total = known.reduce((sum, value) => sum + value, 0);
+    warRoomSetText(
+      "warRoomDecksRemaining",
+      unknownCount ? `${warRoomNumberText(total)} bekend` : warRoomNumberText(total),
+      "—"
+    );
+    warRoomSetText(
+      "warRoomDecksNote",
+      unknownCount
+        ? `Gebaseerd op ${known.length} spelers; ${unknownCount} speler${unknownCount === 1 ? "" : "s"} onbekend en niet als nul geteld.`
+        : `Gebaseerd op ${known.length} spelers.`,
+      "Resterende decks: onbekend."
+    );
+  }
+
+  function warRoomRenderAggregateAlerts(data) {
+    warRoomClear("warRoomAlertList");
+    if (data?.alerts_scope !== "public_aggregate" || !Array.isArray(data?.alerts)) return;
+
+    const typeLabels = {
+      duel_first: "Duel-first-signaal",
+      data_quality: "Datakwaliteit",
+      data_freshness: "Dataversheid",
+    };
+    data.alerts.forEach((alert) => {
+      if (!alert || typeof alert !== "object") return;
+      const item = document.createElement("div");
+      item.className = "warRoom__alertItem";
+      const type = typeLabels[alert.type] || "Publiek signaal";
+      const count = warRoomNumber(alert.count);
+      const status = alert.status ? ` · ${warRoomText(alert.status, "onbekend")}` : "";
+      item.textContent = `${type}${status}: ${count == null ? "onbekend" : warRoomNumberText(count)}`;
+      el("warRoomAlertList")?.appendChild(item);
+    });
+  }
+
+  function warRoomRenderDuel(data) {
+    const summary = data?.duel_first_summary;
+    const counts = summary?.counts && typeof summary.counts === "object"
+      ? summary.counts
+      : summary?.status_counts && typeof summary.status_counts === "object"
+        ? summary.status_counts
+        : null;
+    warRoomClear("warRoomDuelSummary");
+
+    if (!summary || !counts || data?.status === "empty") {
+      warRoomShowMessage("warRoomDuelSummary", "Duel-first-overzicht: onbekend.");
+      warRoomSetText(
+        "warRoomDuelNote",
+        "Alleen openbare totalen; individuele Duel-first-statussen worden niet getoond.",
+        "Alleen openbare totalen."
+      );
+      warRoomClear("warRoomAlertList");
+      return;
+    }
+
+    const entries = [
+      ["not_started", "Nog niet gestart"],
+      ["solo_start_observed", "Solo-start waargenomen"],
+      ["duel_first_likely", "Duel-first waarschijnlijk"],
+      ["unknown_start", "Start onbekend"],
+      ["api_stale", "API stale"],
+    ];
+    const grid = el("warRoomDuelSummary");
+    entries.forEach(([key, label]) => {
+      const item = document.createElement("div");
+      item.className = "warRoom__duelItem";
+      const itemLabel = document.createElement("span");
+      itemLabel.className = "warRoom__metricLabel";
+      itemLabel.textContent = label;
+      const itemValue = document.createElement("strong");
+      itemValue.className = "warRoom__duelValue";
+      itemValue.textContent = warRoomNumberText(
+        Object.prototype.hasOwnProperty.call(counts, key) ? counts[key] : null
+      );
+      item.appendChild(itemLabel);
+      item.appendChild(itemValue);
+      grid.appendChild(item);
+    });
+
+    const alertable = warRoomNumber(summary.alertable_count);
+    const alertNote = alertable == null
+      ? "Alertbare signalen: onbekend."
+      : `Alertbare signalen: ${warRoomNumberText(alertable)}.`;
+    warRoomSetText(
+      "warRoomDuelNote",
+      `Alleen openbare totalen; individuele Duel-first-statussen worden niet getoond. ${alertNote}`,
+      "Alleen openbare totalen."
+    );
+    warRoomRenderAggregateAlerts(data);
+  }
+
+  function warRoomFindOwnClan(data, clanRows) {
+    const selectedTag = normalizeClanTag(data?.clan_tag || currentClanTag);
+    return clanRows.find((row) => normalizeClanTag(row?.clan_tag) === selectedTag)
+      || clanRows.find((row) => row && row.is_opponent === false)
+      || null;
+  }
+
+  function warRoomRenderForecast(data) {
+    const rows = Array.isArray(data?.player_rows) ? data.player_rows : [];
+    const clanRows = Array.isArray(data?.clan_rows) ? data.clan_rows : [];
+    const own = warRoomFindOwnClan(data, clanRows);
+    const remainingValues = rows.map((row) => warRoomRemaining(row));
+    const hasCompleteRemaining = rows.length > 0
+      && remainingValues.every((value) => value != null);
+    const fame = warRoomNumber(own?.fame);
+    let used = warRoomNumber(own?.decks_used_today);
+    if (used == null && rows.length && rows.every((row) => warRoomNumber(row?.decks_used_today) != null)) {
+      used = rows.reduce((sum, row) => sum + warRoomNumber(row.decks_used_today), 0);
+    }
+
+    if (!own || fame == null || used == null || used <= 0 || !hasCompleteRemaining) {
+      warRoomSetText("warRoomForecast", "—", "—");
+      warRoomSetText(
+        "warRoomForecastNote",
+        "Schatting onbekend: onvoldoende actuele velden voor een verantwoorde berekening.",
+        "Schatting onbekend."
+      );
+      return;
+    }
+
+    const remaining = remainingValues.reduce((sum, value) => sum + value, 0);
+    const estimate = Math.round(fame + (fame / used) * remaining);
+    warRoomSetText("warRoomForecast", `${warRoomNumberText(estimate)} fame`, "—");
+    warRoomSetText(
+      "warRoomForecastNote",
+      `Schatting op basis van ${warRoomNumberText(fame)} fame, ${warRoomNumberText(used)} gebruikte decks en ${warRoomNumberText(remaining)} resterende decks.`,
+      "Schatting onbekend."
+    );
+  }
+
+  function warRoomIsOpponent(row, data) {
+    if (row?.is_opponent === true) return true;
+    if (row?.is_opponent === false) return false;
+    const selectedTag = normalizeClanTag(data?.clan_tag || currentClanTag);
+    const rowTag = normalizeClanTag(row?.clan_tag);
+    return Boolean(rowTag && selectedTag && rowTag !== selectedTag);
+  }
+
+  function warRoomBuildBoardCard(row, includeBoat) {
+    const card = document.createElement("div");
+    card.className = "warRoom__boardCard";
+    const top = document.createElement("div");
+    top.className = "warRoom__boardTop";
+    const name = document.createElement("strong");
+    name.className = "warRoom__boardName";
+    name.textContent = warRoomText(row?.name, "Onbekende clan");
+    const rank = document.createElement("span");
+    rank.className = "warRoom__boardRank";
+    const rankValue = warRoomNumber(row?.rank);
+    rank.textContent = rankValue == null ? "Rang: —" : `Rang: ${warRoomNumberText(rankValue)}`;
+    top.appendChild(name);
+    top.appendChild(rank);
+    card.appendChild(top);
+
+    const metrics = [
+      ["Fame", row?.fame],
+      ["Repair", row?.repair_points],
+      ["Decks vandaag", row?.decks_used_today],
+      ["Leden", row?.member_count],
+    ];
+    if (includeBoat) {
+      metrics.push(["Bootaanvallen", row?.boat_attacks_today]);
+      metrics.push(["Bootverdediging", row?.boat_defenses_today]);
+    }
+    const metricGrid = document.createElement("div");
+    metricGrid.className = "warRoom__boardMetrics";
+    metrics.forEach(([label, value]) => {
+      const metric = document.createElement("div");
+      metric.className = "warRoom__boardMetric";
+      const metricLabel = document.createElement("span");
+      metricLabel.className = "warRoom__metricLabel";
+      metricLabel.textContent = label;
+      const metricValue = document.createElement("strong");
+      metricValue.className = "warRoom__boardMetricValue";
+      metricValue.textContent = warRoomNumberText(value);
+      metric.appendChild(metricLabel);
+      metric.appendChild(metricValue);
+      metricGrid.appendChild(metric);
+    });
+    card.appendChild(metricGrid);
+    return card;
+  }
+
+  function warRoomRenderOpponentBoard(data) {
+    const rows = Array.isArray(data?.clan_rows) ? data.clan_rows : [];
+    const opponents = rows.filter((row) => warRoomIsOpponent(row, data));
+    warRoomClear("warRoomOpponentBoard");
+
+    if (!rows.length) {
+      warRoomSetText("warRoomOpponentCount", "Aantal: —", "Aantal: —");
+      warRoomShowMessage("warRoomOpponentBoard", "Tegenstanderdata: onbekend.");
+      return;
+    }
+    warRoomSetText("warRoomOpponentCount", `Aantal: ${warRoomNumberText(opponents.length)}`, "Aantal: —");
+    if (!opponents.length) {
+      warRoomShowMessage("warRoomOpponentBoard", "Geen opponent-data aangeleverd.");
+      return;
+    }
+    const board = el("warRoomOpponentBoard");
+    opponents.forEach((row) => board.appendChild(warRoomBuildBoardCard(row, false)));
+  }
+
+  function warRoomRenderBoatInfo(data) {
+    const rows = Array.isArray(data?.clan_rows) ? data.clan_rows : [];
+    const hasBoatData = rows.some((row) => row && (
+      (row.boat_attacks_today != null && row.boat_attacks_today !== "")
+      || (row.boat_defenses_today != null && row.boat_defenses_today !== "")
+    ));
+    const card = el("warRoomBoatCard");
+    if (!card) return;
+    card.hidden = !hasBoatData;
+    warRoomClear("warRoomBoatInfo");
+    if (!hasBoatData) return;
+    const board = el("warRoomBoatInfo");
+    rows.forEach((row) => board.appendChild(warRoomBuildBoardCard(row, true)));
+  }
+
+  function warRoomRenderUnavailablePanels() {
+    warRoomSetText("warRoomPhase", "onbekend", "onbekend");
+    warRoomSetText("warRoomPhaseMeta", "Periode en status: onbekend", "Periode en status: onbekend");
+    warRoomSetText("warRoomActionSummary", "Actie: onbekend", "Actie: onbekend");
+    warRoomShowMessage("warRoomActionList", "Geen actuele spelerdata beschikbaar.");
+    warRoomSetText("warRoomDecksRemaining", "—", "—");
+    warRoomSetText("warRoomDecksNote", "Resterende decks: onbekend.", "Resterende decks: onbekend.");
+    warRoomShowMessage("warRoomDuelSummary", "Duel-first-overzicht: onbekend.");
+    warRoomSetText("warRoomDuelNote", "Alleen openbare totalen; individuele Duel-first-statussen worden niet getoond.", "Alleen openbare totalen.");
+    warRoomClear("warRoomAlertList");
+    warRoomSetText("warRoomForecast", "—", "—");
+    warRoomSetText("warRoomForecastNote", "Schatting onbekend.", "Schatting onbekend.");
+    warRoomSetText("warRoomOpponentCount", "Aantal: —", "Aantal: —");
+    warRoomShowMessage("warRoomOpponentBoard", "Tegenstanderdata: onbekend.");
+    warRoomSetHidden("warRoomBoatCard", true);
+    warRoomClear("warRoomBoatInfo");
+  }
+
+  function warRoomRenderEmpty(data) {
+    warRoomSetText(
+      "warRoomEmpty",
+      "Geen actieve race beschikbaar. Actie, Duel-first en prognose zijn onbekend.",
+      "Geen actieve race beschikbaar."
+    );
+    warRoomRenderPhase(data);
+    warRoomSetText("warRoomActionSummary", "Actie: onbekend", "Actie: onbekend");
+    warRoomShowMessage("warRoomActionList", "Geen actieve race; speleractie is onbekend.");
+    warRoomSetText("warRoomDecksRemaining", "—", "—");
+    warRoomSetText("warRoomDecksNote", "Geen actieve race; resterende decks zijn onbekend.", "Resterende decks: onbekend.");
+    warRoomShowMessage("warRoomDuelSummary", "Geen actieve race; Duel-first-overzicht is onbekend.");
+    warRoomSetText("warRoomDuelNote", "Alleen openbare totalen; individuele Duel-first-statussen worden niet getoond.", "Alleen openbare totalen.");
+    warRoomClear("warRoomAlertList");
+    warRoomSetText("warRoomForecast", "—", "—");
+    warRoomSetText("warRoomForecastNote", "Geen actieve race; schatting onbekend.", "Schatting onbekend.");
+    warRoomSetText("warRoomOpponentCount", "Aantal: —", "Aantal: —");
+    warRoomShowMessage("warRoomOpponentBoard", "Geen actieve race; opponent-data is onbekend.");
+    warRoomSetHidden("warRoomBoatCard", true);
+    warRoomClear("warRoomBoatInfo");
+  }
+
+  function warRoomRenderData(data) {
+    const status = warRoomStatusFromData(data);
+    if (!status || status === "error") {
+      warRoomRenderError();
+      return;
+    }
+    warRoomSetState(status);
+    warRoomRenderMetadata(data);
+    if (status === "empty") {
+      warRoomRenderEmpty(data);
+      return;
+    }
+    warRoomRenderPhase(data);
+    warRoomRenderActionPanel(data);
+    warRoomRenderDecks(data);
+    warRoomRenderDuel(data);
+    warRoomRenderForecast(data);
+    warRoomRenderOpponentBoard(data);
+    warRoomRenderBoatInfo(data);
+  }
+
+  function warRoomRenderError(httpStatus) {
+    warRoomCurrentData = null;
+    warRoomSetState("error");
+    warRoomRenderMetadata({});
+    warRoomRenderUnavailablePanels();
+    const message = httpStatus
+      ? `War Room kon niet worden ververst (HTTP ${httpStatus}).`
+      : "War Room kon niet worden ververst.";
+    warRoomSetText("warRoomError", message, "War Room kon niet worden ververst.");
+  }
+
+  async function warRoomFetchData() {
+    const requestId = ++warRoomRequestSequence;
+    const requestedClan = currentClanTag;
+    warRoomSetState("loading");
+
+    try {
+      const res = await fetch(`/api/war_status?clan=${encodeURIComponent(requestedClan)}`, { cache: "no-store" });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
+      }
+      if (requestId !== warRoomRequestSequence || requestedClan !== currentClanTag) return;
+
+      const status = warRoomStatusFromData(data);
+      if (!res.ok || !data || data.ok === false || status === "error") {
+        warRoomRenderError(res.status || null);
+        return;
+      }
+      if (!["live", "stale", "empty"].includes(status)) {
+        warRoomRenderError();
+        return;
+      }
+      warRoomCurrentData = data;
+      warRoomRenderData(data);
+    } catch (_) {
+      if (requestId === warRoomRequestSequence && requestedClan === currentClanTag) {
+        warRoomRenderError();
+      }
+    }
+  }
 
   function parseOverviewValue(value, columnName) {
     const col = (columnName || "").toLowerCase();
@@ -1323,6 +2136,7 @@
   }
 
   async function fetchData() {
+    warRoomFetchData().catch(() => {});
     el("errorBox").style.display = "none";
     el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
 
@@ -1426,6 +2240,19 @@
 
   // Buttons
   el("refresh").addEventListener("click", () => fetchData());
+
+  const warRoomRefreshButton = el("warRoomRefresh");
+  if (warRoomRefreshButton) {
+    warRoomRefreshButton.addEventListener("click", () => warRoomFetchData().catch(() => {}));
+  }
+
+  const warRoomActionOnlyInput = el("warRoomActionOnly");
+  if (warRoomActionOnlyInput) {
+    warRoomActionOnlyInput.addEventListener("change", () => {
+      warRoomActionOnly = warRoomActionOnlyInput.checked;
+      warRoomRenderActionPanel(warRoomCurrentData || {});
+    });
+  }
 
   document.querySelectorAll("button[data-copy]").forEach(btn => {
     btn.addEventListener("click", () => copyText(btn.dataset.copy));
