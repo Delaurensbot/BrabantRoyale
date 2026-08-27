@@ -731,6 +731,16 @@
       direct.worst_rank,
       direct.worst_finish,
     ].every((v) => Number.isFinite(Number(v)));
+    const dataStatus = String(data?.data_status || data?.data_quality?.status || "")
+      .toLowerCase();
+    const noOfficialProjection = direct.model === "official_api_no_finish_projection";
+    if (noOfficialProjection || (dataStatus && dataStatus !== "fresh" && !directHasAll)) {
+      container.className = "empty";
+      container.textContent = dataStatus === "empty"
+        ? "(geen actieve officiële race)"
+        : `(finish outlook niet beschikbaar: ${dataStatus || "onbekende datastatus"})`;
+      return;
+    }
 
     let battlesLeft;
     let duelsLeft;
