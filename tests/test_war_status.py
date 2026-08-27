@@ -196,8 +196,8 @@ def test_live_contract_uses_t02_and_t07_and_never_writes():
     assert player["player_tag"] == "PLAYER1"
     assert player["decks_used_today"] == 2
     assert player["decks_remaining_today"] == 2
-    assert player["duel_first_status"] == STATUS_DUEL_FIRST_LIKELY
-    assert player["status_confidence"] == "medium"
+    assert player["duel_first_status"] == "redacted"
+    assert player["status_confidence"] == "redacted"
     assert history.calls and history.calls[0][0] == CLAN_TAG
     assert not any("write" in name.lower() for name in dir(history))
     assert payload["data_quality"]["read_only"] is True
@@ -321,6 +321,8 @@ def test_individual_alerts_require_explicit_server_verified_leader_view():
     assert leader["alerts_scope"] == "leader"
     assert leader["leader_view"] is True
     assert leader["alerts"][0]["player_tag"] == "PLAYER1"
+    assert leader["player_rows"][0]["duel_first_status"] == STATUS_DUEL_FIRST_LIKELY
+    assert leader["player_rows"][0]["status_confidence"] == "medium"
     assert "leader-secret" not in json.dumps(leader)
 
 

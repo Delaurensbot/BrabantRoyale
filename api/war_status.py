@@ -875,6 +875,7 @@ def _build_player_rows(
     previous_results: List[Mapping[str, Any]],
     errors: List[Dict[str, str]],
     raw_status: str,
+    leader_verified: bool,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     participants = list(_value(normalized_race, "participants", default=()) or ())
     if not participants and raw_status in {DATA_STATUS_EMPTY, DATA_STATUS_ERROR}:
@@ -960,8 +961,21 @@ def _build_player_rows(
             "role": role,
             "decks_used_today": current,
             "decks_remaining_today": _remaining_decks(current),
-            "duel_first_status": classification["status"],
-            "status_confidence": classification["confidence"],
+            # A public player row remains useful for action tracking, but an
+            # alertable Duel-first classification is an individual violation
+            # signal and therefore stays leader-only.  Keep the field in the
+            # stable response contract with an explicit redaction marker;
+            # aggregate counts below remain public.
+            "duel_first_status": (
+                classification["status"]
+                if leader_verified or classification["status"] not in _ALERT_STATUSES
+                else "redacted"
+            ),
+            "status_confidence": (
+                classification["confidence"]
+                if leader_verified or classification["status"] not in _ALERT_STATUSES
+                else "redacted"
+            ),
             "observed_at": participant_observed_at,
         }
         rows.append(row)
@@ -1324,6 +1338,7 @@ def build_war_status_payload(
         previous_results,
         player_errors,
         raw_status,
+        bool(leader_verified),
     )
     errors.extend(player_errors)
 
