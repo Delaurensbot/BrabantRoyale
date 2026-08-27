@@ -32,6 +32,15 @@ def test_policy_defaults_are_explicit_and_complete():
     assert all(result[field] is not None for field in policy.POLICY_FIELDS)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [None, 123, "not-a-clan-tag", "#BAD#TAG", "##TAG", "TAG/OTHER"],
+)
+def test_invalid_clan_tags_use_the_storage_boundary_validation_error(value):
+    with pytest.raises(ValueError):
+        policy.validate_clan_tag(value)
+
+
 def test_policy_values_are_normalized_within_allowed_ranges():
     result = policy.validate_policy_payload(
         {

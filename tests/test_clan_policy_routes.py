@@ -72,6 +72,19 @@ def test_policy_write_requires_admin_key_before_reading_body_or_storage():
     mocked_write.assert_not_called()
 
 
+def test_policy_route_maps_invalid_clan_tag_to_bad_request():
+    request = fake_request(
+        path="/api/clan_policy?clan=not-a-clan-tag",
+        headers={ADMIN_KEY_HEADER: ADMIN_KEY},
+        body={"duel_first_enabled": True},
+    )
+    with patch.object(clan_policy_route, "write_clan_policy") as mocked_write:
+        clan_policy_route.handler.do_POST(request)
+
+    assert request.sent == (400, {"ok": False, "error": "Invalid policy request."})
+    mocked_write.assert_not_called()
+
+
 def test_policy_write_forwards_existing_admin_key_only_to_storage():
     request = fake_request(
         path="/api/clan_policy",

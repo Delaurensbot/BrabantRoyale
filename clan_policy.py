@@ -20,7 +20,7 @@ import os
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import requests
 
@@ -29,14 +29,12 @@ try:
         DEFAULT_SUPABASE_URL,
         _supabase_headers,
         get_supabase_read_config,
-        normalize_tag,
     )
 except ImportError:  # pragma: no cover - convenient for loose Vercel files.
     from .supabase_history import (  # type: ignore
         DEFAULT_SUPABASE_URL,
         _supabase_headers,
         get_supabase_read_config,
-        normalize_tag,
     )
 
 
@@ -165,7 +163,17 @@ def _contains_configured_secret(value: str) -> bool:
 def validate_clan_tag(value: object) -> str:
     """Return a canonical Clash tag without silently selecting a fallback clan."""
 
-    candidate = normalize_tag(value)
+    if not isinstance(value, str):
+        raise ValueError("Invalid clan tag.")
+    candidate = value.strip()
+    for _ in range(2):
+        decoded = unquote(candidate)
+        if decoded == candidate:
+            break
+        candidate = decoded
+    if candidate.startswith("#"):
+        candidate = candidate[1:]
+    candidate = candidate.upper()
     if not _TAG_PATTERN.fullmatch(candidate) or _contains_configured_secret(candidate):
         raise ValueError("Invalid clan tag.")
     return candidate
