@@ -13,6 +13,7 @@ import base64
 import json
 import math
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -27,6 +28,7 @@ EXCLUSIONS_TABLE = "clan_war_week_exclusions"
 LIVE_SNAPSHOT_TABLE = "river_race_live_snapshots"
 DAY_EVENTS_TABLE = "war_player_day_events"
 NOTIFICATION_LOG_TABLE = "notification_log"
+ROSTER_SNAPSHOT_TABLE = "clan_roster_snapshots"
 DEFAULT_PAGE_SIZE = 1000
 DEFAULT_WRITE_BATCH_SIZE = 500
 DEFAULT_RAW_STORAGE_TIMEOUT = 25
@@ -53,6 +55,11 @@ DAY_EVENT_CONFLICT_COLUMNS = (
     "event_type",
 )
 NOTIFICATION_LOG_CONFLICT_COLUMNS = ("event_key", "channel")
+ROSTER_SNAPSHOT_CONFLICT_COLUMNS = (
+    "clan_tag",
+    "player_tag",
+    "captured_at",
+)
 
 LIVE_SNAPSHOT_SELECT_COLUMNS = (
     "id,clan_tag,season_id,section_index,period_index,period_type,"
@@ -68,12 +75,18 @@ DAY_EVENT_SELECT_COLUMNS = (
 NOTIFICATION_LOG_SELECT_COLUMNS = (
     "id,event_key,channel,status,response_code,sent_at,details"
 )
+ROSTER_SNAPSHOT_SELECT_COLUMNS = (
+    "id,clan_tag,player_tag,player_name,role,trophies,seen_at,captured_at"
+)
 
 STORAGE_STATUS_OK = "ok"
 STORAGE_STATUS_EMPTY = "empty"
 STORAGE_STATUS_FRESH = "fresh"
 STORAGE_STATUS_STALE = "stale"
+STORAGE_STATUS_PARTIAL = "partial"
 STORAGE_STATUS_ERROR = "error"
+
+DEFAULT_ROSTER_MAX_ROWS = 10000
 
 _MISSING = object()
 _RETRYABLE_STORAGE_STATUSES = frozenset({408, 425, 429})
@@ -823,6 +836,104 @@ def _map_live_snapshot(payload: Mapping[str, object]) -> Dict[str, object]:
     return row
 
 
+def _roster_tag_value(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+) -> str:
+    """Normalize a roster identity and reject values the SQL check rejects."""
+
+    value = _required_payload_value(payload, name, *aliases)
+    candidate = normalize_tag(value)
+    candidate = re.sub(r"[^A-Z0-9]", "", candidate)
+    if not re.fullmatch(r"[A-Z0-9]{1,32}", candidate or ""):
+        raise ValueError(f"{name} must be a valid tag.")
+    return candidate
+
+
+def _roster_optional_text(
+    payload: Mapping[str, object],
+    name: str,
+    *aliases: str,
+    default: Optional[str] = None,
+    maximum: int,
+) -> Optional[str]:
+    value, present = _payload_value(payload, name, *aliases)
+    if not present or value is None:
+        return default
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be text.")
+    result = value.strip()
+    if len(result) > maximum:
+        raise ValueError(f"{name} is too long.")
+    if any(ord(character) < 32 or ord(character) == 127 for character in result):
+        raise ValueError(f"{name} contains invalid control characters.")
+    return result or default
+
+
+def _map_roster_snapshot(payload: Mapping[str, object]) -> Dict[str, object]:
+    """Map one current-clan member observation to the roster table schema."""
+
+    if not isinstance(payload, Mapping):
+        raise TypeError("Roster snapshot must be an object.")
+
+    captured_value, captured_present = _payload_value(
+        payload,
+        "captured_at",
+        "capturedAt",
+    )
+    seen_value, seen_present = _payload_value(payload, "seen_at", "seenAt")
+    if captured_present and captured_value is not None:
+        captured_at = _timestamp_value(captured_value, "captured_at")
+    elif seen_present and seen_value is not None:
+        # A caller that supplies only the observation time still gets a
+        # deterministic retry key; the route normally supplies both values.
+        captured_at = _timestamp_value(seen_value, "seen_at")
+    else:
+        captured_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if seen_present and seen_value is not None:
+        seen_at = _timestamp_value(seen_value, "seen_at")
+    else:
+        seen_at = captured_at
+
+    row: Dict[str, object] = {
+        "clan_tag": _roster_tag_value(payload, "clan_tag", "clanTag"),
+        "player_tag": _roster_tag_value(
+            payload,
+            "player_tag",
+            "playerTag",
+            "tag",
+        ),
+        "player_name": _roster_optional_text(
+            payload,
+            "player_name",
+            "playerName",
+            "name",
+            default="unknown",
+            maximum=120,
+        ),
+        "role": _roster_optional_text(
+            payload,
+            "role",
+            "player_role",
+            "playerRole",
+            default="unknown",
+            maximum=32,
+        )
+        or "unknown",
+        "seen_at": seen_at,
+        "captured_at": captured_at,
+    }
+    _set_optional_int(
+        payload,
+        row,
+        "trophies",
+        minimum=0,
+    )
+    return row
+
+
 def _map_day_event(payload: Mapping[str, object]) -> Dict[str, object]:
     if not isinstance(payload, Mapping):
         raise TypeError("Day event must be an object.")
@@ -1327,6 +1438,84 @@ def write_live_snapshot(
     )
 
 
+def write_roster_snapshots(
+    snapshots: Iterable[Mapping[str, object]],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert normalized roster observations with an idempotent natural key.
+
+    ``captured_at`` is part of the identity on purpose: a retry of the same
+    roster capture updates one row, while a later capture creates the next
+    observation.  Rows are deduplicated before batching so repeated player
+    tags in one upstream response cannot create duplicate observations.
+    """
+
+    deduped: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+    for snapshot in snapshots:
+        row = _map_roster_snapshot(snapshot)
+        if "trophies" not in row:
+            row["trophies"] = None
+        key = (
+            str(row["clan_tag"]),
+            str(row["player_tag"]),
+            str(row["captured_at"]),
+        )
+        deduped[key] = row
+
+    return _write_raw_rows(
+        list(deduped.values()),
+        table=ROSTER_SNAPSHOT_TABLE,
+        conflict_columns=ROSTER_SNAPSHOT_CONFLICT_COLUMNS,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def write_roster_snapshot(
+    snapshot: Mapping[str, object],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    batch_size: int = DEFAULT_WRITE_BATCH_SIZE,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Upsert one roster observation and return a safe storage result."""
+
+    return write_roster_snapshots(
+        [snapshot],
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        batch_size=batch_size,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
 def _read_raw_row(
     *,
     table: str,
@@ -1435,6 +1624,276 @@ def _read_raw_row(
             row_key=result_key,
             attempts=attempts,
         )
+
+
+def _normalize_roster_read_row(
+    raw: Mapping[str, object],
+    clan_tag: str,
+    player_tag: Optional[str],
+) -> Optional[Dict[str, object]]:
+    """Validate and project a row returned by the roster table.
+
+    The second clan/player filter is intentional defense in depth: a malformed
+    or misconfigured PostgREST response must not cross the requested clan
+    boundary into a public lifecycle response.
+    """
+
+    try:
+        row_clan = normalize_tag(raw.get("clan_tag", raw.get("clanTag")))
+        row_player = normalize_tag(raw.get("player_tag", raw.get("playerTag")))
+        row_clan = re.sub(r"[^A-Z0-9]", "", row_clan)
+        row_player = re.sub(r"[^A-Z0-9]", "", row_player)
+    except Exception:
+        return None
+    if row_clan != clan_tag or not row_player:
+        return None
+    if player_tag and row_player != player_tag:
+        return None
+
+    captured_value = raw.get("captured_at", raw.get("capturedAt"))
+    seen_value = raw.get("seen_at", raw.get("seenAt"))
+    try:
+        captured_at = _timestamp_value(captured_value, "captured_at")
+        seen_at = _timestamp_value(
+            seen_value if seen_value is not None else captured_at,
+            "seen_at",
+        )
+    except ValueError:
+        return None
+
+    player_name = raw.get("player_name", raw.get("playerName"))
+    if player_name is not None and not isinstance(player_name, str):
+        player_name = str(player_name)
+    if isinstance(player_name, str):
+        player_name = player_name.strip() or "unknown"
+    if player_name is None:
+        player_name = "unknown"
+
+    role = raw.get("role", raw.get("player_role", raw.get("playerRole")))
+    if role is None:
+        role = "unknown"
+    elif not isinstance(role, str):
+        role = str(role)
+    role = role.strip() or "unknown"
+
+    trophies = raw.get("trophies")
+    if trophies is not None:
+        try:
+            trophies = _int_value(trophies, "trophies", minimum=0)
+        except ValueError:
+            trophies = None
+
+    return {
+        "clan_tag": row_clan,
+        "player_tag": row_player,
+        "player_name": player_name,
+        "role": role,
+        "trophies": trophies,
+        "seen_at": seen_at,
+        "captured_at": captured_at,
+    }
+
+
+def read_roster_snapshots(
+    clan_tag: str,
+    *,
+    player_tag: Optional[str] = None,
+    max_rows: int = DEFAULT_ROSTER_MAX_ROWS,
+    stale_after_seconds: Optional[float] = None,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Read a bounded, server-side roster history with explicit data status."""
+
+    normalized_clan = re.sub(r"[^A-Z0-9]", "", normalize_tag(clan_tag))
+    if not re.fullmatch(r"[A-Z0-9]{1,32}", normalized_clan or ""):
+        raise ValueError("clan_tag is required and must be a valid tag.")
+    normalized_player = None
+    if player_tag is not None:
+        normalized_player = re.sub(r"[^A-Z0-9]", "", normalize_tag(player_tag))
+        if not re.fullmatch(r"[A-Z0-9]{1,32}", normalized_player or ""):
+            raise ValueError("player_tag must be a valid tag.")
+    if (
+        isinstance(max_rows, bool)
+        or not isinstance(max_rows, int)
+        or not 1 <= max_rows <= DEFAULT_ROSTER_MAX_ROWS
+    ):
+        raise ValueError(
+            f"max_rows must be between 1 and {DEFAULT_ROSTER_MAX_ROWS}."
+        )
+
+    _validate_stale_after(stale_after_seconds)
+    _validate_request_options(
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+    )
+
+    params = {
+        "select": ROSTER_SNAPSHOT_SELECT_COLUMNS,
+        "clan_tag": f"eq.{normalized_clan}",
+        "order": "captured_at.asc,player_tag.asc",
+        "limit": str(max_rows),
+    }
+    if normalized_player:
+        params["player_tag"] = f"eq.{normalized_player}"
+
+    attempts = 0
+    try:
+        configured_url, configured_key = _resolve_raw_storage_config(
+            supabase_url=supabase_url,
+            api_key=api_key,
+            supabase_api_key=supabase_api_key,
+        )
+        endpoint = f"{configured_url}/rest/v1/{ROSTER_SNAPSHOT_TABLE}"
+        response, attempts = _storage_request(
+            "GET",
+            endpoint,
+            table=ROSTER_SNAPSHOT_TABLE,
+            headers=_supabase_headers(configured_key),
+            params=params,
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+            max_backoff=max_backoff,
+            sleep=sleep,
+        )
+        content = getattr(response, "content", b"")
+        raw_rows = response.json() if content else []
+        if not isinstance(raw_rows, list):
+            raise SupabaseStorageError("invalid_response", attempts=attempts)
+        truncated = False
+        content_range = getattr(response, "headers", {}).get("Content-Range")
+        if isinstance(content_range, str):
+            match = re.search(r"/(\d+)\s*$", content_range.strip())
+            if match:
+                try:
+                    truncated = int(match.group(1)) > max_rows
+                except (TypeError, ValueError, OverflowError):
+                    truncated = False
+
+        rows: List[Dict[str, object]] = []
+        invalid_rows = 0
+        for raw in raw_rows:
+            if not isinstance(raw, Mapping):
+                invalid_rows += 1
+                continue
+            # Rows outside the requested scope are ignored rather than
+            # treated as partial roster data.  PostgREST already filters this
+            # server-side, but the second check prevents cross-clan leakage
+            # if an upstream response is broader than requested.
+            raw_clan = re.sub(
+                r"[^A-Z0-9]",
+                "",
+                normalize_tag(raw.get("clan_tag", raw.get("clanTag"))),
+            )
+            raw_player = re.sub(
+                r"[^A-Z0-9]",
+                "",
+                normalize_tag(raw.get("player_tag", raw.get("playerTag"))),
+            )
+            if raw_clan != normalized_clan:
+                continue
+            if normalized_player and raw_player != normalized_player:
+                continue
+            row = _normalize_roster_read_row(
+                raw,
+                normalized_clan,
+                normalized_player,
+            )
+            if row is None:
+                invalid_rows += 1
+                continue
+            rows.append(row)
+
+        if not rows:
+            status = STORAGE_STATUS_PARTIAL if invalid_rows else STORAGE_STATUS_EMPTY
+            result: Dict[str, object] = {
+                "ok": True,
+                "status": status,
+                "data_status": status,
+                "table": ROSTER_SNAPSHOT_TABLE,
+                "snapshots": [],
+                "rows": [],
+                "count": 0,
+                "invalid_rows": invalid_rows,
+                "truncated": truncated,
+                "stale": False,
+                "is_stale": False,
+                "attempts": attempts,
+            }
+            return result
+
+        stale = False
+        if stale_after_seconds is not None:
+            try:
+                latest = max(
+                    _timestamp_value(row["captured_at"], "captured_at")
+                    for row in rows
+                )
+                latest_dt = clash_date_to_datetime(latest)
+                age_seconds = max(
+                    0.0,
+                    (datetime.now(timezone.utc) - latest_dt).total_seconds(),
+                )
+                stale = age_seconds > float(stale_after_seconds)
+            except (TypeError, ValueError, OverflowError):
+                raise SupabaseStorageError(
+                    "invalid_response",
+                    attempts=attempts,
+                ) from None
+
+        status = (
+            STORAGE_STATUS_PARTIAL
+            if invalid_rows or truncated
+            else STORAGE_STATUS_STALE
+            if stale
+            else STORAGE_STATUS_FRESH
+        )
+        result = {
+            "ok": True,
+            "status": status,
+            "data_status": status,
+            "table": ROSTER_SNAPSHOT_TABLE,
+            "snapshots": rows,
+            "rows": rows,
+            "count": len(rows),
+            "invalid_rows": invalid_rows,
+            "truncated": truncated,
+            "stale": stale,
+            "is_stale": stale,
+            "attempts": attempts,
+        }
+        if stale:
+            result["stale_reason"] = "age"
+        return result
+    except SupabaseStorageError as error:
+        result = _storage_error_result(
+            ROSTER_SNAPSHOT_TABLE,
+            error,
+            row_key="snapshots",
+            attempts=attempts + error.attempts,
+        )
+        result["rows"] = None
+        result["count"] = 0
+        return result
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        result = _storage_error_result(
+            ROSTER_SNAPSHOT_TABLE,
+            SupabaseStorageError("invalid_response"),
+            row_key="snapshots",
+            attempts=attempts,
+        )
+        result["rows"] = None
+        result["count"] = 0
+        return result
 
 
 def read_previous_player_snapshot(
