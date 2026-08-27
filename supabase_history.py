@@ -65,6 +65,9 @@ DAY_EVENT_SELECT_COLUMNS = (
     "id,clan_tag,race_created_at,period_index,player_tag,event_type,"
     "observed_decks_used_today,confidence,observed_at,details,created_at"
 )
+NOTIFICATION_LOG_SELECT_COLUMNS = (
+    "id,event_key,channel,status,response_code,sent_at,details"
+)
 
 STORAGE_STATUS_OK = "ok"
 STORAGE_STATUS_EMPTY = "empty"
@@ -909,6 +912,15 @@ def _map_notification_log(payload: Mapping[str, object]) -> Dict[str, object]:
     return row
 
 
+def _notification_identity_value(value: object, name: str, max_length: int) -> str:
+    return _text_value(
+        {name: value},
+        name,
+        allow_empty=False,
+        max_length=max_length,
+    )
+
+
 def _clean_server_url(value: object) -> str:
     url = str(value or "").strip().rstrip("/")
     parsed = urlsplit(url)
@@ -1610,6 +1622,136 @@ def read_day_event(
         max_backoff=max_backoff,
         sleep=sleep,
     )
+
+
+def read_notification_log(
+    event_key: object,
+    channel: object,
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Read one notification idempotency row without exposing raw secrets."""
+
+    normalized_event_key = _notification_identity_value(event_key, "event_key", 256)
+    normalized_channel = _notification_identity_value(channel, "channel", 64)
+    params = {
+        "event_key": f"eq.{normalized_event_key}",
+        "channel": f"eq.{normalized_channel}",
+        "order": "sent_at.desc",
+        "limit": "1",
+    }
+    return _read_raw_row(
+        table=NOTIFICATION_LOG_TABLE,
+        result_key="notification_log",
+        select_columns=NOTIFICATION_LOG_SELECT_COLUMNS,
+        params=params,
+        timestamp_field="sent_at",
+        stale_after_seconds=None,
+        supabase_url=supabase_url,
+        api_key=api_key,
+        supabase_api_key=supabase_api_key,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+        sleep=sleep,
+    )
+
+
+def claim_notification_log(
+    entry: Mapping[str, object],
+    *,
+    supabase_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    supabase_api_key: Optional[str] = None,
+    timeout: float = DEFAULT_RAW_STORAGE_TIMEOUT,
+    max_retries: int = DEFAULT_RAW_STORAGE_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_RAW_STORAGE_BACKOFF_SECONDS,
+    max_backoff: float = DEFAULT_RAW_STORAGE_MAX_BACKOFF_SECONDS,
+    sleep: Optional[Callable[[float], None]] = None,
+) -> Dict[str, object]:
+    """Atomically claim an event/channel pair before an external send.
+
+    ``resolution=ignore-duplicates`` makes the unique T05 key the durable
+    single-send gate.  The response body is used only to distinguish a newly
+    inserted row from an already claimed row; it is never returned to callers.
+    """
+
+    row = _map_notification_log({**dict(entry), "status": "pending"})
+    _validate_batch_size(1)
+    _validate_request_options(
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_factor=backoff_factor,
+        max_backoff=max_backoff,
+    )
+    attempts = 0
+    try:
+        json.dumps([row], ensure_ascii=False, separators=(",", ":"))
+        configured_url, configured_key = _resolve_raw_storage_config(
+            supabase_url=supabase_url,
+            api_key=api_key,
+            supabase_api_key=supabase_api_key,
+        )
+        endpoint = _raw_endpoint(
+            configured_url,
+            NOTIFICATION_LOG_TABLE,
+            NOTIFICATION_LOG_CONFLICT_COLUMNS,
+        )
+        headers = _supabase_headers(configured_key, write=True)
+        headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
+        response, attempts = _storage_request(
+            "POST",
+            endpoint,
+            table=NOTIFICATION_LOG_TABLE,
+            headers=headers,
+            payload=[row],
+            timeout=timeout,
+            max_retries=max_retries,
+            backoff_factor=backoff_factor,
+            max_backoff=max_backoff,
+            sleep=sleep,
+        )
+        content = getattr(response, "content", b"")
+        raw_rows = response.json() if content else []
+        if not isinstance(raw_rows, list):
+            raise SupabaseStorageError("invalid_response", attempts=attempts)
+        if raw_rows and not isinstance(raw_rows[0], Mapping):
+            raise SupabaseStorageError("invalid_response", attempts=attempts)
+        claimed = bool(raw_rows)
+        return {
+            "ok": True,
+            "status": "claimed" if claimed else "exists",
+            "data_status": STORAGE_STATUS_OK if claimed else STORAGE_STATUS_FRESH,
+            "table": NOTIFICATION_LOG_TABLE,
+            "claimed": claimed,
+            "rows_written": 1 if claimed else 0,
+            "rows_upserted": 1 if claimed else 0,
+            "attempts": attempts,
+        }
+    except SupabaseStorageError as error:
+        result = _storage_error_result(
+            NOTIFICATION_LOG_TABLE,
+            error,
+            attempts=attempts + error.attempts,
+        )
+        result["claimed"] = False
+        return result
+    except (TypeError, ValueError, OverflowError):
+        result = _storage_error_result(
+            NOTIFICATION_LOG_TABLE,
+            SupabaseStorageError("invalid_payload"),
+            attempts=attempts,
+        )
+        result["claimed"] = False
+        return result
 
 
 def write_notification_logs(

@@ -6,11 +6,10 @@ Supabase.  The request header is ``X-War-Monitor-Secret``; no compatibility
 alias is accepted for the existing ``SUPABASE_INGEST_TOKEN`` because that
 token protects a different route.
 
-There is currently no notification policy in the repository.  Consequently,
-notification queueing is disabled by default.  An operator may explicitly
-opt in to queue-only records with ``WAR_MONITOR_NOTIFICATION_POLICY=pending``
-or by supplying an injected policy to :func:`run_war_monitor`.  This module
-never sends a Discord webhook.
+Discord notification is optional and server-only.  It is enabled only when
+``DISCORD_WAR_WEBHOOK_URL`` contains a valid HTTPS URL.  Without that variable,
+monitoring continues normally and the existing queue-only opt-in remains
+available through ``WAR_MONITOR_NOTIFICATION_POLICY=pending``.
 
 All upstream reads use the T01 client and all payload interpretation uses the
 T02 normalizers.  All raw monitoring I/O goes through the T06 Supabase
@@ -64,13 +63,34 @@ except ImportError:  # pragma: no cover - useful when run as a loose Vercel file
     )
 
 try:
+    from api.discord_webhook import (
+        DISCORD_CHANNEL,
+        build_discord_payload,
+        configured_discord_webhook_url,
+        is_alertable_event,
+        send_discord_webhook,
+        validate_discord_webhook_url,
+    )
+except ImportError:  # pragma: no cover - useful when run as a loose Vercel file.
+    from discord_webhook import (
+        DISCORD_CHANNEL,
+        build_discord_payload,
+        configured_discord_webhook_url,
+        is_alertable_event,
+        send_discord_webhook,
+        validate_discord_webhook_url,
+    )
+
+try:
     from Royale_api import CLAN_CONFIGS, get_clan_config
 except ImportError:  # pragma: no cover - convenient for direct module loading.
     from ..Royale_api import CLAN_CONFIGS, get_clan_config
 
 try:
     from supabase_history import (
+        claim_notification_log,
         read_day_event,
+        read_notification_log,
         read_previous_player_snapshot,
         write_day_events,
         write_live_snapshots,
@@ -78,7 +98,9 @@ try:
     )
 except ImportError:  # pragma: no cover - convenient for package-style loading.
     from ..supabase_history import (
+        claim_notification_log,
         read_day_event,
+        read_notification_log,
         read_previous_player_snapshot,
         write_day_events,
         write_live_snapshots,
@@ -89,7 +111,7 @@ except ImportError:  # pragma: no cover - convenient for package-style loading.
 MONITOR_SECRET_ENV = "WAR_MONITOR_SECRET"
 MONITOR_SECRET_HEADER = "X-War-Monitor-Secret"
 NOTIFICATION_POLICY_ENV = "WAR_MONITOR_NOTIFICATION_POLICY"
-NOTIFICATION_CHANNEL = "discord"
+NOTIFICATION_CHANNEL = DISCORD_CHANNEL
 HTTP_STATUS_PARTIAL = 207
 
 _ACTIVE_RACE_STATES = frozenset(
@@ -167,6 +189,8 @@ class MonitorFunctions:
     read_day_event: Optional[Callable[..., Mapping[str, Any]]]
     write_day_events: Callable[..., Mapping[str, Any]]
     write_notification_logs: Optional[Callable[..., Mapping[str, Any]]]
+    read_notification_log: Optional[Callable[..., Mapping[str, Any]]] = None
+    claim_notification_log: Optional[Callable[..., Mapping[str, Any]]] = None
 
 
 def configured_monitor_secret() -> Optional[str]:
@@ -335,6 +359,17 @@ def _new_report() -> Dict[str, Any]:
         "snapshots_written": 0,
         "events_created": 0,
         "notifications_pending": 0,
+        "notifications_sent": 0,
+        "notifications_failed": 0,
+        "notifications_skipped": 0,
+        "notifications": {
+            "channel": NOTIFICATION_CHANNEL,
+            "status": "disabled",
+            "configured": False,
+            "sent": 0,
+            "failed": 0,
+            "skipped": 0,
+        },
         "freshness": {},
         "warnings": [],
         "clans": [],
@@ -403,6 +438,8 @@ def _default_monitor_functions() -> MonitorFunctions:
         read_day_event=read_day_event,
         write_day_events=write_day_events,
         write_notification_logs=write_notification_logs,
+        read_notification_log=read_notification_log,
+        claim_notification_log=claim_notification_log,
     )
 
 
@@ -432,6 +469,8 @@ def _resolve_monitor_functions(
     read_day_event_fn: Optional[Callable[..., Mapping[str, Any]]],
     write_day_events_fn: Optional[Callable[..., Mapping[str, Any]]],
     write_notification_logs_fn: Optional[Callable[..., Mapping[str, Any]]],
+    read_notification_log_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
+    claim_notification_log_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
 ) -> MonitorFunctions:
     defaults = _default_monitor_functions()
     resolved = MonitorFunctions(
@@ -464,6 +503,18 @@ def _resolve_monitor_functions(
             "write_notification_logs",
             write_notification_logs_fn,
             defaults.write_notification_logs,
+        ),
+        read_notification_log=_storage_callable(
+            storage,
+            "read_notification_log",
+            read_notification_log_fn,
+            defaults.read_notification_log,
+        ),
+        claim_notification_log=_storage_callable(
+            storage,
+            "claim_notification_log",
+            claim_notification_log_fn,
+            defaults.claim_notification_log,
         ),
     )
     if any(
@@ -660,12 +711,319 @@ def _event_args(
     }
 
 
+def _resolve_discord_webhook_url(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return configured_discord_webhook_url()
+    if not _safe_text(value):
+        return None
+    try:
+        return validate_discord_webhook_url(value)
+    except Exception:
+        return None
+
+
+def _bounded_notification_text(value: Any, fallback: str, limit: int = 160) -> str:
+    text = _safe_text(value, fallback)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    text = " ".join(text.split())
+    return (text or fallback)[:limit].rstrip() or fallback
+
+
+def _notification_candidate(
+    config: MonitorClanConfig,
+    participant: Any,
+    event: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not is_alertable_event(event):
+        return None
+    event_key = _safe_text(event.get("event_key"))
+    player_tag = _safe_text(_value(participant, "player_tag", "tag", default=""))
+    if not event_key or not player_tag:
+        return None
+    details = event.get("details")
+    event_details = details if isinstance(details, Mapping) else {}
+    status = _safe_text(event.get("event_type"), "")
+    confidence = _safe_text(event.get("confidence"), "unknown")
+    observed_at = _safe_text(event.get("observed_at"), "")
+    current_count = _safe_int(event.get("observed_decks_used_today"))
+    if not status or not observed_at or current_count is None:
+        return None
+    return {
+        "event_key": event_key,
+        "channel": NOTIFICATION_CHANNEL,
+        "status": "pending",
+        "details": {
+            "event_type": status,
+            "status": status,
+            "confidence": confidence,
+            "observed_at": observed_at[:64],
+            "race_day_key": _bounded_notification_text(
+                event_details.get("race_day_key"),
+                "onbekende race-dag",
+                256,
+            ),
+            "clan_tag": config.tag,
+            "clan_name": _bounded_notification_text(config.name, config.tag),
+            "player_tag": player_tag,
+            "player_name": _bounded_notification_text(
+                _value(participant, "name", default=""),
+                player_tag,
+            ),
+            "current_decks_used_today": current_count,
+        },
+    }
+
+
+def _notification_row_present(result: Any) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("exists") is True or result.get("event_exists") is True:
+        return True
+    for key in ("notification_log", "notification", "log"):
+        if isinstance(result.get(key), Mapping):
+            return True
+    status = _safe_text(result.get("status")).lower()
+    if status in {"sent", "failed", "pending", "exists", "claimed"}:
+        return True
+    return False
+
+
+def _notification_read_ok(result: Any) -> bool:
+    if not isinstance(result, Mapping) or result.get("ok") is False:
+        return False
+    if _notification_row_present(result):
+        return True
+    status = _safe_text(result.get("status")).lower()
+    return status in {"empty", "fresh", "ok", "exists", "claimed"}
+
+
+def _notification_result_error(result: Any, default: str = "monitor_error") -> str:
+    if isinstance(result, Mapping):
+        error = _safe_text(result.get("error"), "")
+        if error in _KNOWN_ERROR_CODES:
+            return error
+    return default if default in _KNOWN_ERROR_CODES else "monitor_error"
+
+
+def _claim_notification_candidate(
+    functions: MonitorFunctions,
+    candidate: Mapping[str, Any],
+) -> Tuple[str, Mapping[str, Any]]:
+    event_key = _safe_text(candidate.get("event_key"))
+    channel = _safe_text(candidate.get("channel"), NOTIFICATION_CHANNEL)
+    if functions.read_notification_log is not None:
+        try:
+            read_result = functions.read_notification_log(event_key, channel)
+        except Exception as error:
+            return "error", {
+                "error": _safe_error_code(error),
+            }
+        if not _notification_read_ok(read_result):
+            return "error", {
+                "error": _notification_result_error(read_result),
+            }
+        if _notification_row_present(read_result):
+            return "skipped", read_result
+
+    if functions.claim_notification_log is not None:
+        try:
+            claim_result = functions.claim_notification_log(candidate)
+        except Exception as error:
+            return "error", {
+                "error": _safe_error_code(error),
+            }
+        if not isinstance(claim_result, Mapping) or claim_result.get("ok") is False:
+            return "error", {
+                "error": _notification_result_error(claim_result),
+            }
+        if (
+            claim_result.get("claimed") is True
+            or _safe_text(claim_result.get("status")).lower() in {"claimed", "inserted"}
+            or (
+                _storage_result_ok(claim_result)
+                and _storage_count(claim_result, 0) > 0
+            )
+        ):
+            return "claimed", claim_result
+        if claim_result.get("claimed") is False or _safe_text(
+            claim_result.get("status")
+        ).lower() in {"exists", "duplicate"}:
+            return "skipped", claim_result
+        return "error", {"error": "invalid_response"}
+
+    # A custom test/storage seam from before T12 may not implement the atomic
+    # claim helper.  The read-before-write fallback remains durable for that
+    # seam, while production uses the unique-key atomic claim above.
+    if functions.read_notification_log is not None and functions.write_notification_logs is not None:
+        try:
+            write_result = functions.write_notification_logs([candidate])
+        except Exception as error:
+            return "error", {"error": _safe_error_code(error)}
+        if _storage_result_ok(write_result):
+            return "claimed", write_result
+        return "error", {"error": _notification_result_error(write_result)}
+    return "error", {"error": "configuration_error"}
+
+
+def _notification_log_update(
+    candidate: Mapping[str, Any],
+    delivery: Mapping[str, Any],
+) -> Dict[str, Any]:
+    details = candidate.get("details")
+    safe_details = dict(details) if isinstance(details, Mapping) else {}
+    delivery_ok = (
+        delivery.get("status") == "sent"
+        and delivery.get("ok") is not False
+    )
+    safe_details["provider"] = "discord"
+    safe_details["delivery_status"] = "sent" if delivery_ok else "failed"
+    attempts = _safe_int(delivery.get("attempts"))
+    if attempts is not None and attempts >= 0:
+        safe_details["attempts"] = attempts
+    if not delivery_ok:
+        safe_details["error"] = _notification_result_error(delivery)
+    entry: Dict[str, Any] = {
+        "event_key": candidate.get("event_key"),
+        "channel": candidate.get("channel", NOTIFICATION_CHANNEL),
+        "status": "sent" if delivery_ok else "failed",
+        "details": safe_details,
+    }
+    response_code = _safe_int(delivery.get("response_code"))
+    if response_code is not None and 100 <= response_code <= 599:
+        entry["response_code"] = response_code
+    sent_at = _safe_text(delivery.get("sent_at"), "")
+    if sent_at:
+        entry["sent_at"] = sent_at
+    return entry
+
+
+def _dispatch_discord_notifications(
+    functions: MonitorFunctions,
+    candidates: Sequence[Mapping[str, Any]],
+    webhook_url: str,
+    *,
+    discord_post_fn: Optional[Callable[..., Any]] = None,
+    discord_sleep_fn: Optional[Callable[[float], None]] = None,
+    discord_clock_fn: Optional[Callable[[], Any]] = None,
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "status": "empty" if not candidates else "fresh",
+        "sent": 0,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": [],
+    }
+    if not candidates:
+        return result
+    if functions.write_notification_logs is None:
+        result["status"] = "error"
+        result["failed"] = len(candidates)
+        result["warnings"] = [_warning("monitor", "discord_notification", "configuration_error")]
+        return result
+
+    for candidate in candidates:
+        details = candidate.get("details")
+        safe_details = details if isinstance(details, Mapping) else {}
+        event = {
+            "event_key": candidate.get("event_key"),
+            "event_type": safe_details.get("event_type"),
+            "confidence": safe_details.get("confidence"),
+            "observed_at": safe_details.get("observed_at"),
+            "player_tag": safe_details.get("player_tag"),
+            "clan_tag": safe_details.get("clan_tag"),
+            "observed_decks_used_today": safe_details.get("current_decks_used_today"),
+            "details": {"race_day_key": safe_details.get("race_day_key")},
+        }
+        try:
+            payload = build_discord_payload(
+                event,
+                clan_name=safe_details.get("clan_name"),
+                player_name=safe_details.get("player_name"),
+                player_tag=safe_details.get("player_tag"),
+            )
+        except Exception:
+            result["status"] = "error"
+            result["failed"] += 1
+            result["warnings"].append(
+                _warning(
+                    _safe_text(safe_details.get("clan_tag"), "monitor"),
+                    "discord_notification",
+                    "invalid_payload",
+                )
+            )
+            continue
+
+        claim_status, claim_result = _claim_notification_candidate(functions, candidate)
+        if claim_status == "skipped":
+            result["skipped"] += 1
+            continue
+        if claim_status != "claimed":
+            result["status"] = "error"
+            result["failed"] += 1
+            result["warnings"].append(
+                _warning(
+                    _safe_text(safe_details.get("clan_tag"), "monitor"),
+                    "notification_claim",
+                    _notification_result_error(claim_result),
+                )
+            )
+            continue
+
+        try:
+            delivery = send_discord_webhook(
+                payload,
+                webhook_url=webhook_url,
+                http_post=discord_post_fn,
+                sleep=discord_sleep_fn,
+                clock=discord_clock_fn,
+            )
+        except Exception as error:
+            delivery = {
+                "ok": False,
+                "status": "failed",
+                "attempts": 0,
+                "error": _safe_error_code(error),
+            }
+        log_entry = _notification_log_update(candidate, delivery)
+        try:
+            log_result = functions.write_notification_logs([log_entry])
+        except Exception as error:
+            log_result = {"ok": False, "error": _safe_error_code(error)}
+        if not _storage_result_ok(log_result):
+            result["status"] = "error"
+            result["warnings"].append(
+                _warning(
+                    _safe_text(safe_details.get("clan_tag"), "monitor"),
+                    "notification_log_write",
+                    _notification_result_error(log_result),
+                )
+            )
+
+        if delivery.get("status") == "sent" and delivery.get("ok") is not False:
+            result["sent"] += 1
+        else:
+            result["status"] = "error"
+            result["failed"] += 1
+            result["warnings"].append(
+                _warning(
+                    _safe_text(safe_details.get("clan_tag"), "monitor"),
+                    "discord_notification",
+                    _notification_result_error(delivery),
+                )
+            )
+    return result
+
+
 def _process_clan(
     config: MonitorClanConfig,
     client: Any,
     functions: MonitorFunctions,
     observed_at: str,
     notification_policy: Any,
+    discord_webhook_url: Optional[str] = None,
+    discord_post_fn: Optional[Callable[..., Any]] = None,
+    discord_sleep_fn: Optional[Callable[[float], None]] = None,
+    discord_clock_fn: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     tag = config.tag
     summary: Dict[str, Any] = {
@@ -676,6 +1034,9 @@ def _process_clan(
         "snapshots_written": 0,
         "events_created": 0,
         "notifications_pending": 0,
+        "notifications_sent": 0,
+        "notifications_failed": 0,
+        "notifications_skipped": 0,
         "freshness": {},
         "warnings": [],
     }
@@ -905,20 +1266,16 @@ def _process_clan(
                 summary["warnings"].append(_warning(tag, "duel_first", "invalid_request"))
                 continue
 
-        if classification.new_event and classification.event:
+        if (
+            classification.new_event
+            and classification.event
+            and is_alertable_event(classification.event)
+        ):
             event_candidates.append(classification.event)
-            if _policy_allows(notification_policy, classification.event):
-                notification_candidates.append(
-                    {
-                        "event_key": classification.event_key,
-                        "channel": NOTIFICATION_CHANNEL,
-                        "status": "pending",
-                        "details": {
-                            "event_type": classification.event.get("event_type"),
-                            "race_day_key": classification.event.get("details", {}).get("race_day_key"),
-                        },
-                    }
-                )
+            if discord_webhook_url or _policy_allows(notification_policy, classification.event):
+                candidate = _notification_candidate(config, participant, classification.event)
+                if candidate is not None:
+                    notification_candidates.append(candidate)
 
     summary["freshness"]["previous_player_snapshots"] = {
         "status": _aggregate_status(previous_results),
@@ -949,7 +1306,32 @@ def _process_clan(
     else:
         summary["freshness"]["day_events"] = {"status": "empty", "data_status": "empty", "is_stale": False}
 
-    if notification_candidates:
+    if notification_candidates and discord_webhook_url:
+        notification_result = _dispatch_discord_notifications(
+            functions,
+            notification_candidates,
+            discord_webhook_url,
+            discord_post_fn=discord_post_fn,
+            discord_sleep_fn=discord_sleep_fn,
+            discord_clock_fn=discord_clock_fn,
+        )
+        summary["notifications_sent"] = notification_result["sent"]
+        summary["notifications_failed"] = notification_result["failed"]
+        summary["notifications_skipped"] = notification_result["skipped"]
+        summary["freshness"]["notification_queue"] = {
+            "status": "error" if notification_result["status"] == "error" else "fresh",
+            "data_status": "error" if notification_result["status"] == "error" else "fresh",
+            "is_stale": False,
+            "channel": NOTIFICATION_CHANNEL,
+            "configured": True,
+            "sent": notification_result["sent"],
+            "failed": notification_result["failed"],
+            "skipped": notification_result["skipped"],
+        }
+        if notification_result["status"] == "error":
+            issue_found = True
+            summary["warnings"].extend(notification_result["warnings"])
+    elif notification_candidates:
         if functions.write_notification_logs is None:
             issue_found = True
             summary["freshness"]["notification_queue"] = _error_freshness(
@@ -979,9 +1361,15 @@ def _process_clan(
                 summary["warnings"].append(_warning(tag, "notification_queue", _safe_error_code(error)))
     else:
         summary["freshness"]["notification_queue"] = {
-            "status": "empty" if _policy_is_enabled(notification_policy) else "disabled",
+            "status": (
+                "empty"
+                if discord_webhook_url or _policy_is_enabled(notification_policy)
+                else "disabled"
+            ),
             "data_status": "empty",
             "is_stale": False,
+            "channel": NOTIFICATION_CHANNEL,
+            "configured": bool(discord_webhook_url),
         }
 
     summary["status"] = "partial" if issue_found else "ok"
@@ -1003,6 +1391,12 @@ def run_war_monitor(
     read_day_event_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
     write_day_events_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
     write_notification_logs_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
+    read_notification_log_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
+    claim_notification_log_fn: Optional[Callable[..., Mapping[str, Any]]] = None,
+    discord_webhook_url: Optional[str] = None,
+    discord_post_fn: Optional[Callable[..., Any]] = None,
+    discord_sleep_fn: Optional[Callable[[float], None]] = None,
+    discord_clock_fn: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """Run one complete monitor pass and return the stable response contract."""
 
@@ -1011,6 +1405,15 @@ def run_war_monitor(
     report["processed_clans"] = len(configs)
     if not configs:
         raise MonitorConfigurationError("No repository clans are configured.")
+    selected_discord_url = _resolve_discord_webhook_url(discord_webhook_url)
+    report["notifications"] = {
+        "channel": NOTIFICATION_CHANNEL,
+        "status": "enabled" if selected_discord_url else "disabled",
+        "configured": bool(selected_discord_url),
+        "sent": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
 
     functions = _resolve_monitor_functions(
         storage,
@@ -1019,6 +1422,8 @@ def run_war_monitor(
         read_day_event_fn=read_day_event_fn,
         write_day_events_fn=write_day_events_fn,
         write_notification_logs_fn=write_notification_logs_fn,
+        read_notification_log_fn=read_notification_log_fn,
+        claim_notification_log_fn=claim_notification_log_fn,
     )
 
     if client is None:
@@ -1049,6 +1454,10 @@ def run_war_monitor(
                 functions,
                 capture_time,
                 notification_policy,
+                selected_discord_url,
+                discord_post_fn,
+                discord_sleep_fn,
+                discord_clock_fn,
             )
         except Exception:
             clan_summary = {
@@ -1059,6 +1468,9 @@ def run_war_monitor(
                 "snapshots_written": 0,
                 "events_created": 0,
                 "notifications_pending": 0,
+                "notifications_sent": 0,
+                "notifications_failed": 0,
+                "notifications_skipped": 0,
                 "freshness": {"monitor": _error_freshness(RuntimeError())},
                 "warnings": [_warning(config.tag, "clan_processing", "monitor_error")],
             }
@@ -1068,7 +1480,18 @@ def run_war_monitor(
         report["snapshots_written"] += _safe_int(clan_summary.get("snapshots_written")) or 0
         report["events_created"] += _safe_int(clan_summary.get("events_created")) or 0
         report["notifications_pending"] += _safe_int(clan_summary.get("notifications_pending")) or 0
+        report["notifications_sent"] += _safe_int(clan_summary.get("notifications_sent")) or 0
+        report["notifications_failed"] += _safe_int(clan_summary.get("notifications_failed")) or 0
+        report["notifications_skipped"] += _safe_int(clan_summary.get("notifications_skipped")) or 0
 
+    report["notifications"] = {
+        "channel": NOTIFICATION_CHANNEL,
+        "status": "enabled" if selected_discord_url else "disabled",
+        "configured": bool(selected_discord_url),
+        "sent": report["notifications_sent"],
+        "failed": report["notifications_failed"],
+        "skipped": report["notifications_skipped"],
+    }
     report["ok"] = all(bool(clan.get("ok")) for clan in report["clans"])
     report["http_status"] = 200 if report["ok"] else HTTP_STATUS_PARTIAL
     return report

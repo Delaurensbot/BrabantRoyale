@@ -254,10 +254,38 @@ class MemoryStorage:
         written = 0
         for entry in entries:
             key = (entry["event_key"], entry["channel"])
-            if not any((old["event_key"], old["channel"]) == key for old in self.notifications):
+            existing = next(
+                (
+                    old
+                    for old in self.notifications
+                    if (old["event_key"], old["channel"]) == key
+                ),
+                None,
+            )
+            if existing is None:
                 self.notifications.append(entry)
-                written += 1
+            else:
+                existing.clear()
+                existing.update(entry)
+            written += 1
         return {"ok": True, "status": "ok", "rows_written": written}
+
+    def read_notification_log(self, event_key, channel):
+        for entry in self.notifications:
+            if (entry["event_key"], entry["channel"]) == (event_key, channel):
+                return {
+                    "ok": True,
+                    "status": "fresh",
+                    "notification_log": dict(entry),
+                }
+        return {"ok": True, "status": "empty", "notification_log": None}
+
+    def claim_notification_log(self, entry):
+        key = (entry["event_key"], entry["channel"])
+        if any((old["event_key"], old["channel"]) == key for old in self.notifications):
+            return {"ok": True, "status": "exists", "claimed": False}
+        self.notifications.append(dict(entry))
+        return {"ok": True, "status": "claimed", "claimed": True}
 
 
 def run_monitor(client, storage, *, timestamp=FIRST_CAPTURE, policy=None):
@@ -477,7 +505,77 @@ def test_notification_queue_is_disabled_by_default_and_no_webhook_is_called():
 
     assert report["events_created"] == 3
     assert report["notifications_pending"] == 0
+    assert report["notifications"] == {
+        "channel": "discord",
+        "status": "disabled",
+        "configured": False,
+        "sent": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
     webhook_forbidden.assert_not_called()
+
+
+def test_configured_discord_webhook_delivers_only_new_alertable_events():
+    client = FakeClient({tag: race_payload(tag, 0) for tag in CLANS})
+    storage = MemoryStorage()
+    run_monitor(client, storage, timestamp=FIRST_CAPTURE)
+    client.races = {tag: race_payload(tag, 2) for tag in CLANS}
+    post = Mock(return_value=type("Response", (), {"status_code": 204, "headers": {}})())
+
+    with patch.dict(os.environ, {"DISCORD_WAR_WEBHOOK_URL": "https://discord.com/api/webhooks/123/test-token"}, clear=True):
+        report = monitor.run_war_monitor(
+            client=client,
+            storage=storage,
+            clan_configs=CLANS,
+            observed_at=SECOND_CAPTURE,
+            discord_post_fn=post,
+            discord_clock_fn=lambda: SECOND_CAPTURE,
+        )
+
+    assert report["ok"] is True
+    assert report["events_created"] == 3
+    assert report["snapshots_written"] == 3
+    assert report["notifications"] == {
+        "channel": "discord",
+        "status": "enabled",
+        "configured": True,
+        "sent": 3,
+        "failed": 0,
+        "skipped": 0,
+    }
+    assert post.call_count == 3
+    assert all(entry["status"] == "sent" for entry in storage.notifications)
+    assert all("Alice (#PLAYER1)" in call.kwargs["json"]["content"] for call in post.call_args_list)
+
+
+def test_discord_failure_warns_without_erasing_snapshot_or_event_counts():
+    client = FakeClient({tag: race_payload(tag, 0) for tag in CLANS})
+    storage = MemoryStorage()
+    run_monitor(client, storage, timestamp=FIRST_CAPTURE)
+    client.races = {tag: race_payload(tag, 2) for tag in CLANS}
+    post = Mock(return_value=type("Response", (), {"status_code": 400, "headers": {}})())
+
+    with patch.dict(os.environ, {"DISCORD_WAR_WEBHOOK_URL": "https://discord.com/api/webhooks/123/test-token"}, clear=True):
+        report = monitor.run_war_monitor(
+            client=client,
+            storage=storage,
+            clan_configs=CLANS,
+            observed_at=SECOND_CAPTURE,
+            discord_post_fn=post,
+            discord_clock_fn=lambda: SECOND_CAPTURE,
+        )
+
+    assert report["ok"] is False
+    assert report["http_status"] == monitor.HTTP_STATUS_PARTIAL
+    assert report["snapshots_written"] == 3
+    assert report["events_created"] == 3
+    assert report["notifications"]["failed"] == 3
+    assert all(entry["status"] == "failed" for entry in storage.notifications)
+    assert all(entry["response_code"] == 400 for entry in storage.notifications)
+    assert all(entry["sent_at"] == SECOND_CAPTURE for entry in storage.notifications)
+    assert "discord.com/api/webhooks" not in json.dumps(storage.notifications)
+    assert all("bad_request" in warning for warning in report["warnings"])
 
 
 def test_response_contract_and_http_statuses_are_stable():
