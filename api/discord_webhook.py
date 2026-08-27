@@ -39,6 +39,16 @@ ALERTABLE_STATUSES = frozenset(
 )
 _CONFIDENCES = frozenset({"unknown", "low", "medium", "high"})
 _TAG_PATTERN = re.compile(r"[A-Z0-9]{1,32}\Z")
+_DISCORD_WEBHOOK_HOSTS = frozenset(
+    {
+        "discord.com",
+        "discordapp.com",
+        "canary.discord.com",
+        "canary.discordapp.com",
+        "ptb.discord.com",
+        "ptb.discordapp.com",
+    }
+)
 _MAX_WEBHOOK_URL_LENGTH = 2048
 _MAX_DISPLAY_TEXT_LENGTH = 160
 _MAX_RACE_DAY_KEY_LENGTH = 256
@@ -93,12 +103,15 @@ def validate_discord_webhook_url(value: Any) -> str:
         raise DiscordWebhookConfigurationError()
     try:
         parsed = urlsplit(url)
+        hostname = parsed.hostname
     except ValueError:
         raise DiscordWebhookConfigurationError() from None
     if (
         parsed.scheme != "https"
         or not parsed.netloc
         or not parsed.path
+        or hostname not in _DISCORD_WEBHOOK_HOSTS
+        or not parsed.path.startswith("/api/webhooks/")
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment

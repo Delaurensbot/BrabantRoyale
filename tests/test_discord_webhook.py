@@ -320,6 +320,23 @@ def test_invalid_webhook_configuration_is_disabled_without_returning_the_url():
     assert invalid_url not in repr(result)
 
 
+@pytest.mark.parametrize(
+    "invalid_url",
+    [
+        "https://example.com/api/webhooks/123/token",
+        "https://discord.com/not-a-webhook/123/token",
+    ],
+)
+def test_webhook_configuration_is_limited_to_discord_webhook_hosts(invalid_url):
+    with patch.dict(os.environ, {DISCORD_WEBHOOK_URL_ENV: invalid_url}, clear=True):
+        result = send_discord_webhook(
+            build_discord_payload(event(), clan_name="Brabant Royale", player_name="Alice")
+        )
+
+    assert result == {"ok": True, "status": "disabled", "attempts": 0}
+    assert invalid_url not in repr(result)
+
+
 @patch("supabase_history.requests.get")
 def test_notification_log_read_is_server_only_and_uses_event_channel_key(mocked_get):
     mocked_get.return_value = FakeResponse(
