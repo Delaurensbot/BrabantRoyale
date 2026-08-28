@@ -76,9 +76,9 @@ except ImportError:  # pragma: no cover - convenient when deployed as loose file
     )
 
 try:
-    from Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG
-except ImportError:  # pragma: no cover - convenient when deployed as a package.
-    from ..Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG
+    from api.config import CLAN_CONFIGS, DEFAULT_CLAN_TAG
+except ImportError:  # pragma: no cover - convenient for loose-file loading.
+    from config import CLAN_CONFIGS, DEFAULT_CLAN_TAG
 
 try:
     from supabase_history import read_previous_player_snapshot
@@ -410,9 +410,8 @@ def _resolve_clan_config(
             continue
         name = _safe_text(supplied_mapping.get("name"), normalized) or normalized
         return {"tag": normalized, "name": name}
-    # Do not call Royale_api.get_clan_config here: that helper intentionally
-    # falls back to the default clan for unknown tags, which is unsafe at an
-    # API boundary.
+    # Do not use the permissive legacy configuration helper here: it falls back
+    # to the default clan for unknown tags, which is unsafe at an API boundary.
     raise InvalidClanTagError("Invalid clan tag.")
 
 

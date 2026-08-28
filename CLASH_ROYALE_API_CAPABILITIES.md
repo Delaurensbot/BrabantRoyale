@@ -28,7 +28,11 @@ De basis is al goed en sluit aan op wat de officiële API werkelijk levert.
 | Historie | Supabase-snapshots | analytics die verder reiken dan de beperkte API-retentie |
 | Kandidatenscreening | `GET /players/%23{tag}` + eigen historie | trophies, kaartdiepte, profielscore en proefperiode-advies |
 
-De repository heeft daarnaast nog een **legacy pad**: de hoofdpagina `/api/cwstats` parseert volgens de README/RoyaleAPI-code HTML van RoyaleAPI. Dat is nuttig als tijdelijk fallback/prototype, maar geen stabiel officieel datacontract. Nieuwe warfeatures moeten uitsluitend op de officiële routes en de eigen normalisatielaag bouwen; migreer de hoofdpagina daarna gecontroleerd mee en behoud hooguit een duidelijk gelabelde fallback.
+De T17-release heeft het tijdelijke **legacy pad** verwijderd: de hoofdpagina
+`/api/cwstats` gebruikt nu dezelfde officiële Clash Royale API-client en
+normalisatielaag als de overige war-routes. Er is geen actieve prototype- of
+fallbackroute meer; upstream-fouten blijven expliciet zichtbaar als een
+partiële of stale respons en worden niet als nulprestatie gepresenteerd.
 
 De bestaande implementatie haalt de kernroutes op in `war_analytics_metrics.py` en normaliseert ze naar een weekmodel. De unieke opslag-sleutel is bewust goed gekozen: `(clan_tag, race_created_at, player_tag)`. De huidige berekeningen en de reden voor persistente opslag staan ook in [ANALYTICS_TABLE_LOGIC.md](ANALYTICS_TABLE_LOGIC.md) en [SCOUTING_FRAMEWORK_REPORT.md](SCOUTING_FRAMEWORK_REPORT.md).
 
@@ -233,7 +237,7 @@ Ook een battlelog vult deze gaten niet op: het is een korte, gemengde terugblik 
 ### P0 — betrouwbaarheid van de bestaande basis
 
 1. **Unified Clash client:** één module voor tagnormalisatie, bearer-auth, time-outs, retry/back-off en foutmapping.
-2. **Één officiële databron:** migreer de legacy `cwstats`-HTML-scrape naar dezelfde officiële normalisatielaag als analytics; houd eventuele fallback zichtbaar gelabeld en nooit als historische waarheid.
+2. **Één officiële databron:** T17 heeft de legacy `cwstats`-route naar dezelfde officiële normalisatielaag als analytics gemigreerd; er is geen actieve fallback meer.
 3. **Data freshness:** voeg bij alle API-responses `fetched_at`, `source`, `is_stale` en een begrijpelijke status toe.
 4. **Race state-machine:** maak expliciete UI-states voor `not_available`, `pre_race`, `active`, `finished`, `stale` en `error`; ga niet alleen af op een numerieke index.
 5. **Snapshots beveiligen:** behoud idempotente upserts en snapshot altijd de volledige beschikbare race-log; leg per record ook `captured_at` vast.

@@ -34,9 +34,9 @@ except ImportError:  # pragma: no cover - convenient for loose Vercel files.
     )
 
 try:
-    from Royale_api import DEFAULT_CLAN_TAG
-except ImportError:  # pragma: no cover - convenient for package-style loading.
-    from ..Royale_api import DEFAULT_CLAN_TAG
+    from api.config import DEFAULT_CLAN_TAG
+except ImportError:  # pragma: no cover - convenient for loose-file loading.
+    from config import DEFAULT_CLAN_TAG
 
 
 HTTP_STATUS_BAD_REQUEST = 400

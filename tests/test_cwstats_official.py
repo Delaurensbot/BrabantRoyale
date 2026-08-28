@@ -170,13 +170,8 @@ def test_official_client_calls_all_routes_with_normalized_tag_and_models():
     assert isinstance(snapshot.race.participants[0], RaceParticipant)
 
 
-def test_successful_official_payload_keeps_legacy_fields_and_metadata(monkeypatch):
+def test_successful_official_payload_keeps_legacy_fields_and_metadata():
     client = FakeClient()
-
-    def fail_html(_url):
-        raise AssertionError("HTML fallback must not run for official success")
-
-    monkeypatch.setattr(cwstats, "fetch_html", fail_html)
     payload = cwstats.build_cwstats_payload(
         "/api/cwstats?clan=%239yp8uy",
         client=client,
@@ -291,9 +286,7 @@ def test_stale_metadata_is_forwarded_without_secret_fields():
     assert "Authorization" not in json.dumps(payload)
 
 
-def test_opt_in_html_fallback_is_labeled_and_cannot_overwrite_official_clans(
-    monkeypatch,
-):
+def test_legacy_fallback_keyword_is_ignored_and_official_errors_stay_explicit():
     client = FakeClient(
         members=ForbiddenError(
             "private upstream body",
@@ -301,12 +294,6 @@ def test_opt_in_html_fallback_is_labeled_and_cannot_overwrite_official_clans(
             status_code=403,
         )
     )
-    html = """
-    <html><body>
-      <a href="/clan/9YP8UY/race">1 Brabant Royale 9,999 0 999 1.00</a>
-    </body></html>
-    """
-    monkeypatch.setattr(cwstats, "fetch_html", lambda _url: html)
 
     payload = cwstats.build_cwstats_payload(
         "/api/cwstats?clan=%239YP8UY",
@@ -314,17 +301,15 @@ def test_opt_in_html_fallback_is_labeled_and_cannot_overwrite_official_clans(
         allow_html_fallback=True,
     )
 
-    assert payload["source"] == "royaleapi_proxy+cwstats_html_fallback"
+    assert payload["source"] == "royaleapi_proxy"
     assert payload["data_quality"]["fallback"] == {
-        "used": True,
-        "temporary": True,
+        "used": False,
+        "temporary": False,
         "official_data_precedence": True,
-        "source": "cwstats_html_fallback",
+        "source": None,
     }
-    official_own = next(
-        row for row in payload["race_rows"] if row["name"] == "Brabant Royale"
-    )
-    assert official_own["currentMedals"] == 2500
+    assert payload["ok"] is False
+    assert payload["data_status"] == "partial"
     assert "private upstream body" not in json.dumps(payload)
 
 

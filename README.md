@@ -1,26 +1,32 @@
 # Clan War Stats on Vercel
 
-Deze repo draait een simpele statische pagina met een Python Serverless Function op Vercel. De frontend haalt data op via `/api/cwstats`; de Refresh-knop runt het RoyaleAPI-scrapescript opnieuw en toont de nieuwste tekst.
+Deze repo draait een statische pagina met Python Serverless Functions op Vercel.
+De productie-routes lezen uitsluitend via de server-side officiële Clash Royale
+API-client in `api/clash_client.py`. De tijdelijke HTML-bron en prototypepagina
+zijn verwijderd; Supabase wordt alleen gebruikt voor de eigen historische
+snapshots.
 
 ## Belangrijk
-- `/api/cwstats` bestaat en geeft JSON terug met `ok: true` wanneer het scrapen/parsen lukt (data komt nu van RoyaleAPI).
-- De website toont drie blokken (Race, Clan Stats, Battles left) en de kopieerknoppen werken per blok én via klik op de tekst.
-- Lokaal openen via `file://` werkt niet, omdat `/api/cwstats` dan niet bestaat.
+
+- `/api/cwstats`, `/api/analytics`, `/api/scouting` en `/api/war_status` geven
+  officiële API-data met bron-, freshness- en kwaliteitsmetadata.
+- Een upstream-storing wordt niet als een nulprestatie gepresenteerd: routes
+  geven een expliciete fout-, partiële of stale-status terug.
+- `/api/war_monitor` is een server-to-server POST-route en vereist de ingest-
+  secret; secrets komen nooit in HTML, client-JavaScript of logs.
+- Lokaal openen via `file://` werkt niet, omdat de `/api/*`-routes dan niet
+  bestaan.
 
 ## Deploy
-1. Push de main branch naar GitHub.
-2. Ga in Vercel naar **New Project** en importeer de repo.
-3. Kies framework **Other** en laat het build-commando leeg (niet nodig).
-4. Deploy.
-5. Test in de browser:
-   - `https://<project>.vercel.app/api/cwstats` moet JSON tonen.
-   - `https://<project>.vercel.app` moet de pagina tonen en data ophalen.
 
+Deploy uitsluitend een gecontroleerde commit met de aanwezige Vercel-workflow.
+De volledige release-, smoke-test-, monitoring- en rollbackprocedure staat in
+[RELEASE_T17.md](RELEASE_T17.md). Controleer vóór release altijd dat de
+rollback-tag `brabant-royale-pre-migration` intact is.
 
-## Temporary clan member test route
-- API route: `/api/test-clan` (server-side Vercel Python function).
-- Temporary page: `/test-clan.html`.
-- Required environment variable: `CLASH_ROYALE_API_KEY` (set in Vercel project settings).
+De productie-URL is `https://brabant-royale.vercel.app` wanneer het gekoppelde
+Vercel-project die standaardnaam gebruikt. Test na een deploy minimaal de
+routes en velden die in [RELEASE_T17.md](RELEASE_T17.md) staan.
 
 ## Langdurige analytics met Supabase
 

@@ -10,8 +10,9 @@ LOSS_SCORE = 100
 THEORETICAL_PLAYER_CAPACITY = 50
 DECKS_PER_PLAYER = 4
 THEORETICAL_DECK_CAPACITY = THEORETICAL_PLAYER_CAPACITY * DECKS_PER_PLAYER
-# Avg/deck is scraped from UI text rounded to two decimals, so reconstructing
-# decks from medals/average needs a small tolerance around the original value.
+# Avg/deck may arrive as displayed UI text rounded to two decimals, so
+# reconstructing decks from medals/average needs a small tolerance around the
+# original value.
 DECK_USAGE_AVERAGE_TOLERANCE = 0.15
 DECK_CAPACITY_RAW_TOLERANCE = 0.25
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}

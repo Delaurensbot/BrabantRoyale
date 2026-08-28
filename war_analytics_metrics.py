@@ -6,17 +6,18 @@
 # - Current season leaderboard: only Player + Score, only "perfect" players (no missed attacks on played weekends).
 # - Seasons are detected dynamically: current = max season in headers, previous = second max.
 
-import argparse
 import os
 import re
-import sys
 from typing import List, Optional, Tuple, Dict, Set, Mapping
-from urllib.parse import unquote
 
 import requests
-from bs4 import BeautifulSoup
 
-from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
+try:
+    from api.clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
+    from api.config import DEFAULT_CLAN_TAG, get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
+    from config import DEFAULT_CLAN_TAG, get_clan_config
 from supabase_history import (
     clash_date_to_iso,
     clash_date_to_datetime,
@@ -39,14 +40,10 @@ except ImportError:  # pragma: no cover - convenient when run as a loose script.
 
 
 DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
-ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["analytics_url"]
-CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["clan_url"]
-
-KNOWN_ROLES = ["Leader", "Co-leader", "Elder", "Member"]
-ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil "Owner"
+ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["race_log_path"]
+CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["members_path"]
 
 UNREPLACEABLE_PENALTY = {0: 0, 1: 2, 2: 4, 3: 12}
-ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 PROMOTION_WINDOWS = (2, 4, 6)
 DEFAULT_PROMOTION_WINDOW = 6
 DEMOTION_WINDOW = 10
@@ -223,8 +220,6 @@ def normalize_space(s: str) -> str:
 
 
 def clean_player_name(s: str) -> str:
-    s = normalize_space(s)
-    s = re.sub(r"<[^>]+>", "", s)
     return normalize_space(s).lower()
 
 
@@ -289,127 +284,6 @@ def format_table(title: str, headers: List[str], rows: List[List[str]], limit: O
     return "\n".join(lines)
 
 
-def fetch(url: str, timeout: int = 25) -> str:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-        "Connection": "close",
-    }
-    r = requests.get(url, headers=headers, timeout=timeout)
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code} while fetching {url}")
-    return r.text
-
-
-def extract_player_tag_from_href(href: str) -> Optional[str]:
-    if not href:
-        return None
-    href_decoded = unquote(href)
-    href_u = href_decoded.upper()
-    m = re.search(r"/PLAYER/(?:#)?([A-Z0-9]+)", href_u)
-    return m.group(1) if m else None
-
-
-def extract_role_from_row_text(row_text: str) -> str:
-    t = normalize_space(row_text)
-    for role in KNOWN_ROLES:
-        if re.search(rf"\b{re.escape(role)}\b", t, flags=re.IGNORECASE):
-            return role
-    return ""
-
-
-def get_current_members_with_roles(members_url: str) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
-    html = fetch(members_url)
-    soup = BeautifulSoup(html, "html.parser")
-
-    tag_to_name_clean: Dict[str, str] = {}
-    name_clean_to_tag: Dict[str, str] = {}
-    tag_to_role: Dict[str, str] = {}
-
-    for tr in soup.find_all("tr"):
-        a = tr.find("a", href=True)
-        if not a:
-            continue
-
-        tag = extract_player_tag_from_href(a["href"])
-        if not tag:
-            continue
-
-        name_raw = a.get_text(" ", strip=True)
-        name_clean = clean_player_name(name_raw)
-        if not name_clean:
-            continue
-
-        role = extract_role_from_row_text(tr.get_text(" ", strip=True))
-        role = ROLE_DISPLAY.get(role, role)
-
-        tag_to_name_clean[tag] = name_clean
-        name_clean_to_tag[name_clean] = tag
-        if role:
-            tag_to_role[tag] = role
-
-    return tag_to_name_clean, name_clean_to_tag, tag_to_role
-
-
-def get_table_headers(table: BeautifulSoup) -> List[str]:
-    thead = table.find("thead")
-    if thead:
-        return [normalize_space(th.get_text(" ", strip=True)) for th in thead.find_all("th")]
-    first_row = table.find("tr")
-    if first_row:
-        return [normalize_space(x.get_text(" ", strip=True)) for x in first_row.find_all(["th", "td"])]
-    return []
-
-
-def find_table_by_headers(soup: BeautifulSoup, must_have: Set[str]) -> Optional[BeautifulSoup]:
-    must_have_lower = {h.lower() for h in must_have}
-    for table in soup.find_all("table"):
-        headers = get_table_headers(table)
-        hset = {h.lower() for h in headers}
-        if must_have_lower.issubset(hset):
-            return table
-    return None
-
-
-def parse_table_with_tag_or_name(table: BeautifulSoup) -> Tuple[List[str], List[List[str]], List[Optional[str]], List[str]]:
-    headers = get_table_headers(table)
-
-    tbody = table.find("tbody")
-    row_tags = tbody.find_all("tr") if tbody else table.find_all("tr")[1:]
-
-    rows: List[List[str]] = []
-    tags_per_row: List[Optional[str]] = []
-    names_per_row: List[str] = []
-
-    for tr in row_tags:
-        cells = tr.find_all(["td", "th"])
-        if not cells:
-            continue
-
-        player_cell = cells[0]
-        row_tag = None
-        a = player_cell.find("a", href=True)
-        if a:
-            row_tag = extract_player_tag_from_href(a["href"])
-
-        row = [normalize_space(c.get_text(" ", strip=True)) for c in cells]
-        if not row or not any(x != "" for x in row):
-            continue
-
-        player_name_clean = clean_player_name(row[0])
-        row[0] = re.sub(r"<[^>]+>", "", row[0]).strip()
-
-        rows.append(row)
-        tags_per_row.append(row_tag)
-        names_per_row.append(player_name_clean)
-
-    return headers, rows, tags_per_row, names_per_row
-
-
 def compute_mvp_list(
     season_weeks: List[str],
     contrib_map: Dict[str, Dict[str, int]],
@@ -422,71 +296,36 @@ def compute_mvp_list(
     results: List[Dict[str, str]] = []
     excluded_weeks = excluded_weeks or set()
 
-    for key, per_week_c in contrib_map.items():
+    for key, per_week_contribution in contrib_map.items():
         total_score = 0
         eligible = True
-
-        for wh in season_weeks:
-            if (key, wh) in excluded_weeks:
+        for week in season_weeks:
+            if (key, week) in excluded_weeks:
                 continue
-            c_val = per_week_c.get(wh)
-            if c_val is None:
+            contribution = per_week_contribution.get(week)
+            if contribution is None:
                 if require_all_weekends:
                     eligible = False
                 continue
-
-            # Alleen meegerekend als Contribution > 0
-            if c_val <= 0:
+            if contribution <= 0:
                 if require_all_weekends:
                     eligible = False
                 continue
-
-            d_val = decks_map.get(key, {}).get(wh)
-            if d_val is None or d_val != 16:
+            decks = decks_map.get(key, {}).get(week)
+            if decks is None or decks != 16:
                 eligible = False
                 break
-
-            total_score += c_val
-
+            total_score += contribution
         if eligible and total_score > 0:
-            results.append({
-                "player": player_print_map.get(key, key),
-                "score": str(total_score),
-            })
+            results.append(
+                {
+                    "player": player_print_map.get(key, key),
+                    "score": str(total_score),
+                }
+            )
 
-    results.sort(key=lambda r: int(r.get("score", 0)), reverse=True)
+    results.sort(key=lambda row: int(row.get("score", 0)), reverse=True)
     return results[:top_n]
-
-
-def filter_rows_keep_alignment(rows, tags, names, current_tags, name_to_tag):
-    f_rows, f_tags, f_names = [], [], []
-    for row, tag, nm in zip(rows, tags, names):
-        name_is_current = nm in name_to_tag
-        tag_is_current = (tag is not None) and (tag in current_tags)
-        if tag_is_current or name_is_current:
-            f_rows.append(row)
-            f_tags.append(tag)
-            f_names.append(nm)
-    return f_rows, f_tags, f_names
-
-
-def add_role_column(headers: List[str], rows: List[List[str]], tags: List[Optional[str]], names: List[str],
-                    name_to_tag: Dict[str, str], tag_to_role: Dict[str, str]) -> Tuple[List[str], List[List[str]]]:
-    new_headers = headers[:]
-    if new_headers and new_headers[0].lower() == "player":
-        new_headers.insert(1, "Role")
-    else:
-        new_headers = ["Player", "Role"] + new_headers[1:]
-
-    new_rows: List[List[str]] = []
-    for row, tag, nm in zip(rows, tags, names):
-        use_tag = tag or name_to_tag.get(nm)
-        role = tag_to_role.get(use_tag, "") if use_tag else ""
-        new_row = row[:]
-        new_row.insert(1, role)
-        new_rows.append(new_row)
-
-    return new_headers, new_rows
 
 
 def parse_int_cell(cell: str) -> Optional[int]:
@@ -1010,18 +849,10 @@ def collect_analytics_data(
     if not api_key:
         raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
 
-    def api_get(path: str) -> Dict[str, object]:
-        url = f"{ROYAL_API_BASE_URL}{path}"
-        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Clash API error {resp.status_code} for {path}")
-        return resp.json() if resp.content else {}
-
-    norm_tag = clan_tag.strip().replace("#", "").upper()
-    encoded = f"%23{norm_tag}"
-
-    members_payload = api_get(f"/clans/{encoded}/members")
-    members = members_payload.get("items", [])
+    client = ClashRoyaleClient(api_key=api_key, requester=requests.get)
+    norm_tag = normalize_api_tag(clan_tag)
+    members_payload = client.get_members(norm_tag).data
+    members = members_payload.get("items", []) if isinstance(members_payload, Mapping) else []
 
     role_map: Dict[str, str] = {}
     player_print_map: Dict[str, str] = {}
@@ -1039,12 +870,14 @@ def collect_analytics_data(
 
     # Collect weekly race snapshots: historic races + current race when available.
     race_items: List[Dict[str, object]] = []
-    river_log = api_get(f"/clans/{encoded}/riverracelog")
-    race_items.extend(river_log.get("items", []))
+    river_log = client.get_river_race_log(norm_tag).data
+    if isinstance(river_log, Mapping):
+        race_items.extend(river_log.get("items", []))
 
     try:
-        current_race = api_get(f"/clans/{encoded}/currentriverrace")
-        if current_race:
+        current_race = client.get_current_river_race(norm_tag).data
+        if isinstance(current_race, Mapping) and current_race:
+            current_race = dict(current_race)
             current_race["is_current"] = True
             race_items.append(current_race)
     except Exception:
@@ -1365,90 +1198,15 @@ def collect_analytics_data(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--analytics-url", default=ANALYTICS_URL_DEFAULT)
-    ap.add_argument("--members-url", default=CLAN_MEMBERS_URL_DEFAULT)
-    ap.add_argument("--limit", type=int, default=0, help="Limit printed rows per table (0 = no limit)")
-    ap.add_argument("--top", type=int, default=10, help="Top N for MVP/leaderboards")
-    args = ap.parse_args()
-
-    try:
-        tag_to_name_clean, name_clean_to_tag, tag_to_role = get_current_members_with_roles(args.members_url)
-    except Exception as e:
-        print(f"Failed to fetch current members: {e}", file=sys.stderr)
-        return 1
-
-    current_tags = set(tag_to_name_clean.keys())
-    if not current_tags:
-        print("Could not extract current members from the clan page.", file=sys.stderr)
-        return 1
-
-    try:
-        html = fetch(args.analytics_url)
-    except Exception as e:
-        print(f"Failed to fetch analytics page: {e}", file=sys.stderr)
-        return 1
-
-    soup = BeautifulSoup(html, "html.parser")
-    contribution_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "C"})
-    decks_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "D"})
-
-    limit = args.limit if args.limit > 0 else None
-    print(f"\nCurrent members detected: {len(current_tags)}")
-
-    contrib_headers2: Optional[List[str]] = None
-    contrib_rows2: Optional[List[List[str]]] = None
-
-    if contribution_table:
-        headers, rows, tags_per_row, names_per_row = parse_table_with_tag_or_name(contribution_table)
-        f_rows, f_tags, f_names = filter_rows_keep_alignment(rows, tags_per_row, names_per_row, current_tags, name_clean_to_tag)
-        headers2, rows2 = add_role_column(headers, f_rows, f_tags, f_names, name_clean_to_tag, tag_to_role)
-        contrib_headers2, contrib_rows2 = headers2, rows2
-
-        print(f"\nContribution rows before filter: {len(rows)} | after filter: {len(f_rows)}")
-        print(format_table("Contribution (current members only)", headers2, rows2, limit=limit))
-    else:
-        print("\nContribution table not found.", file=sys.stderr)
-
-    decks_headers2: Optional[List[str]] = None
-    decks_rows2: Optional[List[List[str]]] = None
-
-    if decks_table:
-        headers, rows, tags_per_row, names_per_row = parse_table_with_tag_or_name(decks_table)
-        f_rows, f_tags, f_names = filter_rows_keep_alignment(rows, tags_per_row, names_per_row, current_tags, name_clean_to_tag)
-        headers2, rows2 = add_role_column(headers, f_rows, f_tags, f_names, name_clean_to_tag, tag_to_role)
-        decks_headers2, decks_rows2 = headers2, rows2
-
-        print(f"\nDecks Used rows before filter: {len(rows)} | after filter: {len(f_rows)}")
-        print(format_table("Decks Used (current members only)", headers2, rows2, limit=limit))
-    else:
-        print("\nDecks Used table not found.", file=sys.stderr)
-
-    if contrib_headers2 and contrib_rows2 and decks_headers2 and decks_rows2:
-        contrib_week_headers, _, contrib_map, decks_map, _, player_print_map = build_maps(
-            contrib_headers2, contrib_rows2, decks_headers2, decks_rows2
-        )
-
-        current_season, prev_season = detect_current_and_previous_season(contrib_week_headers)
-
-        if prev_season is not None:
-            print(build_previous_season_mvp_simple(
-                contrib_week_headers, contrib_map, decks_map, player_print_map, prev_season, args.top
-            ))
-        else:
-            print("\nVorige seizoen MVP\nNiet genoeg season-data gevonden om een vorig seizoen te bepalen.")
-
-        if current_season is not None:
-            print(build_current_leaderboard_simple(
-                contrib_week_headers, contrib_map, decks_map, player_print_map, current_season, args.top
-            ))
-        else:
-            print("\nHuidig seizoen leaderboard\nGeen season-data gevonden.")
-
-        print_mvp_explanations_simple(prev_season, current_season)
-
+    """Print the official API analytics payload for local operators."""
+    payload = collect_analytics_data()
+    print(format_table(
+        "MVP current",
+        ["Player", "Score"],
+        [[row.get("player", ""), str(row.get("score", ""))]
+         for row in payload.get("mvp_current", [])],
+    ))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

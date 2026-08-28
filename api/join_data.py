@@ -18,12 +18,19 @@ import re
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
-from Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
+try:
+    from api.config import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from config import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
 
 try:
-    from api.clash_client import ClashClientError, ClashRoyaleClient
+    from api.clash_client import (
+        ROYAL_API_BASE_URL,
+        ClashClientError,
+        ClashRoyaleClient,
+    )
 except ImportError:  # pragma: no cover - convenient for loose-file deployment.
-    from clash_client import ClashClientError, ClashRoyaleClient
+    from clash_client import ROYAL_API_BASE_URL, ClashClientError, ClashRoyaleClient
 
 try:
     from supabase_history import read_roster_snapshots, write_roster_snapshots
@@ -34,7 +41,6 @@ except ImportError:  # pragma: no cover - convenient for package-style loading.
     )
 
 
-ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 OBSERVED_INTERVAL_LABEL = "waargenomen tussen snapshots"
 ROSTER_STALE_AFTER_SECONDS = 2 * 60 * 60
 _STORAGE_STATUSES = frozenset(

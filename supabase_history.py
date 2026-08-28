@@ -21,8 +21,10 @@ from urllib.parse import unquote, urlsplit
 
 import requests
 
-
-ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
+try:
+    from api.clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
 HISTORY_TABLE = "clan_war_player_weeks"
 EXCLUSIONS_TABLE = "clan_war_week_exclusions"
 LIVE_SNAPSHOT_TABLE = "river_race_live_snapshots"
@@ -320,35 +322,50 @@ def fetch_clash_json(
     *,
     timeout: int = 25,
 ) -> Dict[str, object]:
-    response = requests.get(
-        f"{ROYAL_API_BASE_URL}{path}",
-        headers={"Authorization": f"Bearer {api_key}"},
+    """Compatibility adapter backed by the central official API client."""
+
+    client = ClashRoyaleClient(
+        api_key=api_key,
         timeout=timeout,
+        requester=requests.get,
     )
-    if response.status_code != 200:
-        raise RuntimeError(f"Clash API error {response.status_code} for {path}")
-    return response.json() if response.content else {}
+    parts = [unquote(part) for part in urlsplit(path).path.split("/") if part]
+    if len(parts) != 3 or parts[0] != "clans":
+        raise ValueError("Unsupported official Clash API path.")
+    clan_tag = normalize_api_tag(parts[1])
+    endpoint = parts[2].lower()
+    if endpoint == "members":
+        response = client.get_members(clan_tag)
+    elif endpoint == "riverracelog":
+        response = client.get_river_race_log(clan_tag)
+    elif endpoint == "currentriverrace":
+        response = client.get_current_river_race(clan_tag)
+    else:
+        raise ValueError("Unsupported official Clash API path.")
+    return dict(response.data) if isinstance(response.data, Mapping) else {}
 
 
 def fetch_live_clan_data(
     clan_tag: str,
     api_key: str,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
-    norm_tag = normalize_tag(clan_tag)
-    encoded_tag = f"%23{norm_tag}"
-    members_payload = fetch_clash_json(f"/clans/{encoded_tag}/members", api_key)
-    members = list(members_payload.get("items") or [])
+    norm_tag = normalize_api_tag(clan_tag)
+    client = ClashRoyaleClient(
+        api_key=api_key,
+        requester=requests.get,
+    )
+    members_payload = client.get_members(norm_tag).data
+    members = list(members_payload.get("items") or []) if isinstance(members_payload, Mapping) else []
 
     race_items: List[Dict[str, object]] = []
-    river_log = fetch_clash_json(f"/clans/{encoded_tag}/riverracelog", api_key)
-    race_items.extend(river_log.get("items") or [])
+    river_log = client.get_river_race_log(norm_tag).data
+    if isinstance(river_log, Mapping):
+        race_items.extend(river_log.get("items") or [])
 
     try:
-        current_race = fetch_clash_json(
-            f"/clans/{encoded_tag}/currentriverrace",
-            api_key,
-        )
-        if current_race:
+        current_race = client.get_current_river_race(norm_tag).data
+        if isinstance(current_race, Mapping) and current_race:
+            current_race = dict(current_race)
             current_race["is_current"] = True
             race_items.append(current_race)
     except Exception:
@@ -504,11 +521,11 @@ def load_history_races_from_env(
             supabase_url=supabase_url,
             api_key=api_key,
         )
-    except Exception as exc:
+    except Exception:
         return [], {
             "enabled": True,
             "source": "clash_api_fallback",
-            "message": str(exc),
+            "message": "Historische Supabase-data is tijdelijk niet beschikbaar.",
         }
 
     races = history_rows_to_races(rows, clan_tag)
@@ -537,10 +554,10 @@ def load_week_exclusions_from_env(
             supabase_url=supabase_url,
             api_key=api_key,
         )
-    except Exception as exc:
+    except Exception:
         return [], {
             "enabled": True,
-            "message": str(exc),
+            "message": "Supabase-weekuitzonderingen zijn tijdelijk niet beschikbaar.",
         }
 
     return rows, {

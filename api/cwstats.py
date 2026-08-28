@@ -3,38 +3,51 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 import json
 from datetime import datetime, timezone
-import os
 from urllib.parse import parse_qs, urlparse
 import re
 from urllib.parse import urlsplit
-
-from bs4 import BeautifulSoup
 
 try:
     from api import strategy_engine
 except ImportError:
     import strategy_engine
 
-from Royale_api import (
-    OUR_CLAN_NAME_DEFAULT,
-    build_short_story,
-    ClanOverview,
-    collect_day1_high_famers,
-    compute_total_players_participated,
-    fetch_html,
-    get_clan_config,
-    parse_day_number,
-    render_battles_left_today,
-    render_clan_avg_projection,
-    render_clan_insights,
-    render_clan_overview_table,
-    render_clan_stats_block,
-    render_day1_high_fame_players,
-    render_day4_last_chance_players,
-    render_high_fame_players,
-    render_player_table,
-    render_risk_left_attacks,
-)
+try:
+    from api.config import OUR_CLAN_NAME_DEFAULT, get_clan_config
+    from api.reporting import (
+        ClanOverview,
+        build_short_story,
+        collect_day1_high_famers,
+        compute_total_players_participated,
+        render_battles_left_today,
+        render_clan_avg_projection,
+        render_clan_insights,
+        render_clan_overview_table,
+        render_clan_stats_block,
+        render_day1_high_fame_players,
+        render_day4_last_chance_players,
+        render_high_fame_players,
+        render_player_table,
+        render_risk_left_attacks,
+    )
+except ImportError:  # pragma: no cover - convenient when run as a loose file.
+    from config import OUR_CLAN_NAME_DEFAULT, get_clan_config
+    from reporting import (
+        ClanOverview,
+        build_short_story,
+        collect_day1_high_famers,
+        compute_total_players_participated,
+        render_battles_left_today,
+        render_clan_avg_projection,
+        render_clan_insights,
+        render_clan_overview_table,
+        render_clan_stats_block,
+        render_day1_high_fame_players,
+        render_day4_last_chance_players,
+        render_high_fame_players,
+        render_player_table,
+        render_risk_left_attacks,
+    )
 
 try:
     from api.clash_client import ClashClientError, ClashRoyaleClient, normalize_tag
@@ -75,8 +88,6 @@ except ImportError:  # pragma: no cover - convenient when run as a loose file.
 
 
 OFFICIAL_SOURCE = "royaleapi_proxy"
-HTML_FALLBACK_SOURCE = "cwstats_html_fallback"
-HTML_FALLBACK_ENV = "CWSTATS_ENABLE_HTML_FALLBACK"
 
 _OFFICIAL_ENDPOINTS = {
     "clan": "/clans/{tag}",
@@ -122,20 +133,11 @@ class _OfficialSnapshot:
     normalization_errors: dict[str, dict] = field(default_factory=dict)
 
 
-@dataclass
-class _HtmlFallback:
-    """Temporary, opt-in fallback data; never the normal cwstats source."""
-
-    finish_outlook: dict = field(default_factory=dict)
-    race_context: dict = field(default_factory=dict)
-    players: list[dict] = field(default_factory=list)
-    clans: list[ClanOverview] = field(default_factory=list)
-
-
 class _OfficialReportContext:
-    """Small non-HTML context adapter for legacy renderers."""
+    """Explicit day metadata adapter for official-data renderers."""
 
     def __init__(self, day: int | None):
+        self.day = day
         self._text = f"Day {day}" if day in {1, 2, 3, 4} else ""
 
     def get_text(self, *_args, **_kwargs):
@@ -394,324 +396,9 @@ def fetch_official_snapshot(clan_tag, client=None):
 
 
 
-def _compact_number(raw: str):
-    value = str(raw or "").strip()
-    compact_match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*([KMB])", value, flags=re.IGNORECASE)
-    if compact_match:
-        number = float(compact_match.group(1).replace(",", "."))
-        multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[compact_match.group(2).upper()]
-        return int(number * multiplier)
-
-    digits = re.sub(r"[^0-9]", "", value)
-    return int(digits) if digits else None
-
-
-def parse_cwstats_finish_outlook_from_html(html: str):
-    soup = BeautifulSoup(html or "", "html.parser")
-    blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
-
-    def extract_number(pattern: str):
-        m = re.search(pattern, blob, flags=re.IGNORECASE)
-        return _compact_number(m.group(1)) if m else None
-
-    def extract_rank_score(pattern: str):
-        m = re.search(pattern, blob, flags=re.IGNORECASE)
-        if not m:
-            return None, None
-        rank = _compact_number(m.group(1))
-        score = _compact_number(m.group(2))
-        return rank, score
-
-    projected_rank, projected_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Projected\s*Finish\s*([\d.,]+)")
-    best_rank, best_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Best\s*Possible\s*Finish\s*([\d.,]+)")
-    worst_rank, worst_finish = extract_rank_score(r"(\d+(?:st|nd|rd|th))\s*Worst\s*Possible\s*Finish\s*([\d.,]+)")
-
-    if projected_rank is None:
-        projected_rank, projected_finish = extract_rank_score(r"Placement\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
-    if best_rank is None:
-        best_rank, best_finish = extract_rank_score(r"Best\s*possible\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
-    if worst_rank is None:
-        worst_rank, worst_finish = extract_rank_score(r"Worst\s*possible\s*(\d+(?:st|nd|rd|th))\s*([\d.,]+)")
-
-    battles_left = extract_number(r"Battles\s*Left\s*([\d.,]+)")
-    if battles_left is None:
-        decks_used_match = re.search(r"Decks\s*used\s*([\d.,]+)\s*/\s*([\d.,]+)", blob, flags=re.IGNORECASE)
-        if decks_used_match:
-            used = _compact_number(decks_used_match.group(1)) or 0
-            total = _compact_number(decks_used_match.group(2)) or 0
-            battles_left = max(0, total - used)
-
-    duels_left = extract_number(r"Duels\s*Left\s*([\d.,]+)")
-    if duels_left is None:
-        slots_used_match = re.search(r"Slots\s*used\s*([\d.,]+)\s*/\s*([\d.,]+)", blob, flags=re.IGNORECASE)
-        if slots_used_match:
-            used = _compact_number(slots_used_match.group(1)) or 0
-            total = _compact_number(slots_used_match.group(2)) or 0
-            duels_left = max(0, total - used)
-
-    return {
-        "battles_left": battles_left,
-        "duels_left": duels_left,
-        "projected_rank": projected_rank,
-        "projected_finish": projected_finish,
-        "best_rank": best_rank,
-        "best_finish": best_finish,
-        "worst_rank": worst_rank,
-        "worst_finish": worst_finish,
-    }
-
-
-def parse_clan_access_type_from_html(html: str):
-    soup = BeautifulSoup(html or "", "html.parser")
-    for value_el in soup.select("div.value"):
-        value_text = value_el.get_text(" ", strip=True)
-        if not value_text:
-            continue
-
-        normalized = value_text.lower()
-        if normalized == "invite only":
-            return "Invite Only"
-        if normalized == "open":
-            return "Open"
-
-    return None
-
-
-def _normalize_clan_name(name: str):
+def _normalize_clan_name(name):
     cleaned = re.sub(r"\s+", " ", (name or "")).strip().lower()
     return re.sub(r"[^\w]+", "", cleaned)
-
-
-def parse_cwstats_active_day(text: str):
-    cleaned = re.sub(r"\bTraining\s+Day\s+1\s*-\s*3\b", " ", text or "", flags=re.IGNORECASE)
-    war_match = re.search(r"\bday\s*([1-4])\s+war\b", cleaned, flags=re.IGNORECASE)
-    if war_match:
-        return int(war_match.group(1))
-
-    matches = [
-        int(match.group(1))
-        for match in re.finditer(r"\bday\s*([1-4])\b", cleaned, flags=re.IGNORECASE)
-    ]
-    return matches[-1] if matches else None
-
-
-def parse_cwstats_race_context_from_html(html: str):
-    soup = BeautifulSoup(html or "", "html.parser")
-    text_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
-    text_blob_lower = text_blob.lower()
-
-    is_colosseum_weekend = bool(re.search(r"\bcolosseum\b", text_blob_lower))
-
-    active_day = parse_cwstats_active_day(text_blob)
-
-    rows = {}
-    row_regex = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s*$")
-    current_row_regex = re.compile(
-        r"^\s*(\d+)\s+"
-        r"(.+?)\s+"
-        r"(?:\d+(?:[.,]\d+)?K\s+)?"
-        r"([\d.,]+)\s+"
-        r"([\d.,]+)\s+"
-        r"([\d.,]+)\s+"
-        r"([\d.,]+)\s*$",
-        flags=re.IGNORECASE,
-    )
-
-    def _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg):
-        normalized_name = _normalize_clan_name(name)
-        if not normalized_name:
-            return
-        rows[normalized_name] = {
-            "rank": int(rank),
-            "name": re.sub(r"\s+", " ", name).strip(),
-            "trophy": _compact_number(str(trophy)) or 0,
-            "cw_trophy": _compact_number(str(cw_trophy)) or 0,
-            "fame": _compact_number(str(trophy)) or 0,
-            "clan_war_trophies": _compact_number(str(cw_trophy)) or 0,
-            "boat_movement": _compact_number(str(boat_movement)) or 0,
-            "fame_avg": float(str(fame_avg).replace(",", ".")),
-        }
-
-    for link in soup.find_all("a", href=True):
-        href = (link.get("href") or "").strip()
-        if not re.fullmatch(r"/clan/[A-Z0-9]+/race", href):
-            continue
-
-        row_text = " ".join(link.stripped_strings)
-        if not row_text or not row_text[0].isdigit():
-            continue
-
-        match = row_regex.match(row_text)
-        if match:
-            _store_row(*match.groups())
-            continue
-
-        match = current_row_regex.match(row_text)
-        if match:
-            rank, name, cw_trophy, boat_movement, fame, fame_avg = match.groups()
-            _store_row(rank, name, fame, boat_movement, cw_trophy, fame_avg)
-
-    if not rows:
-        fallback_blob = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
-        fallback_regex = re.compile(
-            r"(\d+)\s+"
-            r"(.+?)\s+"
-            r"([\d.,]+)\s+Clan\s*War\s*trophies\s+"
-            r"([\d.,]+)\s+Boat\s*movement\s+"
-            r"([\d.,]+)\s+Fame\s+"
-            r"([\d.,]+)",
-            flags=re.IGNORECASE,
-        )
-        for match in fallback_regex.finditer(fallback_blob):
-            rank, name, cw_trophy, boat_movement, trophy, fame_avg = match.groups()
-            _store_row(rank, name, trophy, boat_movement, cw_trophy, fame_avg)
-
-    if not rows:
-        def _to_int(value):
-            if isinstance(value, bool) or value is None:
-                return None
-            if isinstance(value, (int, float)):
-                return int(value)
-            return _compact_number(str(value))
-
-        def _to_float(value):
-            if isinstance(value, bool) or value is None:
-                return None
-            if isinstance(value, (int, float)):
-                return float(value)
-            raw = str(value).strip().replace(",", ".")
-            try:
-                return float(raw)
-            except ValueError:
-                return None
-
-        def _find_row_nodes(obj):
-            found = []
-            if isinstance(obj, dict):
-                keys = {k.lower(): k for k in obj.keys()}
-                name_key = next((keys[k] for k in ("name", "clanname", "clan_name") if k in keys), None)
-                if name_key:
-                    has_rank = any(k in keys for k in ("rank", "position", "place"))
-                    has_cw = any(k in keys for k in ("clanwartrophies", "cw_trophy", "cw_trophies"))
-                    has_fame = any(k in keys for k in ("fame", "famepoints", "currentfame", "score"))
-                    if has_rank and has_cw and has_fame:
-                        found.append(obj)
-                for value in obj.values():
-                    found.extend(_find_row_nodes(value))
-            elif isinstance(obj, list):
-                for item in obj:
-                    found.extend(_find_row_nodes(item))
-            return found
-
-        for script in soup.find_all("script"):
-            script_text = script.string or script.get_text("", strip=True)
-            if not script_text or "{" not in script_text:
-                continue
-
-            candidates = []
-            if script_text.strip().startswith("{"):
-                candidates.append(script_text.strip())
-            if "__NEXT_DATA__" in script_text:
-                first_brace = script_text.find("{")
-                last_brace = script_text.rfind("}")
-                if first_brace != -1 and last_brace > first_brace:
-                    candidates.append(script_text[first_brace:last_brace + 1])
-
-            for candidate in candidates:
-                try:
-                    payload = json.loads(candidate)
-                except Exception:
-                    continue
-
-                for node in _find_row_nodes(payload):
-                    kl = {k.lower(): v for k, v in node.items()}
-                    name = kl.get("name") or kl.get("clanname") or kl.get("clan_name")
-                    rank = _to_int(kl.get("rank") or kl.get("position") or kl.get("place"))
-                    cw_trophy = _to_int(kl.get("clanwartrophies") or kl.get("cw_trophy") or kl.get("cw_trophies"))
-                    boat = _to_int(kl.get("boatmovement") or kl.get("boat_movement") or kl.get("boat")) or 0
-                    fame = _to_int(kl.get("fame") or kl.get("famepoints") or kl.get("currentfame") or kl.get("score")) or 0
-                    fame_avg = _to_float(kl.get("fameavg") or kl.get("fame_avg") or kl.get("avg") or kl.get("fameperdeck"))
-
-                    if not name or rank is None or cw_trophy is None:
-                        continue
-
-                    _store_row(rank, str(name), fame, boat, cw_trophy, fame_avg or 0)
-
-            if rows:
-                break
-
-    return {
-        "is_colosseum_weekend": is_colosseum_weekend,
-        "active_day": active_day,
-        "rows_by_name": rows,
-    }
-
-def parse_cwstats_players_from_html(html: str):
-    soup = BeautifulSoup(html or "", "html.parser")
-    players = []
-
-    def normalize_header(value):
-        return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
-
-    header_indexes = {}
-    for tr in soup.find_all("tr"):
-        headers = [normalize_header(th.get_text(" ", strip=True)) for th in tr.find_all("th")]
-        if headers:
-            header_indexes = {header: index for index, header in enumerate(headers)}
-
-    def idx_by(*names):
-        normalized_names = {normalize_header(name) for name in names}
-        for header, index in header_indexes.items():
-            if header in normalized_names:
-                return index
-        return None
-
-    idx_boat = idx_by("Boat movement", "Boat")
-    idx_used_today = idx_by("Cards used today", "Decks used today", "Used today", "Today")
-    idx_cards = idx_by("Cards", "Decks", "Decks used", "Total")
-    idx_medals = idx_by("Medals", "Score", "Fame")
-
-    for tr in soup.find_all("tr"):
-        cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-        if len(cells) < 6:
-            continue
-
-        rank_raw = (cells[0] or "").strip()
-        if not re.fullmatch(r"\d+", rank_raw):
-            continue
-
-        name = (cells[1] or "").strip()
-        if not name:
-            continue
-
-        boat_index = idx_boat if idx_boat is not None else 2
-        used_index = idx_used_today if idx_used_today is not None else 3
-        cards_index = idx_cards if idx_cards is not None else 4
-        medals_index = idx_medals if idx_medals is not None else 5
-
-        players.append({
-            "rank": int(rank_raw),
-            "tag": "",
-            "name": name,
-            "role": "",
-            "boat_attacks": (_compact_number(cells[boat_index]) if boat_index < len(cells) else 0) or 0,
-            "decks_used_today": (_compact_number(cells[used_index]) if used_index < len(cells) else 0) or 0,
-            "decks_total_so_far": (_compact_number(cells[cards_index]) if cards_index < len(cells) else 0) or 0,
-            "fame": (_compact_number(cells[medals_index]) if medals_index < len(cells) else 0) or 0,
-        })
-
-    return players
-
-
-def pick_reporting_soup(race_soup: BeautifulSoup, cwstats_active_day):
-    day_num = parse_day_number(race_soup)
-    if day_num in {1, 2, 3, 4}:
-        return race_soup
-
-    if cwstats_active_day in {1, 2, 3, 4}:
-        return BeautifulSoup(f"Day {cwstats_active_day}", "html.parser")
-
-    return race_soup
 
 
 def build_war_phase(day_num, cwstats_race_context):
@@ -1291,113 +978,7 @@ def _snapshot_fetched_at(records):
     return datetime.now(timezone.utc).isoformat()
 
 
-def _combined_source(fallback_used=False):
-    return (
-        f"{OFFICIAL_SOURCE}+{HTML_FALLBACK_SOURCE}"
-        if fallback_used
-        else OFFICIAL_SOURCE
-    )
-
-
-def _fallback_enabled(value):
-    if value is not None:
-        return bool(value)
-    return os.environ.get(HTML_FALLBACK_ENV, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _load_html_fallback(clan_config):
-    """Load the old cwstats parser only as an explicit temporary fallback."""
-
-    fallback = _HtmlFallback()
-    cwstats_url = f"https://cwstats.com/clan/{clan_config.get('tag')}/race"
-    try:
-        html = fetch_html(cwstats_url)
-    except Exception:
-        return fallback
-
-    fallback.finish_outlook = parse_cwstats_finish_outlook_from_html(html)
-    fallback.race_context = parse_cwstats_race_context_from_html(html)
-    fallback.players = parse_cwstats_players_from_html(html)
-    for row in (fallback.race_context.get("rows_by_name") or {}).values():
-        fallback.clans.append(
-            ClanOverview(
-                name=str(row.get("name") or ""),
-                decks_used_today=None,
-                decks_total_today=None,
-                avg_medals_per_deck=_safe_float(row.get("fame_avg")),
-                projected_medals=None,
-                boat_points=_safe_int(row.get("boat_movement")),
-                current_medals=(
-                    _safe_int(row.get("fame"))
-                    if row.get("fame") is not None
-                    else _safe_int(row.get("trophy"))
-                ),
-                trophies=(
-                    _safe_int(row.get("clan_war_trophies"))
-                    if row.get("clan_war_trophies") is not None
-                    else _safe_int(row.get("cw_trophy"))
-                ),
-            )
-        )
-    for row in fallback.players:
-        row["source"] = HTML_FALLBACK_SOURCE
-        row["data_status"] = DATA_STATUS_PARTIAL
-        row["is_stale"] = False
-        row["stale"] = False
-        row["fetched_at"] = None
-    return fallback
-
-
-def _merge_fallback_clans(official_clans, fallback_clans):
-    if not fallback_clans:
-        return list(official_clans)
-    merged = list(official_clans)
-    official_names = {_normalize_clan_name(clan.name) for clan in merged}
-    for clan in fallback_clans:
-        key = _normalize_clan_name(clan.name)
-        if key and key not in official_names:
-            merged.append(clan)
-            official_names.add(key)
-    return merged
-
-
-def _merge_fallback_players(official_players, fallback_players):
-    if not fallback_players:
-        return list(official_players)
-    merged = list(official_players)
-    existing_tags = {
-        (row.get("tag") or "").strip().upper()
-        for row in merged
-        if row.get("tag")
-    }
-    existing_names = {
-        (row.get("name") or "").strip().upper()
-        for row in merged
-        if row.get("name")
-    }
-    for row in fallback_players:
-        tag_key = (row.get("tag") or "").strip().upper()
-        name_key = (row.get("name") or "").strip().upper()
-        if (tag_key and tag_key in existing_tags) or (
-            name_key and name_key in existing_names
-        ):
-            continue
-        copied = dict(row)
-        copied["rank"] = len(merged) + 1
-        merged.append(copied)
-        if tag_key:
-            existing_tags.add(tag_key)
-        if name_key:
-            existing_names.add(name_key)
-    return merged
-
-
-def _quality(snapshot, records, status, clans, players, *, fallback_used):
+def _quality(snapshot, records, status, clans, players):
     missing = set()
     estimated = set()
     errors = []
@@ -1444,8 +1025,6 @@ def _quality(snapshot, records, status, clans, players, *, fallback_used):
         confidence = "medium" if clans or players else "low"
 
     sources = [OFFICIAL_SOURCE]
-    if fallback_used:
-        sources.append(HTML_FALLBACK_SOURCE)
     return {
         "status": status,
         "dataStatus": status,
@@ -1465,10 +1044,10 @@ def _quality(snapshot, records, status, clans, players, *, fallback_used):
         "endpoints": records,
         "endpointMetadata": records,
         "fallback": {
-            "used": bool(fallback_used),
-            "temporary": True,
+            "used": False,
+            "temporary": False,
             "official_data_precedence": True,
-            "source": HTML_FALLBACK_SOURCE if fallback_used else None,
+            "source": None,
         },
         "metricSources": {
             "current_medals": "official currentriverrace clan.fame",
@@ -1530,40 +1109,21 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
     production the default ``ClashRoyaleClient`` reads the API key server-side.
     """
 
+    # Retain the keyword for callers upgrading from T16, but deliberately do
+    # not activate a legacy source under any value.
+    del allow_html_fallback
     clan_config = pick_clan_config(path)
     clan_tag = normalize_tag(clan_config.get("tag") or "")
     snapshot = fetch_official_snapshot(clan_tag, client=client)
     status = _snapshot_data_status(snapshot)
-    fallback = _HtmlFallback()
-    fallback_used = False
-
-    # A normal empty race is an explicit business state, not a reason to show
-    # an older scraped race.  Fallback is reserved for actual official gaps.
-    if _fallback_enabled(allow_html_fallback) and (
-        snapshot.endpoint_errors or snapshot.normalization_errors
-    ):
-        fallback = _load_html_fallback(clan_config)
-        fallback_used = bool(
-            any(value is not None for value in fallback.finish_outlook.values())
-            or fallback.race_context.get("active_day") in {1, 2, 3, 4}
-            or fallback.race_context.get("rows_by_name")
-            or fallback.players
-            or fallback.clans
-        )
 
     clans = [] if status == DATA_STATUS_EMPTY else _official_clan_overviews(snapshot)
     players = _official_player_rows(snapshot, status)
-    if fallback_used:
-        clans = _merge_fallback_clans(clans, fallback.clans)
-        players = _merge_fallback_players(players, fallback.players)
 
     official_day = _official_active_day(snapshot)
-    fallback_day = fallback.race_context.get("active_day")
-    active_day = official_day if official_day in {1, 2, 3, 4} else fallback_day
+    active_day = official_day
     official_colosseum = _official_colosseum(snapshot)
-    is_colosseum = official_colosseum or bool(
-        fallback.race_context.get("is_colosseum_weekend") if fallback_used else False
-    )
+    is_colosseum = official_colosseum
     war_phase = build_war_phase(
         active_day,
         {
@@ -1571,10 +1131,6 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
             "is_colosseum_weekend": is_colosseum,
         },
     )
-    if official_day is None and fallback_day in {1, 2, 3, 4}:
-        war_phase["source"] = HTML_FALLBACK_SOURCE
-        war_phase["confidence"] = "low"
-
     response_records = _endpoint_records(snapshot, clan_tag)
     fetched_at = _snapshot_fetched_at(response_records)
     stale = any(record.get("is_stale") for record in response_records)
@@ -1594,34 +1150,17 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
         ),
         None,
     )
-    source = _combined_source(fallback_used)
+    source = OFFICIAL_SOURCE
 
     clan_name = clan_config.get("name") or OUR_CLAN_NAME_DEFAULT
     if snapshot.clan is not None and snapshot.clan.name:
         clan_name = snapshot.clan.name if clan_tag == snapshot.clan.clan_tag else clan_name
 
-    finish_outlook = {}
-    if fallback_used and fallback.finish_outlook:
-        # Omit unavailable fallback numbers instead of serializing nulls;
-        # JavaScript's Number(null) would otherwise look like a real zero.
-        finish_outlook = {
-            key: value
-            for key, value in fallback.finish_outlook.items()
-            if value is not None
-        }
-        finish_outlook.update(
-            {
-                "source": HTML_FALLBACK_SOURCE,
-                "data_status": DATA_STATUS_PARTIAL,
-                "model": "temporary_html_fallback",
-            }
-        )
-    else:
-        finish_outlook = {
-            "source": source,
-            "data_status": status,
-            "model": "official_api_no_finish_projection",
-        }
+    finish_outlook = {
+        "source": source,
+        "data_status": status,
+        "model": "official_api_no_finish_projection",
+    }
 
     # Strategy is only fed race data when the normalized race is usable.  Its
     # own dataQuality output still records estimates such as theoretical deck
@@ -1632,7 +1171,7 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
         strategy_input_clans,
         clan_name,
         strategy_input_players,
-        finish_outlook if fallback_used else {},
+        {},
         war_phase,
     )
     quality = _quality(
@@ -1641,7 +1180,6 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
         status,
         clans,
         players,
-        fallback_used=fallback_used,
     )
     strategy_quality = strategy_package.get("dataQuality") or {}
     quality["missingFields"] = sorted(
@@ -1848,7 +1386,6 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
                 if record.get("data_status") == DATA_STATUS_ERROR
             ],
             *([f"{_status_text(status)}"] if status in {DATA_STATUS_EMPTY, DATA_STATUS_PARTIAL, DATA_STATUS_ERROR, DATA_STATUS_STALE} else []),
-            *(["Tijdelijke HTML-fallback gebruikt; officiële data bleef leidend."] if fallback_used else []),
         ],
     }
     return payload

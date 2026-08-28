@@ -4,7 +4,10 @@ import hmac
 import json
 import os
 
-from Royale_api import CLAN_CONFIGS, get_clan_config
+try:
+    from api.config import CLAN_CONFIGS, get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from config import CLAN_CONFIGS, get_clan_config
 from supabase_history import (
     DEFAULT_SUPABASE_PUBLISHABLE_KEY,
     DEFAULT_SUPABASE_URL,
@@ -69,8 +72,11 @@ class handler(BaseHTTPRequestHandler):
                     )
                 )
             self._send_json(200, {"ok": True, "clans": results})
-        except Exception as exc:
-            self._send_json(500, {"ok": False, "error": str(exc)})
+        except Exception:
+            self._send_json(
+                500,
+                {"ok": False, "error": "Snapshot history kon niet worden bijgewerkt."},
+            )
 
     def do_GET(self):
         self._send_json(405, {"ok": False, "error": "Method not allowed"})

@@ -82,9 +82,9 @@ except ImportError:  # pragma: no cover - useful when run as a loose Vercel file
     )
 
 try:
-    from Royale_api import CLAN_CONFIGS, get_clan_config
+    from api.config import CLAN_CONFIGS, get_clan_config
 except ImportError:  # pragma: no cover - convenient for direct module loading.
-    from ..Royale_api import CLAN_CONFIGS, get_clan_config
+    from config import CLAN_CONFIGS, get_clan_config
 
 try:
     from supabase_history import (

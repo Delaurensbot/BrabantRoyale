@@ -120,10 +120,12 @@ def test_existing_dashboard_markers_remain_present():
         'const DEFAULT_CLAN = "9YP8UY"',
         "function fetchData()",
         "/api/cwstats?clan=",
-        "/api/test-clan-prototype?clan=",
         "function init()",
     ):
         assert marker in INDEX_HTML
+
+    assert "/api/test-clan-prototype" not in INDEX_HTML
+    assert "/test-clan.html" not in INDEX_HTML
 
 
 def test_frontend_contains_no_server_credentials_or_private_headers():

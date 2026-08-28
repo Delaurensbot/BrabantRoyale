@@ -33,9 +33,9 @@ except ImportError:  # pragma: no cover - useful when deployed as loose files.
     from clash_normalizers import normalize_player_profile, serialize_normalized
 
 try:
-    from Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
-except ImportError:  # pragma: no cover - convenient for package-style loading.
-    from ..Royale_api import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
+    from api.config import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
+except ImportError:  # pragma: no cover - convenient for loose-file loading.
+    from config import CLAN_CONFIGS, DEFAULT_CLAN_TAG, get_clan_config
 
 from scouting_metrics import build_fit_payload
 from supabase_history import (
@@ -70,8 +70,8 @@ def _normalize_clan_tag(value: object) -> str:
         normalized = normalize_api_tag(value)  # type: ignore[arg-type]
     except ClashClientError:
         raise ValueError("Invalid clan tag.") from None
-    # Royale_api.get_clan_config historically fell back to the default clan for
-    # unknown tags.  Scouting must not silently inspect a different clan.
+    # The historical configuration helper fell back to the default clan for
+    # unknown tags. Scouting must not silently inspect a different clan.
     if normalized not in CLAN_CONFIGS:
         raise ValueError("Invalid clan tag.")
     return normalized
