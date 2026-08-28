@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from collections.abc import Mapping
 import math
+import os
 import re
 
 
@@ -37,6 +38,32 @@ DATA_STATUS_PARTIAL = "partial"
 DATA_STATUS_EMPTY = "empty"
 DATA_STATUS_UNKNOWN = "unknown"
 DEFAULT_BOAT_SAFETY_BUFFER = 100
+STRATEGY_MODES = frozenset(
+    {
+        "normal",
+        "protect_position",
+        "strategic_experiment",
+    }
+)
+DEFAULT_STRATEGY_MODE = "normal"
+DEFAULT_BOAT_ELIGIBILITY_POLICY = {
+    # These defaults are deliberately conservative and transparent.  A clan
+    # can override them through the already existing strategy policy input.
+    "minimumCardDepth": 8,
+    "minimumObservedWarReliability": 90,
+    "minimumObservedWarRaces": 2,
+    "eligibleRoles": ["Leader", "Co-leader", "Elder", "Member"],
+}
+_SECRET_ENV_NAMES = (
+    "CLASH_ROYALE_API_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_INGEST_TOKEN",
+    "WAR_MONITOR_SECRET",
+    "WAR_STATUS_LEADER_SECRET",
+)
 DEFAULT_STRATEGY_POLICY = {
     "scoreRules": {
         "win": WIN_SCORE,
@@ -48,6 +75,7 @@ DEFAULT_STRATEGY_POLICY = {
         "enabled": True,
         "safetyBuffer": DEFAULT_BOAT_SAFETY_BUFFER,
     },
+    "boatEligibility": dict(DEFAULT_BOAT_ELIGIBILITY_POLICY),
 }
 
 
@@ -165,6 +193,344 @@ def _timestamp_text(value):
     if isinstance(value, str) and value.strip():
         return None
     return None
+
+
+def _explicit_bool(value):
+    """Return a boolean only when the input explicitly carries one."""
+
+    if isinstance(value, bool):
+        return value
+    token = _normalized_token(value)
+    if token in {"true", "yes", "1"}:
+        return True
+    if token in {"false", "no", "0"}:
+        return False
+    return None
+
+
+def _safe_report_text(value, maximum):
+    """Keep audit/report strings bounded and free of control characters."""
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > maximum:
+        return None
+    if any(ord(character) < 32 or ord(character) == 127 for character in candidate):
+        return None
+    if any(
+        os.environ.get(name, "").strip()
+        and os.environ.get(name, "").strip() in candidate
+        for name in _SECRET_ENV_NAMES
+    ):
+        return None
+    return candidate
+
+
+def normalize_strategy_mode(value, default=DEFAULT_STRATEGY_MODE):
+    """Normalize the three supported strategic reporting modes."""
+
+    aliases = {
+        "normal": "normal",
+        "protectposition": "protect_position",
+        "protect": "protect_position",
+        "strategicexperiment": "strategic_experiment",
+        "experiment": "strategic_experiment",
+    }
+    normalized_default = aliases.get(_normalized_token(default), DEFAULT_STRATEGY_MODE)
+    return aliases.get(_normalized_token(value), normalized_default)
+
+
+def _strategy_decisions(war_phase):
+    decisions = []
+    sources = _context_sources(war_phase)
+    for source in list(sources):
+        for key in ("policy", "strategyPolicy", "strategy_policy"):
+            nested = _value_from(source, key)
+            if isinstance(nested, Mapping):
+                sources.append(nested)
+    for source in sources:
+        decision_type = _normalized_token(
+            _value_from(source, "decisionType", "decision_type")
+        )
+        if decision_type:
+            decisions.append(source)
+        for key in ("leaderDecisions", "leader_decisions", "decisions"):
+            raw = _value_from(source, key)
+            if isinstance(raw, Mapping):
+                nested = raw.get("decisions")
+                raw = nested if isinstance(nested, (list, tuple)) else [raw]
+            if not isinstance(raw, (list, tuple)):
+                continue
+            decisions.extend(item for item in raw if isinstance(item, Mapping))
+        for key in ("leaderDecision", "leader_decision"):
+            raw = _value_from(source, key)
+            if isinstance(raw, Mapping):
+                decisions.append(raw)
+    return decisions
+
+
+def _strategic_experiment_decision(war_phase):
+    context_clan = _context_value(war_phase, "clanTag", "clan_tag")
+    context_clan = str(context_clan or "").strip().lstrip("#").upper()
+    for decision in _strategy_decisions(war_phase):
+        decision_type = _normalized_token(
+            _value_from(decision, "decisionType", "decision_type")
+        )
+        if decision_type != "strategicexperiment":
+            continue
+        decision_clan = _value_from(decision, "clanTag", "clan_tag")
+        decision_clan = str(decision_clan or "").strip().lstrip("#").upper()
+        if context_clan and decision_clan and context_clan != decision_clan:
+            continue
+        return decision
+    return None
+
+
+def _strategic_week_candidate(war_phase):
+    candidate = {}
+    decision = _strategic_experiment_decision(war_phase)
+    if decision:
+        candidate.update(decision)
+    for source in _context_sources(war_phase):
+        raw = _value_from(
+            source,
+            "strategicWeek",
+            "strategic_week",
+            "strategyWeek",
+            "strategy_week",
+        )
+        if isinstance(raw, Mapping):
+            candidate.update(raw)
+        elif raw is True:
+            candidate.setdefault("isStrategicWeek", True)
+    direct_fields = (
+        ("reason", ("reason", "strategyReason", "strategy_reason", "experimentReason", "experiment_reason")),
+        ("actor", ("actor", "strategyActor", "strategy_actor", "experimentActor", "experiment_actor")),
+        ("race_key", ("raceKey", "race_key", "strategyRaceKey", "strategy_race_key")),
+        ("included_in_normal_analytics", ("includedInNormalAnalytics", "included_in_normal_analytics")),
+        ("observed_outcome", ("observedOutcome", "observed_outcome", "experimentOutcome", "experiment_outcome")),
+    )
+    for target, keys in direct_fields:
+        for source in _context_sources(war_phase):
+            value = _value_from(source, *keys)
+            if value is not None:
+                candidate.setdefault(target, value)
+                break
+    return candidate
+
+
+def _race_key_from_context(war_phase):
+    explicit = _context_value(
+        war_phase,
+        "raceKey",
+        "race_key",
+        "strategyRaceKey",
+        "strategy_race_key",
+    )
+    safe_explicit = _safe_report_text(explicit, 256)
+    if safe_explicit:
+        return safe_explicit
+
+    clan_tag = _context_value(war_phase, "clanTag", "clan_tag")
+    season_id = safe_int(_context_value(war_phase, "seasonId", "season_id"))
+    section_index = safe_int(
+        _context_value(war_phase, "sectionIndex", "section_index")
+    )
+    created_at = _timestamp_text(
+        _context_value(
+            war_phase,
+            "raceCreatedAt",
+            "race_created_at",
+            "createdDate",
+            "created_at",
+        )
+    )
+    if season_id is None or not created_at:
+        return None
+    prefix = _safe_report_text(clan_tag, 32) or "race"
+    parts = [prefix, str(season_id)]
+    if section_index is not None:
+        parts.append(str(section_index))
+    parts.append(created_at)
+    return ":".join(parts)[:256]
+
+
+def _safe_observed_outcome(war_phase, candidate):
+    raw = _value_from(
+        candidate,
+        "observedOutcome",
+        "observed_outcome",
+        "experimentOutcome",
+        "experiment_outcome",
+    )
+    if raw is None:
+        raw = _context_value(
+            war_phase,
+            "observedOutcome",
+            "observed_outcome",
+            "experimentOutcome",
+            "experiment_outcome",
+        )
+    if isinstance(raw, str):
+        return _safe_report_text(raw, 500)
+    if isinstance(raw, (bool, int, float)):
+        return raw
+    if isinstance(raw, Mapping):
+        allowed = (
+            "status",
+            "result",
+            "sample_size",
+            "sampleSize",
+            "confidence",
+            "data_status",
+            "dataStatus",
+        )
+        clean = {}
+        for key in allowed:
+            value = raw.get(key)
+            if isinstance(value, str):
+                value = _safe_report_text(value, 120)
+            elif not isinstance(value, (bool, int, float)) or isinstance(value, bool):
+                if not isinstance(value, bool):
+                    value = None
+            if value is not None:
+                clean[key] = value
+        return clean or None
+    return None
+
+
+def _resolve_strategy_mode(war_phase):
+    explicit = _context_value(war_phase, "strategyMode", "strategy_mode")
+    if explicit is not None:
+        return normalize_strategy_mode(explicit)
+    candidate = _strategic_week_candidate(war_phase)
+    candidate_mode = _value_from(candidate, "strategyMode", "strategy_mode")
+    if candidate_mode is not None:
+        return normalize_strategy_mode(candidate_mode)
+    if _explicit_bool(
+        _value_from(candidate, "isStrategicWeek", "is_strategic_week")
+    ) is True:
+        return "strategic_experiment"
+    policy = _context_value(war_phase, "policy", "strategyPolicy", "strategy_policy")
+    if isinstance(policy, Mapping):
+        policy_mode = _value_from(policy, "strategyMode", "strategy_mode")
+        if policy_mode is not None:
+            return normalize_strategy_mode(policy_mode)
+    if _strategic_experiment_decision(war_phase) is not None:
+        return "strategic_experiment"
+    return DEFAULT_STRATEGY_MODE
+
+
+def build_strategic_week_metadata(war_phase=None, *, strategy_mode=None):
+    """Build an explicit, fail-closed label for a strategic experiment week."""
+
+    candidate = _strategic_week_candidate(war_phase)
+    mode = normalize_strategy_mode(
+        strategy_mode if strategy_mode is not None else _resolve_strategy_mode(war_phase)
+    )
+    if mode != "strategic_experiment":
+        return {
+            "label": None,
+            "is_strategic_week": False,
+            "strategy_mode": mode,
+            "strategyMode": mode,
+            "reason": None,
+            "actor": None,
+            "race_key": None,
+            "raceKey": None,
+            "included_in_normal_analytics": True,
+            "includedInNormalAnalytics": True,
+            "metadata_status": "not_applicable",
+            "observed_outcome": None,
+            "observedOutcome": None,
+            "outcome_status": "not_applicable",
+            "uncertainties": [],
+        }
+
+    reason = _safe_report_text(
+        _value_from(candidate, "reason", "strategyReason", "strategy_reason"),
+        240,
+    )
+    actor = _safe_report_text(
+        _value_from(candidate, "actor", "strategyActor", "strategy_actor"),
+        120,
+    )
+    race_key = _safe_report_text(
+        _value_from(candidate, "raceKey", "race_key", "relatedRaceKey", "related_race_key"),
+        256,
+    ) or _race_key_from_context(war_phase)
+    outcome = _safe_observed_outcome(war_phase, candidate)
+    missing = [
+        field
+        for field, value in (
+            ("reason", reason),
+            ("actor", actor),
+            ("race_key", race_key),
+        )
+        if value is None
+    ]
+    complete = not missing
+    explicit_include = _explicit_bool(
+        _value_from(
+            candidate,
+            "includedInNormalAnalytics",
+            "included_in_normal_analytics",
+        )
+    )
+    # An incomplete audit label must never silently remove a week from normal
+    # analytics.  A complete strategic experiment is excluded by default,
+    # while an explicit boolean can keep it included for comparison.
+    included = (
+        True
+        if not complete
+        else explicit_include
+        if explicit_include is not None
+        else False
+    )
+    uncertainties = []
+    if missing:
+        uncertainties.append(
+            "Strategic experiment metadata incomplete; missing "
+            + ", ".join(missing)
+            + "."
+        )
+    if outcome is None:
+        uncertainties.append(
+            "Observed outcome is unknown; this experiment does not guarantee loose-to-win."
+        )
+    data_status = _normalized_token(
+        _context_value(war_phase, "dataStatus", "data_status")
+    )
+    if data_status in {"partial", "empty", "unknown", "stale", "error", "invalid"}:
+        uncertainties.append(
+            f"Race data status is {data_status}; observed outcome remains uncertain."
+        )
+    experiment_name = _safe_report_text(
+        _value_from(candidate, "experiment", "experimentName", "experiment_name"),
+        120,
+    ) or "loose_to_win"
+    return {
+        "label": "strategic_week",
+        "is_strategic_week": True,
+        "strategy_mode": mode,
+        "strategyMode": mode,
+        "reason": reason,
+        "actor": actor,
+        "race_key": race_key,
+        "raceKey": race_key,
+        "included_in_normal_analytics": included,
+        "includedInNormalAnalytics": included,
+        "metadata_status": "complete" if complete else "incomplete",
+        "experiment": experiment_name,
+        "hypothesis": (
+            "Loose-to-win wordt als experiment gevolgd; de uitkomst is geen garantie."
+        ),
+        "observed_outcome": outcome,
+        "observedOutcome": outcome,
+        "outcome_status": "observed" if outcome is not None else "unknown",
+        "uncertainties": list(dict.fromkeys(uncertainties)),
+    }
 
 
 def _valid_war_day(value):
@@ -460,6 +826,7 @@ def build_war_context(war_phase, now=None, target_rank=1, risk_profile="balanced
     policy = {
         "scoreRules": dict(DEFAULT_STRATEGY_POLICY["scoreRules"]),
         "boat": dict(DEFAULT_STRATEGY_POLICY["boat"]),
+        "boatEligibility": dict(DEFAULT_STRATEGY_POLICY["boatEligibility"]),
     }
     if isinstance(policy_input, Mapping):
         policy_source = "configured"
@@ -469,14 +836,34 @@ def build_war_context(war_phase, now=None, target_rank=1, risk_profile="balanced
         supplied_boat = policy_input.get("boat")
         if isinstance(supplied_boat, Mapping):
             policy["boat"].update(supplied_boat)
+        supplied_eligibility = policy_input.get(
+            "boatEligibility",
+            policy_input.get("boat_eligibility"),
+        )
+        if isinstance(supplied_eligibility, Mapping):
+            policy["boatEligibility"].update(supplied_eligibility)
     direct_scores = _context_value(war_phase, "scoreRules", "score_rules")
     if isinstance(direct_scores, Mapping):
         policy_source = "configured"
         policy["scoreRules"].update(direct_scores)
+    direct_eligibility = _context_value(
+        war_phase,
+        "boatEligibility",
+        "boat_eligibility",
+    )
+    if isinstance(direct_eligibility, Mapping):
+        policy_source = "configured"
+        policy["boatEligibility"].update(direct_eligibility)
+    strategy_mode = _resolve_strategy_mode(war_phase)
+    strategic_week = build_strategic_week_metadata(
+        war_phase,
+        strategy_mode=strategy_mode,
+    )
     policy["source"] = policy_source
     policy["assumptions"] = [
         "Score rules are configured policy values; default values are used when the API does not provide a policy.",
         "Boat advice is disabled outside a verified normal war day and remains an estimated decision aid.",
+        "Boat eligibility is a manual report only; no game action is performed or promised.",
     ]
     score_rules = policy["scoreRules"]
     race_finished = phase["phaseStatus"] == PHASE_FINISHED
@@ -503,6 +890,40 @@ def build_war_context(war_phase, now=None, target_rank=1, risk_profile="balanced
         "placementFrozenAfterFinish": placement_frozen,
         "targetRank": target_rank,
         "riskProfile": risk_profile,
+        "strategyMode": strategy_mode,
+        "strategy_mode": strategy_mode,
+        "raceKey": _race_key_from_context(war_phase),
+        "race_key": _race_key_from_context(war_phase),
+        "boatNeed": _context_value(
+            war_phase,
+            "boatNeed",
+            "boat_need",
+            "currentBoatNeed",
+            "current_boat_need",
+        ),
+        "boat_need": _context_value(
+            war_phase,
+            "boatNeed",
+            "boat_need",
+            "currentBoatNeed",
+            "current_boat_need",
+        ),
+        "boatTarget": _context_value(
+            war_phase,
+            "boatTarget",
+            "boat_target",
+            "targetClan",
+            "target_clan",
+        ),
+        "boatTargetClanId": _context_value(
+            war_phase,
+            "boatTargetClanId",
+            "boat_target_clan_id",
+            "targetClanId",
+            "target_clan_id",
+        ),
+        "strategicWeek": strategic_week,
+        "strategic_week": strategic_week,
         "scoreRules": score_rules,
         "policy": policy,
         **phase,
@@ -581,11 +1002,41 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
         )
         raw_projected = _clan_value(clan, "projected_medals", "projectedMedals", "projected")
         raw_boat = _clan_value(clan, "boat_points", "boatPoints", "boatValueRaw")
+        raw_boat_defenses_today = _clan_value(
+            clan,
+            "boat_defenses_today",
+            "boatDefensesToday",
+        )
+        raw_boat_defenses_total = _clan_value(
+            clan,
+            "boat_defenses",
+            "boatDefenses",
+            "boat_defenses_total",
+            "boatDefensesTotal",
+        )
+        raw_boat_defenses_remaining = _clan_value(
+            clan,
+            "boat_defenses_remaining",
+            "boatDefensesRemaining",
+            "defenses_remaining",
+            "defensesRemaining",
+        )
+        raw_boat_need = _clan_value(
+            clan,
+            "boat_need",
+            "boatNeed",
+            "boat_attack_needed",
+            "boatAttackNeeded",
+        )
         decks_used = safe_int(raw_decks_used)
         decks_total = safe_int(raw_decks_total)
         current_medals = safe_int(raw_current_medals)
         today_avg = safe_number(raw_today_avg)
         projected = safe_int(raw_projected)
+        boat_defenses_today = _safe_nonnegative_int(raw_boat_defenses_today)
+        boat_defenses_total = _safe_nonnegative_int(raw_boat_defenses_total)
+        boat_defenses_remaining = _safe_nonnegative_int(raw_boat_defenses_remaining)
+        boat_need = _explicit_bool(raw_boat_need)
         confidence = "high"
         capacity_source = "live" if decks_total is not None else "unknown"
         deck_data_source = "api" if decks_used is not None or decks_total is not None else "unknown"
@@ -596,6 +1047,15 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
             "todayAveragePerDeck": "derived" if today_avg is not None else "unknown",
             "projected": "estimated" if projected is not None else "unknown",
             "boatValueRaw": "official" if safe_int(raw_boat) is not None else "unknown",
+            "boatDefensesToday": (
+                "official" if boat_defenses_today is not None else "unknown"
+            ),
+            "boatDefensesTotal": (
+                "official" if boat_defenses_total is not None else "unknown"
+            ),
+            "boatDefensesRemaining": (
+                "official" if boat_defenses_remaining is not None else "unknown"
+            ),
         }
         estimated_fields = []
 
@@ -700,6 +1160,9 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
                 ("blendedAveragePerDeck", blended),
                 ("projected", projected),
                 ("boatValueRaw", safe_int(raw_boat)),
+                ("boatDefensesToday", boat_defenses_today),
+                ("boatDefensesTotal", boat_defenses_total),
+                ("boatDefensesRemaining", boat_defenses_remaining),
             )
             if value is None
         ]
@@ -727,6 +1190,17 @@ def normalize_clans(clans, clan_name, players=None, finish_outlook=None):
             "boatState": "unknown",
             "boatValueRaw": safe_int(raw_boat),
             "boatValueLabel": "Boat movement",
+            "boatDefensesToday": boat_defenses_today,
+            "boatDefensesTotal": boat_defenses_total,
+            "boatDefensesRemaining": boat_defenses_remaining,
+            "boatNeed": boat_need,
+            "boatDefenseStatus": (
+                "complete"
+                if boat_defenses_remaining is not None
+                else "partial"
+                if any(value is not None for value in (boat_defenses_today, boat_defenses_total))
+                else "unknown"
+            ),
             "dataConfidence": confidence,
             "projected": projected,
             "trophies": safe_int(_clan_value(clan, "trophies")),
@@ -1114,6 +1588,747 @@ def _phase_can_drive_strategy(context):
     return status in {PHASE_WAR_DAY, PHASE_COLOSSEUM} and quality != "estimated"
 
 
+def _player_sources(player):
+    sources = [player]
+    if player is None:
+        return sources
+    for key in (
+        "account_readiness",
+        "accountReadiness",
+        "profile",
+        "profile_metrics",
+        "profileMetrics",
+        "observed_war_reliability",
+        "observedWarReliability",
+        "war_reliability",
+        "warReliability",
+        "war",
+    ):
+        nested = _value_from(player, key)
+        if isinstance(nested, Mapping):
+            sources.append(nested)
+            metrics = _value_from(nested, "metrics")
+            if isinstance(metrics, Mapping):
+                sources.append(metrics)
+    return sources
+
+
+def _player_value(player, *keys):
+    for source in _player_sources(player):
+        value = _value_from(source, *keys)
+        if value is not None:
+            return value
+    return None
+
+
+def _safe_nonnegative_int(value):
+    number = safe_int(value)
+    return number if number is not None and number >= 0 else None
+
+
+def _extract_card_depth(player):
+    level_15 = _safe_nonnegative_int(
+        _player_value(
+            player,
+            "level_15_depth",
+            "level15Depth",
+            "cards_level_15_plus",
+            "cardsLevel15Plus",
+        )
+    )
+    level_16 = _safe_nonnegative_int(
+        _player_value(
+            player,
+            "level_16_depth",
+            "level16Depth",
+            "cards_level_16",
+            "cardsLevel16",
+        )
+    )
+    depth = _safe_nonnegative_int(
+        _player_value(
+            player,
+            "card_depth",
+            "cardDepth",
+            "cards_depth",
+            "cardsDepth",
+            "deck_breadth",
+            "deckBreadth",
+        )
+    )
+    source = "explicit"
+
+    if depth is None and level_15 is not None:
+        depth = level_15
+        source = "level_15_depth"
+    elif depth is None and level_16 is not None:
+        depth = level_16
+        source = "level_16_depth"
+
+    cards = _player_value(player, "cards")
+    if depth is None and isinstance(cards, (list, tuple)):
+        if not cards:
+            depth = 0
+            level_15 = 0
+            level_16 = 0
+            source = "empty_cards"
+        else:
+            levels = []
+            for card in cards:
+                level = _safe_nonnegative_int(
+                    _value_from(card, "normalizedLevel", "normalized_level", "level")
+                )
+                if level is not None:
+                    levels.append(level)
+            if levels:
+                level_15 = sum(level >= 15 for level in levels)
+                level_16 = sum(level >= 16 for level in levels)
+                depth = level_15
+                source = "cards"
+
+    return {
+        "card_depth": depth,
+        "cardDepth": depth,
+        "level_15_depth": level_15,
+        "level15Depth": level_15,
+        "level_16_depth": level_16,
+        "level16Depth": level_16,
+        "status": (
+            "known"
+            if depth is not None
+            else "partial"
+            if any(value is not None for value in (level_15, level_16))
+            else "unknown"
+        ),
+        "source": source if depth is not None else "unknown",
+        "unknown_fields": [] if depth is not None else ["card_depth"],
+    }
+
+
+def _extract_observed_war_reliability(player):
+    reliability = _player_value(
+        player,
+        "reliability",
+        "reliability_score",
+        "reliabilityScore",
+    )
+    sample_size = _player_value(
+        player,
+        "sample_size",
+        "sampleSize",
+        "observed_races",
+        "observedRaces",
+        "observed_war_races",
+        "observedWarRaces",
+        "weeks_played",
+        "weeksPlayed",
+    )
+    if reliability is None:
+        direct_reliability = _value_from(
+            player,
+            "observed_war_reliability",
+            "observedWarReliability",
+            "war_reliability",
+            "warReliability",
+        )
+        if not isinstance(direct_reliability, Mapping):
+            reliability = direct_reliability
+    reliability = safe_number(reliability)
+    if reliability is not None and not 0 <= reliability <= 100:
+        reliability = None
+    sample_size = _safe_nonnegative_int(sample_size)
+    return {
+        "reliability": round(reliability, 2) if reliability is not None else None,
+        "reliability_score": round(reliability, 2) if reliability is not None else None,
+        "sample_size": sample_size,
+        "sampleSize": sample_size,
+        "observed_races": sample_size,
+        "observedRaces": sample_size,
+        "status": (
+            "known"
+            if reliability is not None and sample_size is not None
+            else "partial"
+            if reliability is not None or sample_size is not None
+            else "unknown"
+        ),
+        "unknown_fields": [
+            field
+            for field, value in (
+                ("reliability", reliability),
+                ("sample_size", sample_size),
+            )
+            if value is None
+        ],
+    }
+
+
+def _extract_defense_evidence(source):
+    sources = [source]
+    if isinstance(source, Mapping):
+        for key in (
+            "defense",
+            "defenses",
+            "boatDefense",
+            "boat_defense",
+            "boatNeed",
+            "boat_need",
+        ):
+            nested = _value_from(source, key)
+            if isinstance(nested, Mapping):
+                sources.append(nested)
+
+    def first_value(*keys):
+        for item in sources:
+            value = _value_from(item, *keys)
+            if value is not None:
+                return _safe_nonnegative_int(value)
+        return None
+
+    today = first_value("boat_defenses_today", "boatDefensesToday")
+    total = first_value(
+        "boat_defenses",
+        "boatDefenses",
+        "boat_defenses_total",
+        "boatDefensesTotal",
+    )
+    remaining = first_value(
+        "boat_defenses_remaining",
+        "boatDefensesRemaining",
+        "defenses_remaining",
+        "defensesRemaining",
+    )
+    return {
+        "boat_defenses_today": today,
+        "boatDefensesToday": today,
+        "boat_defenses_total": total,
+        "boatDefensesTotal": total,
+        "boat_defenses_remaining": remaining,
+        "boatDefensesRemaining": remaining,
+        "status": (
+            "complete"
+            if remaining is not None
+            else "partial"
+            if any(value is not None for value in (today, total))
+            else "unknown"
+        ),
+        "unknown_fields": [
+            field
+            for field, value in (
+                ("boat_defenses_today", today),
+                ("boat_defenses_total", total),
+                ("boat_defenses_remaining", remaining),
+            )
+            if value is None
+        ],
+    }
+
+
+def _boat_need_value(value, *, source="explicit"):
+    if isinstance(value, bool):
+        return {
+            "needed": value,
+            "status": "needed" if value else "not_needed",
+            "source": source,
+            "attacks_needed": None,
+            "defenses_remaining": None,
+        }
+    if isinstance(value, Mapping):
+        explicit = _explicit_bool(
+            _value_from(
+                value,
+                "needed",
+                "need",
+                "needsBoatAttack",
+                "needs_boat_attack",
+                "boatAttackNeeded",
+                "boat_attack_needed",
+            )
+        )
+        attacks = _safe_nonnegative_int(
+            _value_from(
+                value,
+                "attacksNeeded",
+                "attacks_needed",
+                "boatAttacksNeeded",
+                "boat_attacks_needed",
+                "requiredBoatAttacks",
+                "required_boat_attacks",
+            )
+        )
+        defenses_remaining = _safe_nonnegative_int(
+            _value_from(
+                value,
+                "defensesRemaining",
+                "defenses_remaining",
+                "boatDefensesRemaining",
+                "boat_defenses_remaining",
+            )
+        )
+        if explicit is not None:
+            needed = explicit
+        elif attacks is not None:
+            needed = attacks > 0
+        elif defenses_remaining is not None:
+            needed = defenses_remaining > 0
+        else:
+            state = _normalized_token(_value_from(value, "status", "state", "boatState"))
+            if state in {"active", "needsattack", "need", "available", "repairing"}:
+                needed = True
+            elif state in {"disabled", "destroyed", "complete", "notneeded", "none"}:
+                needed = False
+            else:
+                return None
+        return {
+            "needed": needed,
+            "status": "needed" if needed else "not_needed",
+            "source": source,
+            "attacks_needed": attacks,
+            "defenses_remaining": defenses_remaining,
+        }
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = safe_number(value)
+        if number is None or number < 0:
+            return None
+        needed = number > 0
+        return {
+            "needed": needed,
+            "status": "needed" if needed else "not_needed",
+            "source": source,
+            "attacks_needed": int(number),
+            "defenses_remaining": None,
+        }
+    return None
+
+
+def _boat_need_from_source(source, *, source_name="unknown"):
+    if source is None:
+        return None
+    for key in (
+        "boatNeed",
+        "boat_need",
+        "currentBoatNeed",
+        "current_boat_need",
+        "warNeed",
+        "war_need",
+        "currentWarNeed",
+        "current_war_need",
+        "boatAttackNeeded",
+        "boat_attack_needed",
+        "needsBoatAttack",
+        "needs_boat_attack",
+        "attacksNeeded",
+        "attacks_needed",
+        "boatAttacksNeeded",
+        "boat_attacks_needed",
+        "requiredBoatAttacks",
+        "required_boat_attacks",
+        "defensesRemaining",
+        "defenses_remaining",
+        "boatDefensesRemaining",
+        "boat_defenses_remaining",
+    ):
+        value = _value_from(source, key)
+        if value is not None:
+            result = _boat_need_value(value, source=source_name)
+            if result is not None:
+                if key in {
+                    "defensesRemaining",
+                    "defenses_remaining",
+                    "boatDefensesRemaining",
+                    "boat_defenses_remaining",
+                }:
+                    result["defenses_remaining"] = _safe_nonnegative_int(value)
+                return result
+    result = _boat_need_value(source, source=source_name)
+    if result is not None:
+        return result
+    return None
+
+
+def _clan_identifier(source):
+    return _value_from(source, "id", "clanId", "clan_id", "tag", "clanTag", "clan_tag")
+
+
+def _boat_war_need(
+    context,
+    opponents=None,
+    target_clan=None,
+    war_need=None,
+    our_clan=None,
+):
+    opponents = list(opponents or [])
+    candidate_sources = []
+    if war_need is not None:
+        candidate_sources.append((war_need, "explicit_argument"))
+    if target_clan is not None:
+        candidate_sources.append((target_clan, "target_clan"))
+    if our_clan is not None:
+        candidate_sources.append((our_clan, "our_clan"))
+    explicit_target = _context_value(
+        context,
+        "boatTarget",
+        "boat_target",
+        "targetClan",
+        "target_clan",
+    )
+    if explicit_target is not None:
+        candidate_sources.append((explicit_target, "target_context"))
+    candidate_sources.append((context, "war_context"))
+
+    target_id = _context_value(
+        context,
+        "boatTargetClanId",
+        "boat_target_clan_id",
+        "targetClanId",
+        "target_clan_id",
+    )
+    if target_id is not None:
+        for opponent in opponents:
+            if str(_clan_identifier(opponent) or "") == str(target_id):
+                candidate_sources.insert(0, (opponent, "target_opponent"))
+                break
+
+    for opponent in opponents:
+        candidate_sources.append((opponent, "opponent"))
+
+    for source, source_name in candidate_sources:
+        result = _boat_need_from_source(source, source_name=source_name)
+        if result is None:
+            continue
+        identifier = _clan_identifier(source)
+        result["target_clan_id"] = identifier
+        result["targetClanId"] = identifier
+        defense = _extract_defense_evidence(source)
+        if defense.get("status") == "unknown":
+            fallback_sources = [target_clan, explicit_target]
+            if target_id is not None:
+                fallback_sources.extend(
+                    opponent
+                    for opponent in opponents
+                    if str(_clan_identifier(opponent) or "") == str(target_id)
+                )
+            for fallback_source in fallback_sources:
+                fallback_defense = _extract_defense_evidence(fallback_source)
+                if fallback_defense.get("status") != "unknown":
+                    defense = fallback_defense
+                    if result.get("target_clan_id") is None:
+                        result["target_clan_id"] = _clan_identifier(fallback_source)
+                        result["targetClanId"] = result["target_clan_id"]
+                    break
+        result["defense"] = defense
+        if defense.get("boat_defenses_remaining") == 0:
+            result["needed"] = False
+            result["status"] = "not_needed"
+            result["source"] = "defense_fields"
+        return result
+
+    defense_source = target_clan or explicit_target or context
+    identifier = _clan_identifier(defense_source)
+    return {
+        "needed": None,
+        "status": "unknown",
+        "source": "unknown",
+        "attacks_needed": None,
+        "defenses_remaining": None,
+        "target_clan_id": identifier,
+        "targetClanId": identifier,
+        "defense": _extract_defense_evidence(defense_source),
+    }
+
+
+def _boat_eligibility_policy(context, policy=None):
+    result = dict(DEFAULT_BOAT_ELIGIBILITY_POLICY)
+    result["eligibleRoles"] = list(DEFAULT_BOAT_ELIGIBILITY_POLICY["eligibleRoles"])
+    containers = [policy]
+    context_policy = _context_value(
+        context,
+        "policy",
+        "strategyPolicy",
+        "strategy_policy",
+    )
+    containers.append(context_policy)
+    containers.append(context)
+    for container in containers:
+        if not isinstance(container, Mapping):
+            continue
+        candidates = [container]
+        for key in ("boatEligibility", "boat_eligibility"):
+            nested = container.get(key)
+            if isinstance(nested, Mapping):
+                candidates.append(nested)
+        for candidate in candidates:
+            for key, aliases in (
+                (
+                    "minimumCardDepth",
+                    ("minimumCardDepth", "minimum_card_depth", "minimumLevel15Depth"),
+                ),
+                (
+                    "minimumObservedWarReliability",
+                    (
+                        "minimumObservedWarReliability",
+                        "minimum_observed_war_reliability",
+                        "minimumReliability",
+                    ),
+                ),
+                (
+                    "minimumObservedWarRaces",
+                    (
+                        "minimumObservedWarRaces",
+                        "minimum_observed_war_races",
+                        "minimumObservedRaces",
+                    ),
+                ),
+            ):
+                value = _value_from(candidate, *aliases)
+                if value is not None:
+                    result[key] = value
+            roles = _value_from(candidate, "eligibleRoles", "eligible_roles", "allowedRoles")
+            if isinstance(roles, (list, tuple)):
+                result["eligibleRoles"] = [
+                    str(role).strip()
+                    for role in roles
+                    if isinstance(role, str) and role.strip()
+                ]
+
+    depth = _safe_nonnegative_int(result.get("minimumCardDepth"))
+    reliability = safe_number(result.get("minimumObservedWarReliability"))
+    races = _safe_nonnegative_int(result.get("minimumObservedWarRaces"))
+    result["minimumCardDepth"] = depth if depth is not None else DEFAULT_BOAT_ELIGIBILITY_POLICY["minimumCardDepth"]
+    result["minimumObservedWarReliability"] = (
+        reliability
+        if reliability is not None and 0 <= reliability <= 100
+        else DEFAULT_BOAT_ELIGIBILITY_POLICY["minimumObservedWarReliability"]
+    )
+    result["minimumObservedWarRaces"] = (
+        races if races is not None and races > 0 else DEFAULT_BOAT_ELIGIBILITY_POLICY["minimumObservedWarRaces"]
+    )
+    result["eligibleRoles"] = list(result.get("eligibleRoles") or [])
+    result["enabled"] = True
+    for container in containers:
+        if not isinstance(container, Mapping):
+            continue
+        boat = container.get("boat")
+        if isinstance(boat, Mapping) and _explicit_bool(boat.get("enabled")) is False:
+            result["enabled"] = False
+        if _explicit_bool(container.get("enabled")) is False:
+            result["enabled"] = False
+    return result
+
+
+def build_boat_eligibility_advice(
+    players,
+    our_clan=None,
+    opponents=None,
+    context=None,
+    policy=None,
+    target_clan=None,
+    war_need=None,
+):
+    """Return manual boat-assignment advice without performing a game action."""
+
+    raw_context = context or {}
+    if not (
+        isinstance(raw_context, Mapping)
+        and (raw_context.get("phaseStatus") or raw_context.get("phase_status"))
+    ):
+        raw_context = build_war_context(raw_context)
+    phase_status = _effective_phase_status(raw_context)
+    strategy_mode = normalize_strategy_mode(
+        raw_context.get("strategyMode", raw_context.get("strategy_mode"))
+    )
+    eligibility_policy = _boat_eligibility_policy(raw_context, policy)
+    need = _boat_war_need(
+        raw_context,
+        opponents=opponents,
+        our_clan=our_clan,
+        target_clan=target_clan,
+        war_need=war_need,
+    )
+    phase_reason = {
+        PHASE_COLOSSEUM: "Bootaanvallen zijn niet relevant in Colosseum.",
+        PHASE_TRAINING: "Bootaanvallen zijn niet relevant tijdens training.",
+        PHASE_FINISHED: "De race is finished; bootadvies is niet beschikbaar.",
+        PHASE_STALE: "Bootadvies is geblokkeerd omdat de racecontext stale is.",
+        PHASE_ERROR: "Bootadvies is geblokkeerd omdat de racecontext een fout bevat.",
+        PHASE_NOT_AVAILABLE: "Bootadvies is geblokkeerd omdat de racefase onbekend is.",
+    }
+    if phase_status == PHASE_COLOSSEUM:
+        status = "not_applicable"
+        top_reason = phase_reason[PHASE_COLOSSEUM]
+    elif not _phase_can_drive_strategy(raw_context):
+        status = "blocked"
+        top_reason = phase_reason.get(
+            phase_status,
+            "Bootadvies is geblokkeerd omdat de racecontext niet betrouwbaar is.",
+        )
+    elif not eligibility_policy["enabled"]:
+        status = "disabled"
+        top_reason = "Bootadvies is via strategy policy uitgeschakeld."
+    elif need["needed"] is True:
+        status = "available"
+        top_reason = "Actuele bootbehoefte is waargenomen; kandidaten blijven handmatig advies."
+    elif need["needed"] is False:
+        status = "not_needed"
+        top_reason = "Er is volgens de beschikbare racegegevens geen actuele bootbehoefte."
+    else:
+        status = "unknown"
+        top_reason = "Actuele bootbehoefte en/of resterende defense is onbekend."
+
+    target_defense = need.get("defense") or _extract_defense_evidence(target_clan or raw_context)
+    target_defense_complete = target_defense.get("status") == "complete"
+    need["attacksNeeded"] = need.get("attacks_needed")
+    need["defensesRemaining"] = need.get("defenses_remaining")
+    player_reports = []
+    for player in players or []:
+        tag = _player_value(player, "player_tag", "playerTag", "tag")
+        name = _player_value(player, "name", "playerName", "player_name")
+        role = _player_value(player, "role", "playerRole", "player_role")
+        role = role.strip() if isinstance(role, str) and role.strip() else None
+        cards = _extract_card_depth(player)
+        reliability = _extract_observed_war_reliability(player)
+        player_defense = _extract_defense_evidence(player)
+        defense = player_defense if player_defense["status"] != "unknown" else target_defense
+        failures = []
+        missing = []
+        if not tag:
+            missing.append("player_tag")
+        if role is None:
+            missing.append("role")
+        else:
+            allowed_roles = {
+                _normalized_token(value) for value in eligibility_policy["eligibleRoles"]
+            }
+            if _normalized_token(role) not in allowed_roles:
+                failures.append(f"Rol {role} staat niet in de boot-eligibility policy.")
+        if cards["card_depth"] is None:
+            missing.append("card_depth")
+        elif cards["card_depth"] < eligibility_policy["minimumCardDepth"]:
+            failures.append(
+                f"Kaartdiepte {cards['card_depth']} ligt onder de minimumwaarde "
+                f"{eligibility_policy['minimumCardDepth']}."
+            )
+        if reliability["reliability"] is None:
+            missing.append("observed_war_reliability")
+        elif reliability["reliability"] < eligibility_policy["minimumObservedWarReliability"]:
+            failures.append(
+                f"Observed war reliability {reliability['reliability']}% ligt onder de "
+                f"minimumwaarde {eligibility_policy['minimumObservedWarReliability']}%."
+            )
+        if reliability["sample_size"] is None:
+            missing.append("observed_war_sample_size")
+        elif reliability["sample_size"] < eligibility_policy["minimumObservedWarRaces"]:
+            failures.append(
+                f"Observed war sample {reliability['sample_size']} ligt onder de "
+                f"minimumwaarde {eligibility_policy['minimumObservedWarRaces']}."
+            )
+        if need["needed"] is None:
+            missing.append("current_boat_need")
+        elif need["needed"] is False:
+            failures.append("Er is geen actuele bootbehoefte gemeld.")
+        elif not target_defense_complete:
+            missing.append("boat_defenses_remaining")
+
+        if status in {"not_applicable", "blocked", "disabled"}:
+            eligible = None
+            eligibility_status = "not_applicable" if status == "not_applicable" else "blocked"
+            reasons = [top_reason]
+        elif failures:
+            eligible = False
+            eligibility_status = "not_eligible"
+            reasons = failures
+        elif missing:
+            eligible = None
+            eligibility_status = "unknown"
+            reasons = [
+                "Boot-eligibility onbekend; ontbrekende signalen zijn niet als nul gerekend: "
+                + ", ".join(missing)
+                + "."
+            ]
+        else:
+            eligible = True
+            eligibility_status = "eligible"
+            reasons = [
+                "Rol, kaartdiepte, observed war reliability, sample en actuele defense-behoefte "
+                "voldoen aan de adviespolicy."
+            ]
+        player_reports.append(
+            {
+                "player_tag": tag,
+                "playerTag": tag,
+                "name": name,
+                "role": role,
+                "card_depth": cards["card_depth"],
+                "cardDepth": cards["card_depth"],
+                "card_depth_details": cards,
+                "cardDepthDetails": cards,
+                "observed_war_reliability": reliability["reliability"],
+                "observedWarReliability": reliability["reliability"],
+                "observed_war_reliability_details": reliability,
+                "observedWarReliabilityDetails": reliability,
+                "defense": defense,
+                "eligible": eligible,
+                "eligibility_status": eligibility_status,
+                "eligibilityStatus": eligibility_status,
+                "recommend": eligible is True,
+                "recommendation": "consider_manual_boat_assignment" if eligible is True else None,
+                "reasons": reasons,
+                "missing_fields": sorted(set(missing)),
+                "unknown_fields": sorted(
+                    set(missing)
+                    | set(cards.get("unknown_fields") or [])
+                    | set(reliability.get("unknown_fields") or [])
+                    | set(defense.get("unknown_fields") or [])
+                ),
+            }
+        )
+
+    eligible_tags = [
+        report["player_tag"]
+        for report in player_reports
+        if report["eligible"] is True and report["player_tag"]
+    ]
+    unknown_fields = []
+    if need["needed"] is None:
+        unknown_fields.append("current_boat_need")
+    if target_defense.get("status") != "complete":
+        unknown_fields.extend(target_defense.get("unknown_fields") or [])
+    return {
+        "status": status,
+        "available": status == "available",
+        "phaseStatus": phase_status,
+        "phase_status": phase_status,
+        "strategyMode": strategy_mode,
+        "strategy_mode": strategy_mode,
+        "advice_only": True,
+        "adviceOnly": True,
+        "automatic_action": False,
+        "automaticAction": False,
+        "action": None,
+        "recommendation_available": bool(eligible_tags),
+        "recommendationAvailable": bool(eligible_tags),
+        "reason": top_reason,
+        "current_need": need,
+        "currentNeed": need,
+        "target_clan_id": need.get("target_clan_id"),
+        "targetClanId": need.get("targetClanId"),
+        "defense": target_defense,
+        "policy": eligibility_policy,
+        "eligible_player_tags": eligible_tags,
+        "eligiblePlayerTags": eligible_tags,
+        "players": player_reports,
+        "unknown_fields": sorted(set(unknown_fields)),
+        "uncertainties": [
+            "Dit is een handmatig advies/rapport; de site voert geen gameactie uit.",
+        ]
+        + (["Defensevelden zijn gedeeltelijk of volledig onbekend."] if not target_defense_complete else []),
+    }
+
+
+# ``boot`` is the Dutch UI term; ``boat`` remains the API-compatible spelling.
+build_boot_eligibility_advice = build_boat_eligibility_advice
+build_boat_eligibility = build_boat_eligibility_advice
+
+
 def _boat_result(context, target_clan, reason, attacks=None, delay_value=None):
     return {
         "recommend": False,
@@ -1128,6 +2343,11 @@ def _boat_result(context, target_clan, reason, attacks=None, delay_value=None):
         "phaseStatus": _effective_phase_status(context),
         "estimated": True,
         "valueStatus": "unknown",
+        "adviceOnly": True,
+        "advice_only": True,
+        "automaticAction": False,
+        "automatic_action": False,
+        "action": None,
     }
 
 
@@ -1140,6 +2360,58 @@ def _empty_action_plan():
         "recommendedBoatAttacks": 0,
         "decksToHoldTemporarily": None,
     }
+
+
+def build_strategic_experiment_report(context):
+    """Describe an experiment without turning its hypothesis into a claim."""
+
+    metadata = build_strategic_week_metadata(
+        context,
+        strategy_mode="strategic_experiment",
+    )
+    uncertainties = list(metadata.get("uncertainties") or [])
+    if not uncertainties:
+        uncertainties.append(
+            "Een waargenomen uitkomst is contextgebonden en bewijst geen algemene werking."
+        )
+    return {
+        "name": metadata.get("experiment", "loose_to_win"),
+        "hypothesis": metadata.get(
+            "hypothesis",
+            "Loose-to-win wordt als experiment gevolgd; de uitkomst is geen garantie.",
+        ),
+        "observed_outcome": metadata.get("observed_outcome"),
+        "observedOutcome": metadata.get("observedOutcome"),
+        "outcome_status": metadata.get("outcome_status", "unknown"),
+        "outcomeStatus": metadata.get("outcome_status", "unknown"),
+        "uncertainties": list(dict.fromkeys(uncertainties)),
+        "claim": "Geen garantie; rapporteer alleen waargenomen uitkomst en onzekerheden.",
+        "advice_only": True,
+        "adviceOnly": True,
+        "automatic_action": False,
+        "automaticAction": False,
+    }
+
+
+def _decorate_recommendation(result, context):
+    strategy_mode = normalize_strategy_mode(
+        context.get("strategyMode", context.get("strategy_mode"))
+    )
+    result["strategyMode"] = strategy_mode
+    result["strategy_mode"] = strategy_mode
+    result["adviceOnly"] = True
+    result["advice_only"] = True
+    result["automaticAction"] = False
+    result["automatic_action"] = False
+    result["strategicWeek"] = context.get(
+        "strategicWeek",
+        context.get("strategic_week"),
+    )
+    result["strategic_week"] = result["strategicWeek"]
+    if strategy_mode == "strategic_experiment":
+        result["experimentReport"] = build_strategic_experiment_report(context)
+        result["experiment_report"] = result["experimentReport"]
+    return result
 
 
 def _blocked_recommendation(context, phase_status, reason=None):
@@ -1171,7 +2443,7 @@ def _blocked_recommendation(context, phase_status, reason=None):
     )
     if reason:
         summary = f"{summary} ({reason})."
-    return {
+    return _decorate_recommendation({
         "mode": "DATA_INCOMPLETE",
         "headline": headline,
         "summary": summary,
@@ -1200,7 +2472,7 @@ def _blocked_recommendation(context, phase_status, reason=None):
         "estimated": False,
         "estimatedFields": [],
         "unknownFields": ["strategy", "actionPlan", "rankBounds"],
-    }
+    }, context)
 
 
 def evaluate_boat_strike(context, our_clan, target_clan, normal_battle_expected_score, boat_battle_expected_score, estimated_attacks_to_disable, estimated_opponent_score_lost, safety_buffer=100):
@@ -1286,6 +2558,11 @@ def evaluate_boat_strike(context, our_clan, target_clan, normal_battle_expected_
             "estimatedOpponentDelayValue",
             "netStrategicValue",
         ],
+        "adviceOnly": True,
+        "advice_only": True,
+        "automaticAction": False,
+        "automatic_action": False,
+        "action": None,
     }
 
 
@@ -1295,6 +2572,19 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
         "Tie-break gebruikt conservatief +1 punt omdat exacte tie-break niet beschikbaar is.",
         "Matchmakingeffect van verliezen is communityhypothese en niet exact gepubliceerd door Supercell.",
     ]
+    def finish(result):
+        return _decorate_recommendation(result, context)
+    strategy_mode = normalize_strategy_mode(
+        context.get("strategyMode", context.get("strategy_mode"))
+    )
+    if strategy_mode == "protect_position":
+        assumptions.append(
+            "Protect-position is een rapportagemodus; resterende gameacties blijven handmatig."
+        )
+    elif strategy_mode == "strategic_experiment":
+        assumptions.append(
+            "Strategic experiment rapporteert alleen waarnemingen en onzekerheden; loose-to-win is niet gegarandeerd."
+        )
     phase_status = _effective_phase_status(context)
     if phase_status not in {PHASE_WAR_DAY, PHASE_COLOSSEUM}:
         return _blocked_recommendation(
@@ -1330,7 +2620,7 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
     if not context.get("scoreRules"):
         missing.append("scoreRules")
     if missing:
-        return {
+        return finish({
             "mode": "DATA_INCOMPLETE",
             "headline": "Onvoldoende betrouwbare data voor strategieadvies",
             "summary": "Essentiele velden ontbreken: " + ", ".join(missing),
@@ -1358,11 +2648,11 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             "estimated": False,
             "estimatedFields": [],
             "unknownFields": missing,
-        }
+        })
 
     bounds = compute_rank_bounds(our_clan, projections, context.get("targetRank", 1), context.get("scoreRules"))
     if not bounds:
-        return {
+        return finish({
             "mode": "DATA_INCOMPLETE",
             "headline": "Onvoldoende betrouwbare projectiedata",
             "summary": "Kan rangscenario's niet berekenen.",
@@ -1390,10 +2680,10 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             "estimated": False,
             "estimatedFields": [],
             "unknownFields": ["rankBounds"],
-        }
+        })
     if not bounds.get("allRelevantOpponentBoundsKnown"):
         warnings.append("Niet alle relevante tegenstanderprojecties hebben geldige floor en ceiling.")
-        return {
+        return finish({
             "mode": "DATA_INCOMPLETE",
             "headline": "Onvoldoende betrouwbare tegenstanderdata",
             "summary": "Een mathematisch advies is geblokkeerd omdat niet alle tegenstanderbounds bekend zijn.",
@@ -1420,7 +2710,7 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
             "estimated": False,
             "estimatedFields": [],
             "unknownFields": ["opponentBounds"],
-        }
+        })
 
     target_rank = context.get("targetRank", 1)
     target = next((t for t in rank_targets if t.get("rank") == target_rank), None)
@@ -1487,6 +2777,20 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
         headline = f"All-out voor plaats {target_rank}"
         summary = "Er is weinig veilige lossruimte; directe medailles hebben prioriteit."
 
+    if strategy_mode == "protect_position" and phase_status == PHASE_WAR_DAY:
+        if protect_plan:
+            mode = "PROTECT_CURRENT_POSITION"
+            headline = f"Bescherm plaats {current_rank or 'onbekend'}"
+            summary = (
+                "Protect-position modus actief: gebruik de conservatieve beschermingsgrens "
+                "als handmatig rapportageadvies."
+            )
+            target_for_plan = protect_plan
+        else:
+            warnings.append(
+                "Protect-position modus is gekozen, maar een betrouwbare beschermingsgrens ontbreekt."
+            )
+
     if mode in {"POSITION_LOCKED_THROW", "COLOSSEUM_LOCKED_THROW", "EARLY_FINISH_BALANCING"}:
         minimum_wins = 0
         safe_losses = safe_int(our_clan.get("decksRemainingToday"))
@@ -1544,7 +2848,7 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
     if bounds.get("currentRankLocked"):
         rationale.append("BestPossibleRank en WorstPossibleRank zijn gelijk.")
 
-    return {
+    return finish({
         "mode": mode,
         "headline": headline,
         "summary": summary,
@@ -1577,7 +2881,50 @@ def recommend_strategy(context, our_clan, opponents, projections, rank_targets):
         "estimated": bool(estimated_fields),
         "estimatedFields": estimated_fields,
         "unknownFields": [],
+    })
+
+
+def build_strategy_report(context, recommendation=None, boat_eligibility=None):
+    """Return the additive T16 report envelope used by API callers."""
+
+    if not (
+        isinstance(context, Mapping)
+        and (context.get("phaseStatus") or context.get("phase_status"))
+    ):
+        context = build_war_context(context or {})
+    strategy_mode = normalize_strategy_mode(
+        context.get("strategyMode", context.get("strategy_mode"))
+    )
+    strategic_week = context.get("strategicWeek") or context.get("strategic_week")
+    report = {
+        "strategyMode": strategy_mode,
+        "strategy_mode": strategy_mode,
+        "phaseStatus": _effective_phase_status(context),
+        "adviceOnly": True,
+        "advice_only": True,
+        "automaticAction": False,
+        "automatic_action": False,
+        "action": None,
+        "strategicWeek": strategic_week,
+        "strategic_week": strategic_week,
+        "recommendation": {
+            "mode": recommendation.get("mode") if isinstance(recommendation, Mapping) else None,
+            "headline": recommendation.get("headline") if isinstance(recommendation, Mapping) else None,
+            "summary": recommendation.get("summary") if isinstance(recommendation, Mapping) else None,
+            "strategyAvailable": (
+                recommendation.get("strategyAvailable")
+                if isinstance(recommendation, Mapping)
+                else False
+            ),
+        },
+        "boatEligibility": boat_eligibility,
+        "boat_eligibility": boat_eligibility,
+        "boot_eligibility": boat_eligibility,
     }
+    if strategy_mode == "strategic_experiment":
+        report["experimentReport"] = build_strategic_experiment_report(context)
+        report["experiment_report"] = report["experimentReport"]
+    return report
 
 
 def _official_context_field_names(context):
@@ -1612,8 +2959,20 @@ def build_strategy_package(clans, clan_name, players, finish_outlook, war_phase,
     phase_quality = context.get("phaseDataQuality", "unknown")
     strategy_allowed = _phase_can_drive_strategy(context)
     own = next((clan for clan in normalized if normalize_name(clan.get("name")) == normalize_name(clan_name)), None)
+    opponents = [clan for clan in normalized if not own or clan.get("id") != own.get("id")]
+    boat_eligibility = build_boat_eligibility_advice(
+        players=players,
+        our_clan=own or {},
+        opponents=opponents,
+        context=context,
+    )
     if not own:
         recommendation = recommend_strategy(context, {"id": None}, [], projections, [])
+        strategy_report = build_strategy_report(
+            context,
+            recommendation,
+            boat_eligibility,
+        )
         data_quality = {
             "status": phase_status,
             "dataStatus": context.get("dataStatus", DATA_STATUS_UNKNOWN),
@@ -1634,17 +2993,26 @@ def build_strategy_package(clans, clan_name, players, finish_outlook, war_phase,
             "projections": projections,
             "rankTargets": [],
             "recommendation": recommendation,
+            "strategyReport": strategy_report,
+            "strategy_report": strategy_report,
+            "boatEligibility": boat_eligibility,
+            "boat_eligibility": boat_eligibility,
+            "boot_eligibility": boat_eligibility,
             "dataQuality": data_quality,
             "phaseStatus": phase_status,
             "dataStatus": context.get("dataStatus", DATA_STATUS_UNKNOWN),
         }
-    opponents = [clan for clan in normalized if clan.get("id") != own.get("id")]
     targets = (
         build_rank_targets(own, opponents, projections, context.get("scoreRules"))
         if strategy_allowed
         else []
     )
     recommendation = recommend_strategy(context, own, opponents, projections, targets)
+    strategy_report = build_strategy_report(
+        context,
+        recommendation,
+        boat_eligibility,
+    )
     missing = []
     estimated = []
     for field in ("currentMedals", "decksRemainingToday", "blendedAveragePerDeck"):
@@ -1719,6 +3087,11 @@ def build_strategy_package(clans, clan_name, players, finish_outlook, war_phase,
         "projections": projections,
         "rankTargets": targets,
         "recommendation": recommendation,
+        "strategyReport": strategy_report,
+        "strategy_report": strategy_report,
+        "boatEligibility": boat_eligibility,
+        "boat_eligibility": boat_eligibility,
+        "boot_eligibility": boat_eligibility,
         "dataQuality": data_quality,
         "phaseStatus": phase_status,
         "dataStatus": context.get("dataStatus", DATA_STATUS_UNKNOWN),

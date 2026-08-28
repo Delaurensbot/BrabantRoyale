@@ -1817,6 +1817,13 @@ def build_cwstats_payload(path, client=None, *, allow_html_fallback=None):
         "war_context": strategy_package.get("warContext"),
         "race_rows": race_rows,
         "strategy": strategy_package.get("recommendation") or {},
+        "strategy_report": strategy_package.get("strategyReport") or strategy_package.get("strategy_report") or {},
+        "boat_eligibility": strategy_package.get("boatEligibility") or strategy_package.get("boat_eligibility") or {},
+        "boot_eligibility": strategy_package.get("boot_eligibility") or strategy_package.get("boatEligibility") or {},
+        "strategic_week": (
+            (strategy_package.get("warContext") or {}).get("strategicWeek")
+            or (strategy_package.get("warContext") or {}).get("strategic_week")
+        ),
         "rank_targets": strategy_package.get("rankTargets") or [],
         "projections": strategy_package.get("projections") or [],
         "cwstats_colosseum_weekend": bool(is_colosseum),

@@ -10,7 +10,7 @@ import argparse
 import os
 import re
 import sys
-from typing import List, Optional, Tuple, Dict, Set
+from typing import List, Optional, Tuple, Dict, Set, Mapping
 from urllib.parse import unquote
 
 import requests
@@ -27,9 +27,15 @@ from supabase_history import (
 )
 
 try:
-    from api.strategy_engine import classify_race_phase
+    from api.strategy_engine import (
+        build_strategic_week_metadata as _build_strategic_week_metadata,
+        classify_race_phase,
+    )
 except ImportError:  # pragma: no cover - convenient when run as a loose script.
-    from strategy_engine import classify_race_phase
+    from strategy_engine import (  # type: ignore
+        build_strategic_week_metadata as _build_strategic_week_metadata,
+        classify_race_phase,
+    )
 
 
 DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
@@ -99,6 +105,113 @@ def _race_phase_metadata(race: Dict[str, object]) -> Dict[str, object]:
         "phase_source": phase.get("phaseSource"),
         "phaseSource": phase.get("phaseSource"),
     }
+
+
+def _analytics_race_key(race: Mapping[str, object], clan_tag: str) -> Optional[str]:
+    explicit = _race_value(
+        dict(race),
+        "raceKey",
+        "race_key",
+        "strategyRaceKey",
+        "strategy_race_key",
+    )
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()[:256]
+    season_id = _safe_int(_race_value(dict(race), "seasonId", "season_id"))
+    try:
+        created_at = clash_date_to_iso(
+            _race_value(race, "createdDate", "created_at", "race_created_at")
+        )
+    except (TypeError, ValueError, OverflowError):
+        created_at = ""
+    if season_id is None or not created_at:
+        return None
+    section = _safe_int(_race_value(dict(race), "sectionIndex", "section_index"))
+    parts = [clan_tag, str(season_id)]
+    if section is not None:
+        parts.append(str(section))
+    parts.append(created_at)
+    return ":".join(parts)[:256]
+
+
+def build_strategic_week_metadata(
+    race: Optional[Mapping[str, object]] = None,
+    *,
+    week_key: Optional[str] = None,
+    clan_tag: str = DEFAULT_CLAN_TAG,
+) -> Dict[str, object]:
+    """Expose the T16 strategic-week label for analytics callers."""
+
+    source = dict(race or {})
+    source.setdefault("clan_tag", clan_tag)
+    metadata = _build_strategic_week_metadata(source)
+    if week_key:
+        metadata["week_key"] = week_key
+        metadata["weekKey"] = week_key
+    if metadata.get("is_strategic_week") and not metadata.get("race_key"):
+        metadata["race_key"] = _analytics_race_key(source, clan_tag)
+        metadata["raceKey"] = metadata["race_key"]
+    return metadata
+
+
+build_strategy_week_metadata = build_strategic_week_metadata
+
+
+def _strategy_week_for_race(
+    race: Mapping[str, object],
+    week_key: str,
+    clan_tag: str,
+    strategy_weeks: object,
+) -> Dict[str, object]:
+    """Merge optional audit metadata into one race without trusting names."""
+
+    base = dict(race)
+    base["clan_tag"] = clan_tag
+    race_key = _analytics_race_key(base, clan_tag)
+    supplied = None
+    if isinstance(strategy_weeks, Mapping):
+        is_metadata = any(
+            key in strategy_weeks
+            for key in (
+                "strategy_mode",
+                "strategyMode",
+                "is_strategic_week",
+                "isStrategicWeek",
+                "reason",
+                "strategy_reason",
+            )
+        )
+        supplied = (
+            strategy_weeks
+            if is_metadata
+            else strategy_weeks.get(week_key)
+            or (strategy_weeks.get(race_key) if race_key else None)
+        )
+    elif isinstance(strategy_weeks, (list, tuple)):
+        for item in strategy_weeks:
+            if not isinstance(item, Mapping):
+                continue
+            item_key = _race_value(
+                dict(item),
+                "week_key",
+                "weekKey",
+                "race_key",
+                "raceKey",
+            )
+            if item_key in {week_key, race_key}:
+                supplied = item
+                break
+    if isinstance(supplied, Mapping):
+        base.update(supplied)
+    metadata = build_strategic_week_metadata(
+        base,
+        week_key=week_key,
+        clan_tag=clan_tag,
+    )
+    if metadata.get("is_strategic_week") and not metadata.get("race_key"):
+        metadata["race_key"] = race_key
+        metadata["raceKey"] = race_key
+    return metadata
 
 
 def _display_metric_value(value: Optional[int]) -> str:
@@ -886,8 +999,12 @@ def collect_analytics_data(
     members_url: str = CLAN_MEMBERS_URL_DEFAULT,
     top_n: int = 10,
     clan_tag: str = DEFAULT_CLAN_TAG,
+    strategy_weeks: Optional[object] = None,
+    strategic_weeks: Optional[object] = None,
 ) -> Dict[str, object]:
     del analytics_url, members_url  # Legacy args; analytics now uses official Clash Royale API.
+    if strategy_weeks is None:
+        strategy_weeks = strategic_weeks
 
     api_key = os.environ.get("CLASH_ROYALE_API_KEY")
     if not api_key:
@@ -963,6 +1080,9 @@ def collect_analytics_data(
     contrib_map: Dict[str, Dict[str, Optional[int]]] = {}
     decks_map: Dict[str, Dict[str, Optional[int]]] = {}
     phase_statuses: Dict[str, int] = {}
+    strategy_modes: Dict[str, int] = {}
+    strategic_week_rows: List[Dict[str, object]] = []
+    normal_analytics_excluded_weeks: List[str] = []
     metric_estimated_fields: Set[str] = set()
 
     for week_key, race in labeled_races:
@@ -973,10 +1093,49 @@ def collect_analytics_data(
         phase_metadata = _race_phase_metadata(race)
         phase_status = phase_metadata.get("phase_status") or "not_available"
         phase_statuses[phase_status] = phase_statuses.get(phase_status, 0) + 1
+        strategy_metadata = _strategy_week_for_race(
+            race,
+            week_key,
+            norm_tag,
+            strategy_weeks,
+        )
+        strategy_mode = str(strategy_metadata.get("strategy_mode") or "normal")
+        strategy_modes[strategy_mode] = strategy_modes.get(strategy_mode, 0) + 1
+        if strategy_metadata.get("is_strategic_week"):
+            strategy_metadata = dict(strategy_metadata)
+            strategic_week_rows.append(strategy_metadata)
+        strategy_excluded = bool(
+            strategy_metadata.get("is_strategic_week")
+            and not strategy_metadata.get("included_in_normal_analytics")
+        )
+        if strategy_excluded:
+            normal_analytics_excluded_weeks.append(week_key)
+        strategy_exclusion_reason = (
+            "Strategic experiment excluded from normal analytics"
+            + (
+                f": {strategy_metadata.get('reason')}"
+                if strategy_metadata.get("reason")
+                else "."
+            )
+            if strategy_excluded
+            else ""
+        )
         week_metadata[week_key] = {
             "season_id": _safe_int(_race_value(race, "seasonId", "season_id")),
             "race_created_at": race_created_at,
             **phase_metadata,
+            "strategy_mode": strategy_mode,
+            "strategyMode": strategy_mode,
+            "strategic_week": strategy_metadata,
+            "strategicWeek": strategy_metadata,
+            "included_in_normal_analytics": strategy_metadata.get(
+                "included_in_normal_analytics",
+                True,
+            ),
+            "includedInNormalAnalytics": strategy_metadata.get(
+                "includedInNormalAnalytics",
+                True,
+            ),
             "estimated": phase_metadata.get("phase_data_quality") == "estimated",
             "derived_fields": [],
             "estimated_fields": [],
@@ -1003,14 +1162,17 @@ def collect_analytics_data(
 
             contrib_map.setdefault(ptag, {})[week_key] = contrib
             decks_map.setdefault(ptag, {})[week_key] = decks
-            exclusion_reason = exclusions_by_snapshot.get(
+            explicit_exclusion_reason = exclusions_by_snapshot.get(
                 (race_created_at, ptag),
                 "",
             )
-            is_included = not bool(exclusion_reason or (
-                race_created_at,
-                ptag,
-            ) in exclusions_by_snapshot)
+            exclusion_reasons = [
+                reason
+                for reason in (strategy_exclusion_reason, explicit_exclusion_reason)
+                if reason
+            ]
+            is_included = not bool(exclusion_reasons)
+            exclusion_reason = "; ".join(exclusion_reasons)
             if not is_included:
                 excluded_weeks.add((ptag, week_key))
             week_evaluations.setdefault(ptag, {})[week_key] = {
@@ -1022,6 +1184,8 @@ def collect_analytics_data(
                 "estimated": phase_metadata.get("phase_data_quality") == "estimated",
                 "derived_fields": ["contribution"] if contrib is not None else [],
                 "estimated_fields": ["contribution"] if contrib is not None else [],
+                "strategy_mode": strategy_mode,
+                "strategic_week": strategy_metadata,
                 "unknown_fields": [
                     field
                     for field, value in (
@@ -1032,6 +1196,26 @@ def collect_analytics_data(
                     if value is None
                 ],
             }
+
+        if strategy_excluded:
+            for ptag in known_players:
+                excluded_weeks.add((ptag, week_key))
+                week_evaluations.setdefault(ptag, {}).setdefault(
+                    week_key,
+                    {
+                        "included": False,
+                        "reason": strategy_exclusion_reason,
+                        "race_created_at": race_created_at,
+                        "phase_status": phase_metadata.get("phase_status"),
+                        "data_status": phase_metadata.get("data_status"),
+                        "estimated": phase_metadata.get("phase_data_quality") == "estimated",
+                        "derived_fields": [],
+                        "estimated_fields": [],
+                        "strategy_mode": strategy_mode,
+                        "strategic_week": strategy_metadata,
+                        "unknown_fields": [],
+                    },
+                )
 
     # Ensure all known players exist in maps for frontend stability.
     for ptag in known_players:
@@ -1148,6 +1332,16 @@ def collect_analytics_data(
         "week_metadata": week_metadata,
         "week_evaluations": week_evaluations,
         "phase_statuses": phase_statuses,
+        "strategy_modes": strategy_modes,
+        "strategy_mode": (
+            next(iter(strategy_modes))
+            if len(strategy_modes) == 1
+            else "mixed"
+            if strategy_modes
+            else "normal"
+        ),
+        "strategic_weeks": strategic_week_rows,
+        "normal_analytics_excluded_weeks": sorted(set(normal_analytics_excluded_weeks)),
         "derived_fields": sorted(metric_estimated_fields),
         "estimated_fields": sorted(metric_estimated_fields),
         "history": {
@@ -1155,6 +1349,16 @@ def collect_analytics_data(
             "available_weeks": len(week_headers),
             "exclusions": exclusion_status,
             "phase_statuses": phase_statuses,
+            "strategy_modes": strategy_modes,
+            "strategy_mode": (
+                next(iter(strategy_modes))
+                if len(strategy_modes) == 1
+                else "mixed"
+                if strategy_modes
+                else "normal"
+            ),
+            "strategic_weeks": strategic_week_rows,
+            "normal_analytics_excluded_weeks": sorted(set(normal_analytics_excluded_weeks)),
             "estimated_fields": sorted(metric_estimated_fields),
         },
     }
