@@ -90,6 +90,20 @@
     .scoutingNotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
     .scoutingNotes > div { padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); }
     .scoutingNotes ul { margin: 7px 0 0; padding-left: 18px; }
+    .scoutingSummaryGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    .scoutingPanel { padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .scoutingPanel h3 { margin: 0 0 8px; font-size: 16px; }
+    .scoutingPanel p { margin: 6px 0; line-height: 1.4; }
+    .scoutingPanel ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; }
+    .scoutingPanel .scoutingMetrics { margin-top: 9px; }
+    .scoutingDestination { display: inline-block; margin-top: 5px; font-size: 22px; color: var(--green); }
+    .scoutingDecisionForm { display: grid; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .scoutingDecisionForm label { display: grid; gap: 4px; font-size: 13px; }
+    .scoutingDecisionForm input, .scoutingDecisionForm select, .scoutingDecisionForm textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(177,92,255,0.42); background: rgba(12,16,27,0.85); color: inherit; font: inherit; }
+    .scoutingDecisionForm textarea { min-height: 76px; resize: vertical; }
+    .scoutingDecisionStatus { min-height: 18px; font-size: 13px; }
+    .scoutingChecklist { list-style: none; padding-left: 0 !important; }
+    .scoutingChecklist li { padding: 8px 9px; border-radius: 8px; background: rgba(255,255,255,0.04); }
     .clickableCell { cursor: pointer; }
     .excludedCopyRow { opacity: 0.45; }
     .excludedCopyRow td { text-decoration: line-through; }
@@ -173,7 +187,7 @@
       <div class="cardHead">
         <div>
           <div class="title">Nieuwe speler screenen op clan-fit</div>
-          <div class="muted">Profielvoorselectie + onze eigen war-historie zodra die bestaat.</div>
+          <div class="muted">Account readiness, eigen war-reliability, proefstatus en bestemming blijven afzonderlijk zichtbaar.</div>
         </div>
         <button class="iconBtn" id="infoScouting">Info</button>
       </div>
@@ -182,7 +196,7 @@
         <button type="submit" id="runScouting">Screen speler</button>
       </form>
       <div class="scoutingResult" id="scoutingResult">
-        <div class="muted">Vul een player tag in. Externe spelers krijgen altijd een proefperiodeadvies totdat er eigen war-data is.</div>
+        <div class="muted">Vul een player tag in. Zonder voldoende eigen clan-warobservaties blijft de bestemming trial.</div>
       </div>
     </div>
 
@@ -288,6 +302,14 @@
   };
   const DEFAULT_CLAN = "9YP8UY";
   let currentClanTag = DEFAULT_CLAN;
+  const SCOUTING_DESTINATIONS = ['main', 'BR2', 'BR3', 'trial', 'reject'];
+  const SCOUTING_DECISION_TYPES = {
+    main: 'main_clan',
+    BR2: 'BR2',
+    BR3: 'BR3',
+    trial: 'strategic_experiment',
+    reject: 'reject',
+  };
 
   function normalizeClanTag(tag) {
     return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
@@ -627,47 +649,224 @@
       .replaceAll("'", '&#039;');
   }
 
+  function scoutingDisplay(value, suffix = '') {
+    if (value === null || value === undefined || value === '') return 'unknown';
+    return `${value}${suffix}`;
+  }
+
+  function scoutingScoreDisplay(value) {
+    return value === null || value === undefined || value === ''
+      ? 'unknown'
+      : `${value}/100`;
+  }
+
+  function scoutingMetric(label, value, suffix = '') {
+    return `<div class="scoutingMetric"><span class="muted">${escapeHtml(label)}</span><strong>${escapeHtml(scoutingDisplay(value, suffix))}</strong></div>`;
+  }
+
+  function scoutingReasonList(items) {
+    const values = Array.isArray(items) ? items : [];
+    if (!values.length) return '<li>unknown</li>';
+    return values.map((item) => {
+      if (item && typeof item === 'object') {
+        return `<li>${escapeHtml(item.label || item.reason || 'unknown')}</li>`;
+      }
+      return `<li>${escapeHtml(item)}</li>`;
+    }).join('');
+  }
+
   function renderScoutingResult(data) {
     const target = el('scoutingResult');
     const profile = data.profile || {};
+    const account = data.account_readiness || {};
     const war = data.war || {};
+    const observedWar = data.observed_war_reliability || {};
+    const trial = data.trial_status || data.trial || {};
     const fit = data.fit || {};
+    const recommendation = data.recommendation || fit.recommendation || {};
     const player = data.player || {};
-    const reasons = (fit.reasons || [])
-      .map((reason) => `<li>${escapeHtml(reason)}</li>`)
-      .join('');
-    const manualChecks = (data.manual_checks || [])
-      .map((check) => `<li>${escapeHtml(check)}</li>`)
-      .join('');
-    const limitations = (data.limitations || [])
-      .map((item) => `<li>${escapeHtml(item)}</li>`)
-      .join('');
+    const currentClan = player.current_clan || profile.current_clan || {};
+    const destination = SCOUTING_DESTINATIONS.includes(recommendation.destination)
+      ? recommendation.destination
+      : 'trial';
+    const reasons = recommendation.reasons || fit.reasons || [];
+    const limitations = data.limitations || [];
+    const checklist = data.manual_intake_checklist || data.manual_checks || [];
+    const playerTag = player.tag || '';
+    const playerName = player.name || playerTag || 'unknown';
+    const currentClanText = currentClan.tag
+      ? `${currentClan.name || 'onbekende naam'} (${currentClan.tag})`
+      : 'unknown';
+    const defaultReason = `Screening T15; voorgestelde bestemming ${destination}.`;
+    const destinationOptions = SCOUTING_DESTINATIONS.map((value) => (
+      `<option value="${escapeHtml(value)}"${value === destination ? ' selected' : ''}>${escapeHtml(value)}</option>`
+    )).join('');
+    const checklistHtml = (Array.isArray(checklist) ? checklist : []).map((item) => {
+      if (typeof item === 'string') return `<li>${escapeHtml(item)}</li>`;
+      return `<li><strong>${escapeHtml(item.label || 'unknown')}</strong><br /><span class="reasonText">${escapeHtml(item.reason || item.status || 'unknown')}</span></li>`;
+    }).join('') || '<li>unknown</li>';
 
     target.innerHTML = `
       <div class="scoutingHero">
         <div>
-          <div class="title">${escapeHtml(player.name || player.tag)}</div>
-          <div class="muted">${escapeHtml(player.tag)} · ${escapeHtml(data.mode)} · confidence ${escapeHtml(fit.confidence)}</div>
-          <div style="margin-top:8px;"><strong>${escapeHtml(fit.label)}</strong></div>
-          <ul>${reasons}</ul>
+          <div class="title">${escapeHtml(playerName)}</div>
+          <div class="muted">${escapeHtml(playerTag)} · ${escapeHtml(data.mode || 'unknown')} · huidige clan ${escapeHtml(currentClanText)}</div>
+          <div style="margin-top:8px;"><strong>${escapeHtml(fit.label || 'T15-screening')}</strong></div>
+          <ul>${scoutingReasonList(reasons)}</ul>
         </div>
-        <div class="scoutingScore">${escapeHtml(fit.overall_score)}/100</div>
+        <div>
+          <div class="muted">Aanbevelingsscore</div>
+          <div class="scoutingScore">${escapeHtml(scoutingScoreDisplay(recommendation.score))}</div>
+          <div class="muted">${escapeHtml(recommendation.score_basis || 'unknown')}</div>
+        </div>
       </div>
-      <div class="scoutingMetrics">
-        <div class="scoutingMetric"><span class="muted">Profielscore</span><strong>${escapeHtml(profile.score)}/100</strong></div>
-        <div class="scoutingMetric"><span class="muted">Kaarten level 16</span><strong>${escapeHtml(profile.cards_level_16)}</strong></div>
-        <div class="scoutingMetric"><span class="muted">Kaarten level 15+</span><strong>${escapeHtml(profile.cards_level_15_plus)}</strong></div>
-        <div class="scoutingMetric"><span class="muted">Best trophies</span><strong>${escapeHtml(profile.best_trophies)}</strong></div>
-        <div class="scoutingMetric"><span class="muted">War-weken</span><strong>${escapeHtml(war.weeks_played)}</strong></div>
-        <div class="scoutingMetric"><span class="muted">War reliability</span><strong>${escapeHtml(war.reliability)}%</strong></div>
-        <div class="scoutingMetric"><span class="muted">Gem. war-score</span><strong>${escapeHtml(war.average_contribution)}</strong></div>
-        <div class="scoutingMetric"><span class="muted">Gemiste attacks</span><strong>${escapeHtml(war.missed_attacks)}</strong></div>
+      <div class="scoutingSummaryGrid">
+        <section class="scoutingPanel">
+          <h3>Account readiness</h3>
+          <div class="scoutingMetrics">
+            ${scoutingMetric('Score', account.score ?? profile.score, '')}
+            ${scoutingMetric('Profielsignalen', account.sample_size, `/${account.sample_size_max ?? 'unknown'}`)}
+            ${scoutingMetric('Trophies', profile.trophies)}
+            ${scoutingMetric('Best trophies', profile.best_trophies)}
+            ${scoutingMetric('Kaartniveau', profile.card_level ?? profile.detected_max_card_level)}
+            ${scoutingMetric('L15-diepte', profile.cards_level_15_plus)}
+            ${scoutingMetric('L16-diepte', profile.cards_level_16)}
+            ${scoutingMetric('Deckbreedte', profile.deck_breadth)}
+          </div>
+          <p class="reasonText">${escapeHtml(account.reason || profile.reason || 'Account readiness: unknown.')}</p>
+          <ul>${scoutingReasonList(account.reasons || profile.reasons)}</ul>
+        </section>
+        <section class="scoutingPanel">
+          <h3>Observed war reliability</h3>
+          <div class="scoutingMetrics">
+            ${scoutingMetric('Eigen races sample', observedWar.sample_size ?? war.sample_size)}
+            ${scoutingMetric('Observed races', war.observed_races ?? war.weeks_observed)}
+            ${scoutingMetric('Reliability', observedWar.metrics?.reliability ?? war.reliability, '%')}
+            ${scoutingMetric('Gem. bijdrage', observedWar.metrics?.average_contribution ?? war.average_contribution)}
+            ${scoutingMetric('Gemiste aanvallen', observedWar.metrics?.missed_attacks ?? war.missed_attacks)}
+            ${scoutingMetric('War-score', observedWar.score ?? war.score)}
+          </div>
+          <p class="reasonText">${escapeHtml(observedWar.reason || war.reason || 'Observed war reliability: unknown.')}</p>
+          <ul>${scoutingReasonList(observedWar.uncertainty || war.uncertainty)}</ul>
+        </section>
+        <section class="scoutingPanel">
+          <h3>Trial status</h3>
+          <div class="scoutingMetrics">
+            ${scoutingMetric('Status', trial.status)}
+            ${scoutingMetric('Eigen races', trial.observed_races ?? trial.sample_size)}
+            ${scoutingMetric('Vereist', trial.required_races)}
+            ${scoutingMetric('Resterend', trial.remaining_races)}
+          </div>
+          <p class="reasonText">${escapeHtml(trial.reason || 'Trial status: unknown.')}</p>
+          <p class="reasonText">Sample-eenheid: ${escapeHtml(trial.sample_unit || 'own_clan_races')}</p>
+        </section>
+        <section class="scoutingPanel">
+          <h3>Recommended destination</h3>
+          <div class="scoutingDestination">${escapeHtml(destination)}</div>
+          <p class="reasonText">${escapeHtml(recommendation.reason || 'Aanbeveling: unknown.')}</p>
+          <p class="reasonText">Samplegrootte: ${escapeHtml(scoutingDisplay(recommendation.sample_size))} own_clan_races.</p>
+          <ul>${scoutingReasonList(recommendation.reasons)}</ul>
+        </section>
+        <section class="scoutingPanel">
+          <h3>Manual intake checklist</h3>
+          <ul class="scoutingChecklist">${checklistHtml}</ul>
+        </section>
+        <section class="scoutingPanel">
+          <h3>Auditbare leidersbeslissing</h3>
+          <p class="reasonText">Opslaan gebruikt uitsluitend de bestaande admin-only T13-route. De geconfigureerde beheerkey staat niet in de pagina-bron of screeningresponse; een leader voert die runtime in via het bestaande patroon.</p>
+          <form class="scoutingDecisionForm" id="scoutingDecisionForm">
+            <label for="scoutingDestination">Bestemming
+              <select id="scoutingDestination" required>${destinationOptions}</select>
+            </label>
+            <label for="scoutingActor">Leader / actor
+              <input id="scoutingActor" type="text" maxlength="120" autocomplete="off" required />
+            </label>
+            <label for="scoutingDecisionReason">Reden (max. 240 tekens)
+              <textarea id="scoutingDecisionReason" maxlength="240" required>${escapeHtml(defaultReason)}</textarea>
+            </label>
+            <button type="submit" id="saveScoutingDecision">Sla beslissing auditbaar op</button>
+            <div class="scoutingDecisionStatus muted" id="scoutingDecisionStatus"></div>
+          </form>
+        </section>
       </div>
       <div class="scoutingNotes">
-        <div><strong>Handmatig controleren</strong><ul>${manualChecks}</ul></div>
-        <div><strong>Databeperkingen</strong><ul>${limitations}</ul></div>
+        <div><strong>Screening-redenen</strong><ul>${scoutingReasonList(reasons)}</ul></div>
+        <div><strong>Policygrenzen en onzekerheid</strong><ul>${scoutingReasonList(limitations)}</ul></div>
       </div>
     `;
+    const decisionForm = el('scoutingDecisionForm');
+    decisionForm.dataset.playerTag = String(playerTag || '');
+    decisionForm.dataset.idempotencyKey = '';
+    el('scoutingDestination').addEventListener('change', () => {
+      decisionForm.dataset.idempotencyKey = '';
+    });
+    decisionForm.addEventListener('submit', saveScoutingDecision);
+  }
+
+  async function saveScoutingDecision(event) {
+    if (event) event.preventDefault();
+    const form = el('scoutingDecisionForm');
+    const status = el('scoutingDecisionStatus');
+    const button = el('saveScoutingDecision');
+    if (!form || !status || !button) return;
+    const destination = String(el('scoutingDestination').value || '');
+    const actor = String(el('scoutingActor').value || '').trim();
+    const operatorReason = String(el('scoutingDecisionReason').value || '').trim();
+    const playerTag = String(form.dataset.playerTag || '').trim().toUpperCase();
+    const auditReason = `T15 destination=${destination}; ${operatorReason}`;
+    if (!SCOUTING_DESTINATIONS.includes(destination) || !/^[A-Z0-9]{1,32}$/.test(playerTag)) {
+      status.textContent = 'Ongeldige T15-bestemming of player tag.';
+      return;
+    }
+    if (!actor || actor.length > 120 || /[\u0000-\u001f\u007f]/.test(actor)) {
+      status.textContent = 'Vul een geldige leader / actor in (max. 120 tekens).';
+      return;
+    }
+    if (!operatorReason || auditReason.length > 240 || /[\u0000-\u001f\u007f]/.test(operatorReason)) {
+      status.textContent = 'Vul een reden in zonder regeleinden (max. 240 tekens).';
+      return;
+    }
+    const adminKey = requestAdminKey();
+    if (!adminKey) {
+      status.textContent = 'Geen beheerkey ingevoerd.';
+      return;
+    }
+    const safeTag = playerTag.replace(/[^A-Z0-9]/g, '').slice(0, 32) || 'player';
+    const idempotencyKey = form.dataset.idempotencyKey || `t15-${safeTag}-${destination}-${Date.now()}`;
+    form.dataset.idempotencyKey = idempotencyKey;
+    button.disabled = true;
+    status.textContent = 'Beslissing opslaan...';
+    try {
+      const response = await fetch('/api/leader_decisions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Analytics-Admin-Key': adminKey,
+        },
+        body: JSON.stringify({
+          clan_tag: currentClanTag,
+          player_tag: playerTag,
+          actor,
+          decision_type: SCOUTING_DECISION_TYPES[destination],
+          reason: auditReason,
+          related_race_key: `T15-scouting-${safeTag}-${destination}`,
+          idempotency_key: idempotencyKey,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (response.status === 403) {
+        sessionStorage.removeItem('analyticsAdminKey');
+        updateManageButton();
+      }
+      if (!response.ok || !json.ok) {
+        throw new Error(json.error || 'Beslissing kon niet worden opgeslagen.');
+      }
+      status.textContent = 'Beslissing auditbaar opgeslagen.';
+    } catch (error) {
+      status.textContent = error.message || 'Beslissing kon niet worden opgeslagen.';
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function runScouting(event) {
@@ -954,11 +1153,12 @@
       body: `
         <p><strong>Wat wel kan</strong></p>
         <ul>
-          <li>Profielsterkte beoordelen met kaartendiepte, trophies en challenge-signaal.</li>
-          <li>Na toetreding eigen war-reliability en gemiddelde contribution meenemen.</li>
-          <li>Confidence laten groeien naarmate we meer eigen weken observeren.</li>
+          <li>Account readiness apart tonen met trophies, best trophies, kaartniveau, L15/L16-diepte en deckbreedte.</li>
+          <li>Observed war reliability apart berekenen uit alleen eigen opgeslagen races, met samplegrootte, gemiste aanvallen en gemiddelde bijdrage.</li>
+          <li>Een bestemming kiezen uit exact main, BR2, BR3, trial of reject; de reden en samplegrootte blijven zichtbaar.</li>
+          <li>Een handmatige beslissing auditbaar opslaan via de bestaande admin-only T13-route.</li>
         </ul>
-        <p><strong>Wat niet betrouwbaar kan</strong><br />De officiële API levert geen volledige externe war-historie en profielstats zeggen niets zekers over communicatie of gedrag. Daarom blijft een proefperiode van 2–4 war-weken onderdeel van ieder extern advies.</p>
+        <p><strong>Grenzen</strong><br />De officiële API levert geen volledige externe war-historie en profielstats zeggen niets zekers over communicatie of gedrag. Ontbrekende waarden zijn unknown, nooit nul. Zonder minimaal twee complete eigen races blijft het advies trial; dat is een operationele grens en geen bewijs van levenslange betrouwbaarheid.</p>
       `,
     },
     ratio: {

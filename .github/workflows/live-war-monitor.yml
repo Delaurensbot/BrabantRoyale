@@ -1,0 +1,103 @@
+name: Live war monitor
+
+on:
+  # GitHub Actions schedules are best-effort and may start late. */5 is the
+  # platform minimum for this live monitor; Vercel Hobby is not suitable for
+  # this frequency.
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Scheduled and manually dispatched runs share one queue. A running monitor
+# must finish before the next run starts, so it is never cancelled in-flight.
+concurrency:
+  group: live-war-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # WAR_MONITOR_URL is a non-secret Actions repository variable. The
+      # default keeps the workflow pointed at the production T08 route.
+      WAR_MONITOR_URL: ${{ vars.WAR_MONITOR_URL || 'https://brabant-royale.vercel.app/api/war_monitor' }}
+    steps:
+      - name: Call production war monitor
+        env:
+          WAR_MONITOR_SECRET: ${{ secrets.WAR_MONITOR_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${WAR_MONITOR_SECRET:-}" ]]; then
+            echo "::error::WAR_MONITOR_SECRET is not configured for this workflow."
+            exit 1
+          fi
+          if [[ -z "${WAR_MONITOR_URL:-}" ]]; then
+            echo "::error::WAR_MONITOR_URL is empty."
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
+          if ! http_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --request POST \
+              --url "${WAR_MONITOR_URL}" \
+              --header "X-War-Monitor-Secret: ${WAR_MONITOR_SECRET}" \
+              --header "Content-Type: application/json" \
+              --connect-timeout 10 \
+              --max-time 60 \
+              --retry 2 \
+              --retry-connrefused \
+              --retry-delay 5 \
+              --retry-max-time 120 \
+              --output "${response_file}" \
+              --write-out '%{http_code}' \
+              --data-raw '{}' \
+              2>/dev/null
+          )"; then
+            echo "::error::War monitor transport request failed after the bounded retry policy."
+            exit 1
+          fi
+
+          if [[ ! "${http_status}" =~ ^[0-9]{3}$ ]]; then
+            echo "::error::War monitor returned an invalid HTTP status."
+            exit 1
+          fi
+
+          response_bytes="$(wc -c < "${response_file}" | tr -d '[:space:]')"
+          # Log only fixed, non-secret fields from the T08 response body.
+          response_summary="$(
+            jq -c '
+              if type == "object" then
+                {
+                  ok: (.ok // null),
+                  processed_clans: (.processed_clans // null),
+                  snapshots_written: (.snapshots_written // null),
+                  events_created: (.events_created // null),
+                  notifications_pending: (.notifications_pending // null)
+                }
+              else
+                {response_type: type}
+              end
+            ' "${response_file}" 2>/dev/null || true
+          )"
+
+          case "${http_status}" in
+            # 207 is the T08 partial-success response and is a 2xx status.
+            2[0-9][0-9])
+              echo "War monitor completed (HTTP ${http_status}; ${response_bytes} response bytes; summary=${response_summary:-unparseable response})."
+              ;;
+            *)
+              echo "::error::War monitor returned HTTP ${http_status} (${response_bytes} response bytes; summary=${response_summary:-unparseable response})."
+              exit 1
+              ;;
+          esac

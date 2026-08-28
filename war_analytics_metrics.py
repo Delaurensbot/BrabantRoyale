@@ -6,17 +6,18 @@
 # - Current season leaderboard: only Player + Score, only "perfect" players (no missed attacks on played weekends).
 # - Seasons are detected dynamically: current = max season in headers, previous = second max.
 
-import argparse
 import os
 import re
-import sys
-from typing import List, Optional, Tuple, Dict, Set
-from urllib.parse import unquote
+from typing import List, Optional, Tuple, Dict, Set, Mapping
 
 import requests
-from bs4 import BeautifulSoup
 
-from Royale_api import DEFAULT_CLAN_TAG, get_clan_config
+try:
+    from api.clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
+    from api.config import DEFAULT_CLAN_TAG, get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from clash_client import ClashRoyaleClient, normalize_tag as normalize_api_tag
+    from config import DEFAULT_CLAN_TAG, get_clan_config
 from supabase_history import (
     clash_date_to_iso,
     clash_date_to_datetime,
@@ -26,16 +27,23 @@ from supabase_history import (
     normalize_tag,
 )
 
+try:
+    from api.strategy_engine import (
+        build_strategic_week_metadata as _build_strategic_week_metadata,
+        classify_race_phase,
+    )
+except ImportError:  # pragma: no cover - convenient when run as a loose script.
+    from strategy_engine import (  # type: ignore
+        build_strategic_week_metadata as _build_strategic_week_metadata,
+        classify_race_phase,
+    )
+
 
 DEFAULT_CLAN_CONFIG = get_clan_config(DEFAULT_CLAN_TAG)
-ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["analytics_url"]
-CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["clan_url"]
-
-KNOWN_ROLES = ["Leader", "Co-leader", "Elder", "Member"]
-ROLE_DISPLAY = {"Leader": "Owner"}  # RoyaleAPI gebruikt vaak "Leader"; jij wil "Owner"
+ANALYTICS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["race_log_path"]
+CLAN_MEMBERS_URL_DEFAULT = DEFAULT_CLAN_CONFIG["members_path"]
 
 UNREPLACEABLE_PENALTY = {0: 0, 1: 2, 2: 4, 3: 12}
-ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
 PROMOTION_WINDOWS = (2, 4, 6)
 DEFAULT_PROMOTION_WINDOW = 6
 DEMOTION_WINDOW = 10
@@ -44,13 +52,174 @@ DEMOTION_MAX_MISSED_ATTACKS = 2
 ExcludedWeeks = Set[Tuple[str, str]]
 
 
+def _safe_int(value: object) -> Optional[int]:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+        try:
+            return int(value.strip())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return None
+
+
+def _known_int(mapping: Dict[str, object], *keys: str) -> Optional[int]:
+    for key in keys:
+        if key in mapping:
+            return _safe_int(mapping.get(key))
+    return None
+
+
+def _race_value(race: Dict[str, object], *keys: str):
+    for key in keys:
+        if key in race and race.get(key) is not None:
+            return race.get(key)
+    return None
+
+
+def _race_phase_metadata(race: Dict[str, object]) -> Dict[str, object]:
+    """Expose official race context without using sectionIndex as a week id."""
+
+    phase = classify_race_phase(race)
+    return {
+        "phase_status": phase.get("phaseStatus"),
+        "phaseStatus": phase.get("phaseStatus"),
+        "detected_phase_status": phase.get("detectedPhaseStatus"),
+        "data_status": phase.get("dataStatus"),
+        "dataStatus": phase.get("dataStatus"),
+        "period_type": phase.get("periodType"),
+        "periodType": phase.get("periodType"),
+        "period_index": phase.get("periodIndex"),
+        "periodIndex": phase.get("periodIndex"),
+        "section_index": phase.get("sectionIndex"),
+        "sectionIndex": phase.get("sectionIndex"),
+        "finish_time": phase.get("finishTime"),
+        "finishTime": phase.get("finishTime"),
+        "phase_data_quality": phase.get("phaseDataQuality"),
+        "phaseDataQuality": phase.get("phaseDataQuality"),
+        "phase_source": phase.get("phaseSource"),
+        "phaseSource": phase.get("phaseSource"),
+    }
+
+
+def _analytics_race_key(race: Mapping[str, object], clan_tag: str) -> Optional[str]:
+    explicit = _race_value(
+        dict(race),
+        "raceKey",
+        "race_key",
+        "strategyRaceKey",
+        "strategy_race_key",
+    )
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()[:256]
+    season_id = _safe_int(_race_value(dict(race), "seasonId", "season_id"))
+    try:
+        created_at = clash_date_to_iso(
+            _race_value(race, "createdDate", "created_at", "race_created_at")
+        )
+    except (TypeError, ValueError, OverflowError):
+        created_at = ""
+    if season_id is None or not created_at:
+        return None
+    section = _safe_int(_race_value(dict(race), "sectionIndex", "section_index"))
+    parts = [clan_tag, str(season_id)]
+    if section is not None:
+        parts.append(str(section))
+    parts.append(created_at)
+    return ":".join(parts)[:256]
+
+
+def build_strategic_week_metadata(
+    race: Optional[Mapping[str, object]] = None,
+    *,
+    week_key: Optional[str] = None,
+    clan_tag: str = DEFAULT_CLAN_TAG,
+) -> Dict[str, object]:
+    """Expose the T16 strategic-week label for analytics callers."""
+
+    source = dict(race or {})
+    source.setdefault("clan_tag", clan_tag)
+    metadata = _build_strategic_week_metadata(source)
+    if week_key:
+        metadata["week_key"] = week_key
+        metadata["weekKey"] = week_key
+    if metadata.get("is_strategic_week") and not metadata.get("race_key"):
+        metadata["race_key"] = _analytics_race_key(source, clan_tag)
+        metadata["raceKey"] = metadata["race_key"]
+    return metadata
+
+
+build_strategy_week_metadata = build_strategic_week_metadata
+
+
+def _strategy_week_for_race(
+    race: Mapping[str, object],
+    week_key: str,
+    clan_tag: str,
+    strategy_weeks: object,
+) -> Dict[str, object]:
+    """Merge optional audit metadata into one race without trusting names."""
+
+    base = dict(race)
+    base["clan_tag"] = clan_tag
+    race_key = _analytics_race_key(base, clan_tag)
+    supplied = None
+    if isinstance(strategy_weeks, Mapping):
+        is_metadata = any(
+            key in strategy_weeks
+            for key in (
+                "strategy_mode",
+                "strategyMode",
+                "is_strategic_week",
+                "isStrategicWeek",
+                "reason",
+                "strategy_reason",
+            )
+        )
+        supplied = (
+            strategy_weeks
+            if is_metadata
+            else strategy_weeks.get(week_key)
+            or (strategy_weeks.get(race_key) if race_key else None)
+        )
+    elif isinstance(strategy_weeks, (list, tuple)):
+        for item in strategy_weeks:
+            if not isinstance(item, Mapping):
+                continue
+            item_key = _race_value(
+                dict(item),
+                "week_key",
+                "weekKey",
+                "race_key",
+                "raceKey",
+            )
+            if item_key in {week_key, race_key}:
+                supplied = item
+                break
+    if isinstance(supplied, Mapping):
+        base.update(supplied)
+    metadata = build_strategic_week_metadata(
+        base,
+        week_key=week_key,
+        clan_tag=clan_tag,
+    )
+    if metadata.get("is_strategic_week") and not metadata.get("race_key"):
+        metadata["race_key"] = race_key
+        metadata["raceKey"] = race_key
+    return metadata
+
+
+def _display_metric_value(value: Optional[int]) -> str:
+    return "Onbekend" if value is None else str(value)
+
+
 def normalize_space(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
 
 def clean_player_name(s: str) -> str:
-    s = normalize_space(s)
-    s = re.sub(r"<[^>]+>", "", s)
     return normalize_space(s).lower()
 
 
@@ -115,127 +284,6 @@ def format_table(title: str, headers: List[str], rows: List[List[str]], limit: O
     return "\n".join(lines)
 
 
-def fetch(url: str, timeout: int = 25) -> str:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-        "Connection": "close",
-    }
-    r = requests.get(url, headers=headers, timeout=timeout)
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code} while fetching {url}")
-    return r.text
-
-
-def extract_player_tag_from_href(href: str) -> Optional[str]:
-    if not href:
-        return None
-    href_decoded = unquote(href)
-    href_u = href_decoded.upper()
-    m = re.search(r"/PLAYER/(?:#)?([A-Z0-9]+)", href_u)
-    return m.group(1) if m else None
-
-
-def extract_role_from_row_text(row_text: str) -> str:
-    t = normalize_space(row_text)
-    for role in KNOWN_ROLES:
-        if re.search(rf"\b{re.escape(role)}\b", t, flags=re.IGNORECASE):
-            return role
-    return ""
-
-
-def get_current_members_with_roles(members_url: str) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
-    html = fetch(members_url)
-    soup = BeautifulSoup(html, "html.parser")
-
-    tag_to_name_clean: Dict[str, str] = {}
-    name_clean_to_tag: Dict[str, str] = {}
-    tag_to_role: Dict[str, str] = {}
-
-    for tr in soup.find_all("tr"):
-        a = tr.find("a", href=True)
-        if not a:
-            continue
-
-        tag = extract_player_tag_from_href(a["href"])
-        if not tag:
-            continue
-
-        name_raw = a.get_text(" ", strip=True)
-        name_clean = clean_player_name(name_raw)
-        if not name_clean:
-            continue
-
-        role = extract_role_from_row_text(tr.get_text(" ", strip=True))
-        role = ROLE_DISPLAY.get(role, role)
-
-        tag_to_name_clean[tag] = name_clean
-        name_clean_to_tag[name_clean] = tag
-        if role:
-            tag_to_role[tag] = role
-
-    return tag_to_name_clean, name_clean_to_tag, tag_to_role
-
-
-def get_table_headers(table: BeautifulSoup) -> List[str]:
-    thead = table.find("thead")
-    if thead:
-        return [normalize_space(th.get_text(" ", strip=True)) for th in thead.find_all("th")]
-    first_row = table.find("tr")
-    if first_row:
-        return [normalize_space(x.get_text(" ", strip=True)) for x in first_row.find_all(["th", "td"])]
-    return []
-
-
-def find_table_by_headers(soup: BeautifulSoup, must_have: Set[str]) -> Optional[BeautifulSoup]:
-    must_have_lower = {h.lower() for h in must_have}
-    for table in soup.find_all("table"):
-        headers = get_table_headers(table)
-        hset = {h.lower() for h in headers}
-        if must_have_lower.issubset(hset):
-            return table
-    return None
-
-
-def parse_table_with_tag_or_name(table: BeautifulSoup) -> Tuple[List[str], List[List[str]], List[Optional[str]], List[str]]:
-    headers = get_table_headers(table)
-
-    tbody = table.find("tbody")
-    row_tags = tbody.find_all("tr") if tbody else table.find_all("tr")[1:]
-
-    rows: List[List[str]] = []
-    tags_per_row: List[Optional[str]] = []
-    names_per_row: List[str] = []
-
-    for tr in row_tags:
-        cells = tr.find_all(["td", "th"])
-        if not cells:
-            continue
-
-        player_cell = cells[0]
-        row_tag = None
-        a = player_cell.find("a", href=True)
-        if a:
-            row_tag = extract_player_tag_from_href(a["href"])
-
-        row = [normalize_space(c.get_text(" ", strip=True)) for c in cells]
-        if not row or not any(x != "" for x in row):
-            continue
-
-        player_name_clean = clean_player_name(row[0])
-        row[0] = re.sub(r"<[^>]+>", "", row[0]).strip()
-
-        rows.append(row)
-        tags_per_row.append(row_tag)
-        names_per_row.append(player_name_clean)
-
-    return headers, rows, tags_per_row, names_per_row
-
-
 def compute_mvp_list(
     season_weeks: List[str],
     contrib_map: Dict[str, Dict[str, int]],
@@ -248,67 +296,36 @@ def compute_mvp_list(
     results: List[Dict[str, str]] = []
     excluded_weeks = excluded_weeks or set()
 
-    for key, per_week_c in contrib_map.items():
+    for key, per_week_contribution in contrib_map.items():
         total_score = 0
         eligible = True
-
-        for wh in season_weeks:
-            if (key, wh) in excluded_weeks:
+        for week in season_weeks:
+            if (key, week) in excluded_weeks:
                 continue
-            c_val = per_week_c.get(wh, 0)
-
-            # Alleen meegerekend als Contribution > 0
-            if c_val <= 0:
+            contribution = per_week_contribution.get(week)
+            if contribution is None:
                 if require_all_weekends:
                     eligible = False
                 continue
-
-            d_val = decks_map.get(key, {}).get(wh, 0)
-            if d_val != 16:
+            if contribution <= 0:
+                if require_all_weekends:
+                    eligible = False
+                continue
+            decks = decks_map.get(key, {}).get(week)
+            if decks is None or decks != 16:
                 eligible = False
                 break
-
-            total_score += c_val
-
+            total_score += contribution
         if eligible and total_score > 0:
-            results.append({
-                "player": player_print_map.get(key, key),
-                "score": str(total_score),
-            })
+            results.append(
+                {
+                    "player": player_print_map.get(key, key),
+                    "score": str(total_score),
+                }
+            )
 
-    results.sort(key=lambda r: int(r.get("score", 0)), reverse=True)
+    results.sort(key=lambda row: int(row.get("score", 0)), reverse=True)
     return results[:top_n]
-
-
-def filter_rows_keep_alignment(rows, tags, names, current_tags, name_to_tag):
-    f_rows, f_tags, f_names = [], [], []
-    for row, tag, nm in zip(rows, tags, names):
-        name_is_current = nm in name_to_tag
-        tag_is_current = (tag is not None) and (tag in current_tags)
-        if tag_is_current or name_is_current:
-            f_rows.append(row)
-            f_tags.append(tag)
-            f_names.append(nm)
-    return f_rows, f_tags, f_names
-
-
-def add_role_column(headers: List[str], rows: List[List[str]], tags: List[Optional[str]], names: List[str],
-                    name_to_tag: Dict[str, str], tag_to_role: Dict[str, str]) -> Tuple[List[str], List[List[str]]]:
-    new_headers = headers[:]
-    if new_headers and new_headers[0].lower() == "player":
-        new_headers.insert(1, "Role")
-    else:
-        new_headers = ["Player", "Role"] + new_headers[1:]
-
-    new_rows: List[List[str]] = []
-    for row, tag, nm in zip(rows, tags, names):
-        use_tag = tag or name_to_tag.get(nm)
-        role = tag_to_role.get(use_tag, "") if use_tag else ""
-        new_row = row[:]
-        new_row.insert(1, role)
-        new_rows.append(new_row)
-
-    return new_headers, new_rows
 
 
 def parse_int_cell(cell: str) -> Optional[int]:
@@ -320,11 +337,14 @@ def parse_int_cell(cell: str) -> Optional[int]:
     return int(c)
 
 
-def row_total_for_weeks(week_values: Dict[str, int], week_headers: List[str]) -> int:
-    total = 0
-    for wh in week_headers:
-        total += int(week_values.get(wh, 0) or 0)
-    return total
+def row_total_for_weeks(
+    week_values: Dict[str, Optional[int]],
+    week_headers: List[str],
+) -> Optional[int]:
+    values = [week_values.get(wh) for wh in week_headers]
+    if any(value is None for value in values):
+        return None
+    return sum(int(value) for value in values)
 
 
 def season_of_week_header(wh: str) -> Optional[int]:
@@ -344,8 +364,8 @@ def build_maps(contrib_headers2, contrib_rows2, decks_headers2, decks_rows2):
     contrib_week_headers = contrib_headers2[c_idx + 1:]
     decks_week_headers = decks_headers2[d_idx + 1:]
 
-    contrib_map: Dict[str, Dict[str, int]] = {}
-    decks_map: Dict[str, Dict[str, int]] = {}
+    contrib_map: Dict[str, Dict[str, Optional[int]]] = {}
+    decks_map: Dict[str, Dict[str, Optional[int]]] = {}
     role_map: Dict[str, str] = {}
     player_print_map: Dict[str, str] = {}
 
@@ -357,11 +377,9 @@ def build_maps(contrib_headers2, contrib_rows2, decks_headers2, decks_rows2):
         player_print_map[key] = player_print
 
         week_cells = r[c_idx + 1:]
-        per_week: Dict[str, int] = {}
+        per_week: Dict[str, Optional[int]] = {}
         for wh, cell in zip(contrib_week_headers, week_cells):
             v = parse_int_cell(cell)
-            if v is None:
-                continue
             per_week[wh] = v
         contrib_map[key] = per_week
 
@@ -371,20 +389,18 @@ def build_maps(contrib_headers2, contrib_rows2, decks_headers2, decks_rows2):
         player_print_map.setdefault(key, player_print)
 
         week_cells = r[d_idx + 1:]
-        per_week: Dict[str, int] = {}
+        per_week: Dict[str, Optional[int]] = {}
         for wh, cell in zip(decks_week_headers, week_cells):
             v = parse_int_cell(cell)
-            if v is None:
-                continue
-            per_week[wh] = max(0, min(16, v))
+            per_week[wh] = max(0, min(16, v)) if v is not None else None
         decks_map[key] = per_week
 
     return contrib_week_headers, decks_week_headers, contrib_map, decks_map, role_map, player_print_map
 
 
 def compute_reliability_scores(
-    contrib_map: Dict[str, Dict[str, int]],
-    decks_map: Dict[str, Dict[str, int]],
+    contrib_map: Dict[str, Dict[str, Optional[int]]],
+    decks_map: Dict[str, Dict[str, Optional[int]]],
     role_map: Dict[str, str],
     player_print_map: Dict[str, str],
     excluded_weeks: Optional[ExcludedWeeks] = None,
@@ -399,18 +415,25 @@ def compute_reliability_scores(
         penalty_points = 0
         attacks_done = 0
         total_points = 0
+        unknown_data = False
 
         for wh, c_val in per_week_c.items():
             if (key, wh) in excluded_weeks:
-                if c_val > 0:
+                if c_val is not None and c_val > 0:
                     excluded_week_count += 1
+                continue
+            if c_val is None:
+                unknown_data = True
                 continue
             if c_val <= 0:
                 continue
 
+            d_val = decks_map.get(key, {}).get(wh)
+            if d_val is None:
+                unknown_data = True
+                continue
             weeks_played += 1
             total_points += c_val
-            d_val = decks_map.get(key, {}).get(wh, 0)
             done = max(0, min(16, d_val))
             attacks_done += done
             missing = max(0, 16 - done)
@@ -418,9 +441,9 @@ def compute_reliability_scores(
             penalty_points += UNREPLACEABLE_PENALTY.get(missing, missing * 4)
 
         total_possible = weeks_played * 16
-        reliability_score = 0.0
-        avg_points = 0.0
-        if total_possible > 0:
+        reliability_score = None
+        avg_points = None
+        if total_possible > 0 and not unknown_data:
             reliability_score = round((attacks_done / total_possible) * 100, 2)
             avg_points = round(total_points / weeks_played, 2)
 
@@ -436,10 +459,22 @@ def compute_reliability_scores(
                 "penalty_points": penalty_points,
                 "avg_points": avg_points,
                 "reliability_score": reliability_score,
+                "data_status": "partial" if unknown_data else "complete",
+                "unknown_weeks": sum(
+                    1
+                    for wh, value in per_week_c.items()
+                    if value is None and (key, wh) not in excluded_weeks
+                ),
             }
         )
 
-    results.sort(key=lambda r: (r.get("reliability_score", 0), r.get("missed_attacks", 0)))
+    results.sort(
+        key=lambda r: (
+            r.get("reliability_score") is not None,
+            r.get("reliability_score") if r.get("reliability_score") is not None else -1,
+            r.get("missed_attacks") if r.get("missed_attacks") is not None else -1,
+        )
+    )
     return results
 
 
@@ -447,33 +482,37 @@ ELDER_MIN_AVG_CONTRIB = 2500
 
 
 def average_contribution(
-    per_week_contrib: Dict[str, int],
+    per_week_contrib: Dict[str, Optional[int]],
     week_headers: Optional[List[str]] = None,
-) -> float:
+) -> Optional[float]:
     values = (
-        [per_week_contrib.get(week, 0) for week in week_headers]
+        [per_week_contrib.get(week) for week in week_headers]
         if week_headers is not None
         else list(per_week_contrib.values())
     )
+    if any(value is None for value in values):
+        return None
     played_weeks = [v for v in values if v > 0]
     if not played_weeks:
-        return 0.0
+        return None
     return round(sum(played_weeks) / len(played_weeks), 2)
 
 
 def format_average_contribution(
-    per_week_contrib: Dict[str, int],
+    per_week_contrib: Dict[str, Optional[int]],
     week_headers: Optional[List[str]] = None,
 ) -> str:
     avg = average_contribution(per_week_contrib, week_headers)
+    if avg is None:
+        return "Onbekend"
     if avg.is_integer():
         return str(int(avg))
     return f"{avg:.2f}".rstrip("0").rstrip(".")
 
 
 def build_promotion_candidates(
-    contrib_map: Dict[str, Dict[str, int]],
-    decks_map: Dict[str, Dict[str, int]],
+    contrib_map: Dict[str, Dict[str, Optional[int]]],
+    decks_map: Dict[str, Dict[str, Optional[int]]],
     role_map: Dict[str, str],
     player_print_map: Dict[str, str],
     week_headers: List[str],
@@ -497,7 +536,7 @@ def build_promotion_candidates(
             continue
 
         last_weeks = included_weeks[-evaluation_window:]
-        if not all(per_week_decks.get(week, 0) == 16 for week in last_weeks):
+        if not all(per_week_decks.get(week) == 16 for week in last_weeks):
             continue
 
         streak = 0
@@ -510,7 +549,7 @@ def build_promotion_candidates(
             contrib_map.get(key, {}),
             last_weeks,
         )
-        if avg_score < ELDER_MIN_AVG_CONTRIB:
+        if avg_score is None or avg_score < ELDER_MIN_AVG_CONTRIB:
             continue
 
         suggestions.append(
@@ -539,8 +578,8 @@ def build_promotion_candidates(
 
 
 def build_demotion_candidates(
-    contrib_map: Dict[str, Dict[str, int]],
-    decks_map: Dict[str, Dict[str, int]],
+    contrib_map: Dict[str, Dict[str, Optional[int]]],
+    decks_map: Dict[str, Dict[str, Optional[int]]],
     role_map: Dict[str, str],
     player_print_map: Dict[str, str],
     week_headers: List[str],
@@ -559,9 +598,13 @@ def build_demotion_candidates(
             week
             for week in week_headers
             if (key, week) not in excluded_weeks
-            and per_week_contrib.get(week, 0) > 0
+            and per_week_contrib.get(week) is not None
+            and per_week_contrib.get(week) > 0
         ][-window:]
         if not played_weeks:
+            continue
+
+        if any(decks_map.get(key, {}).get(week) is None for week in played_weeks):
             continue
 
         missed_by_week = [
@@ -570,7 +613,7 @@ def build_demotion_candidates(
                 16
                 - max(
                     0,
-                    min(16, decks_map.get(key, {}).get(week, 0)),
+                    min(16, decks_map.get(key, {}).get(week)),
                 ),
             )
             for week in played_weeks
@@ -620,13 +663,17 @@ def detect_current_and_previous_season(week_headers: List[str]) -> Tuple[Optiona
 
 def race_created_sort_value(race: Dict[str, object]) -> int:
     try:
-        return int(clash_date_to_datetime(race.get("createdDate")).timestamp())
-    except (TypeError, ValueError):
+        return int(
+            clash_date_to_datetime(
+                _race_value(race, "createdDate", "created_at", "race_created_at")
+            ).timestamp()
+        )
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
 def race_sort_key(race: Dict[str, object]) -> Tuple[int, int]:
-    season = int(race.get("seasonId") or 0)
+    season = _safe_int(_race_value(race, "seasonId", "season_id")) or 0
     return (season, race_created_sort_value(race))
 
 
@@ -642,14 +689,22 @@ def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[st
     - assign week numbers sequentially within each season (`season-1`, `season-2`, ...)
     """
 
-    ordered = sorted(race_items, key=race_sort_key)
+    ordered = sorted(
+        (race for race in race_items if isinstance(race, dict)),
+        key=race_sort_key,
+    )
     deduped: List[Dict[str, object]] = []
     seen_keys: Set[Tuple[int, str]] = set()
 
     for race in ordered:
-        season_id = int(race.get("seasonId") or 0)
-        created_date = str(race.get("createdDate") or "")
-        if season_id <= 0 or race_created_sort_value(race) <= 0:
+        season_id = _safe_int(_race_value(race, "seasonId", "season_id"))
+        try:
+            created_date = clash_date_to_iso(
+                _race_value(race, "createdDate", "created_at", "race_created_at")
+            )
+        except (TypeError, ValueError, OverflowError):
+            created_date = ""
+        if season_id is None or season_id <= 0 or not created_date:
             continue
         dedupe_key = (
             season_id,
@@ -663,7 +718,9 @@ def dedupe_and_label_races(race_items: List[Dict[str, object]]) -> List[Tuple[st
     labeled: List[Tuple[str, Dict[str, object]]] = []
     season_counts: Dict[int, int] = {}
     for race in deduped:
-        season = int(race.get("seasonId") or 0)
+        season = _safe_int(_race_value(race, "seasonId", "season_id"))
+        if season is None:
+            continue
         season_counts[season] = season_counts.get(season, 0) + 1
         labeled.append((f"{season}-{season_counts[season]}", race))
 
@@ -687,12 +744,15 @@ def build_previous_season_mvp_simple(contrib_week_headers, contrib_map, decks_ma
         eligible = True
 
         for wh in season_weeks:
-            c_val = per_week_c.get(wh, 0)
+            c_val = per_week_c.get(wh)
+            if c_val is None:
+                eligible = False
+                break
             if c_val <= 0:
                 eligible = False
                 break
-            d_val = decks_map.get(key, {}).get(wh, 0)
-            if d_val != 16:
+            d_val = decks_map.get(key, {}).get(wh)
+            if d_val is None or d_val != 16:
                 eligible = False
                 break
             total_score += c_val
@@ -722,17 +782,19 @@ def build_current_leaderboard_simple(contrib_week_headers, contrib_map, decks_ma
         perfect = True
 
         for wh in season_weeks:
-            c_val = per_week_c.get(wh, 0)
+            c_val = per_week_c.get(wh)
+            if c_val is None:
+                continue
 
             # Alleen "gespeeld weekend" als Contribution > 0
             if c_val <= 0:
                 continue
 
             weeks_played += 1
-            d_val = decks_map.get(key, {}).get(wh, 0)
+            d_val = decks_map.get(key, {}).get(wh)
 
             # Perfect rule: als je speelt, dan moet je D=16 hebben
-            if d_val != 16:
+            if d_val is None or d_val != 16:
                 perfect = False
                 break
 
@@ -776,25 +838,21 @@ def collect_analytics_data(
     members_url: str = CLAN_MEMBERS_URL_DEFAULT,
     top_n: int = 10,
     clan_tag: str = DEFAULT_CLAN_TAG,
+    strategy_weeks: Optional[object] = None,
+    strategic_weeks: Optional[object] = None,
 ) -> Dict[str, object]:
     del analytics_url, members_url  # Legacy args; analytics now uses official Clash Royale API.
+    if strategy_weeks is None:
+        strategy_weeks = strategic_weeks
 
     api_key = os.environ.get("CLASH_ROYALE_API_KEY")
     if not api_key:
         raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
 
-    def api_get(path: str) -> Dict[str, object]:
-        url = f"{ROYAL_API_BASE_URL}{path}"
-        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=25)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Clash API error {resp.status_code} for {path}")
-        return resp.json() if resp.content else {}
-
-    norm_tag = clan_tag.strip().replace("#", "").upper()
-    encoded = f"%23{norm_tag}"
-
-    members_payload = api_get(f"/clans/{encoded}/members")
-    members = members_payload.get("items", [])
+    client = ClashRoyaleClient(api_key=api_key, requester=requests.get)
+    norm_tag = normalize_api_tag(clan_tag)
+    members_payload = client.get_members(norm_tag).data
+    members = members_payload.get("items", []) if isinstance(members_payload, Mapping) else []
 
     role_map: Dict[str, str] = {}
     player_print_map: Dict[str, str] = {}
@@ -812,12 +870,14 @@ def collect_analytics_data(
 
     # Collect weekly race snapshots: historic races + current race when available.
     race_items: List[Dict[str, object]] = []
-    river_log = api_get(f"/clans/{encoded}/riverracelog")
-    race_items.extend(river_log.get("items", []))
+    river_log = client.get_river_race_log(norm_tag).data
+    if isinstance(river_log, Mapping):
+        race_items.extend(river_log.get("items", []))
 
     try:
-        current_race = api_get(f"/clans/{encoded}/currentriverrace")
-        if current_race:
+        current_race = client.get_current_river_race(norm_tag).data
+        if isinstance(current_race, Mapping) and current_race:
+            current_race = dict(current_race)
             current_race["is_current"] = True
             race_items.append(current_race)
     except Exception:
@@ -832,7 +892,7 @@ def collect_analytics_data(
     for row in exclusion_rows:
         try:
             race_created_at = clash_date_to_iso(row.get("race_created_at"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
         player_tag = normalize_tag(row.get("player_tag"))
         if not player_tag:
@@ -850,15 +910,68 @@ def collect_analytics_data(
     week_metadata: Dict[str, Dict[str, object]] = {}
     week_evaluations: Dict[str, Dict[str, Dict[str, object]]] = {}
     excluded_weeks: ExcludedWeeks = set()
-    contrib_map: Dict[str, Dict[str, int]] = {}
-    decks_map: Dict[str, Dict[str, int]] = {}
+    contrib_map: Dict[str, Dict[str, Optional[int]]] = {}
+    decks_map: Dict[str, Dict[str, Optional[int]]] = {}
+    phase_statuses: Dict[str, int] = {}
+    strategy_modes: Dict[str, int] = {}
+    strategic_week_rows: List[Dict[str, object]] = []
+    normal_analytics_excluded_weeks: List[str] = []
+    metric_estimated_fields: Set[str] = set()
 
     for week_key, race in labeled_races:
         week_headers.append(week_key)
-        race_created_at = clash_date_to_iso(race.get("createdDate"))
+        race_created_at = clash_date_to_iso(
+            _race_value(race, "createdDate", "created_at", "race_created_at")
+        )
+        phase_metadata = _race_phase_metadata(race)
+        phase_status = phase_metadata.get("phase_status") or "not_available"
+        phase_statuses[phase_status] = phase_statuses.get(phase_status, 0) + 1
+        strategy_metadata = _strategy_week_for_race(
+            race,
+            week_key,
+            norm_tag,
+            strategy_weeks,
+        )
+        strategy_mode = str(strategy_metadata.get("strategy_mode") or "normal")
+        strategy_modes[strategy_mode] = strategy_modes.get(strategy_mode, 0) + 1
+        if strategy_metadata.get("is_strategic_week"):
+            strategy_metadata = dict(strategy_metadata)
+            strategic_week_rows.append(strategy_metadata)
+        strategy_excluded = bool(
+            strategy_metadata.get("is_strategic_week")
+            and not strategy_metadata.get("included_in_normal_analytics")
+        )
+        if strategy_excluded:
+            normal_analytics_excluded_weeks.append(week_key)
+        strategy_exclusion_reason = (
+            "Strategic experiment excluded from normal analytics"
+            + (
+                f": {strategy_metadata.get('reason')}"
+                if strategy_metadata.get("reason")
+                else "."
+            )
+            if strategy_excluded
+            else ""
+        )
         week_metadata[week_key] = {
-            "season_id": int(race.get("seasonId") or 0),
+            "season_id": _safe_int(_race_value(race, "seasonId", "season_id")),
             "race_created_at": race_created_at,
+            **phase_metadata,
+            "strategy_mode": strategy_mode,
+            "strategyMode": strategy_mode,
+            "strategic_week": strategy_metadata,
+            "strategicWeek": strategy_metadata,
+            "included_in_normal_analytics": strategy_metadata.get(
+                "included_in_normal_analytics",
+                True,
+            ),
+            "includedInNormalAnalytics": strategy_metadata.get(
+                "includedInNormalAnalytics",
+                True,
+            ),
+            "estimated": phase_metadata.get("phase_data_quality") == "estimated",
+            "derived_fields": [],
+            "estimated_fields": [],
         }
         source_rows = extract_clan_participants(race, norm_tag)
 
@@ -869,28 +982,73 @@ def collect_analytics_data(
 
             player_print_map.setdefault(ptag, p.get("name") or ptag)
             role_map.setdefault(ptag, "")
-            fame = int(p.get("fame") or 0)
-            repair = int(p.get("repairPoints") or 0)
-            contrib = fame + repair
-            decks = int(p.get("decksUsed") or 0)
+            fame = _known_int(p, "fame")
+            repair = _known_int(p, "repairPoints", "repair_points")
+            contrib = fame + repair if fame is not None and repair is not None else None
+            decks = _known_int(p, "decksUsed", "decks_used")
+            if decks is not None:
+                decks = max(0, min(16, decks))
+            if contrib is not None:
+                metric_estimated_fields.add("contribution")
+                week_metadata[week_key]["derived_fields"] = ["contribution"]
+                week_metadata[week_key]["estimated_fields"] = ["contribution"]
 
             contrib_map.setdefault(ptag, {})[week_key] = contrib
-            decks_map.setdefault(ptag, {})[week_key] = max(0, min(16, decks))
-            exclusion_reason = exclusions_by_snapshot.get(
+            decks_map.setdefault(ptag, {})[week_key] = decks
+            explicit_exclusion_reason = exclusions_by_snapshot.get(
                 (race_created_at, ptag),
                 "",
             )
-            is_included = not bool(exclusion_reason or (
-                race_created_at,
-                ptag,
-            ) in exclusions_by_snapshot)
+            exclusion_reasons = [
+                reason
+                for reason in (strategy_exclusion_reason, explicit_exclusion_reason)
+                if reason
+            ]
+            is_included = not bool(exclusion_reasons)
+            exclusion_reason = "; ".join(exclusion_reasons)
             if not is_included:
                 excluded_weeks.add((ptag, week_key))
             week_evaluations.setdefault(ptag, {})[week_key] = {
                 "included": is_included,
                 "reason": exclusion_reason,
                 "race_created_at": race_created_at,
+                "phase_status": phase_metadata.get("phase_status"),
+                "data_status": phase_metadata.get("data_status"),
+                "estimated": phase_metadata.get("phase_data_quality") == "estimated",
+                "derived_fields": ["contribution"] if contrib is not None else [],
+                "estimated_fields": ["contribution"] if contrib is not None else [],
+                "strategy_mode": strategy_mode,
+                "strategic_week": strategy_metadata,
+                "unknown_fields": [
+                    field
+                    for field, value in (
+                        ("fame", fame),
+                        ("repairPoints", repair),
+                        ("decksUsed", decks),
+                    )
+                    if value is None
+                ],
             }
+
+        if strategy_excluded:
+            for ptag in known_players:
+                excluded_weeks.add((ptag, week_key))
+                week_evaluations.setdefault(ptag, {}).setdefault(
+                    week_key,
+                    {
+                        "included": False,
+                        "reason": strategy_exclusion_reason,
+                        "race_created_at": race_created_at,
+                        "phase_status": phase_metadata.get("phase_status"),
+                        "data_status": phase_metadata.get("data_status"),
+                        "estimated": phase_metadata.get("phase_data_quality") == "estimated",
+                        "derived_fields": [],
+                        "estimated_fields": [],
+                        "strategy_mode": strategy_mode,
+                        "strategic_week": strategy_metadata,
+                        "unknown_fields": [],
+                    },
+                )
 
     # Ensure all known players exist in maps for frontend stability.
     for ptag in known_players:
@@ -976,11 +1134,16 @@ def collect_analytics_data(
         contrib_rows.append([
             pname,
             role,
-            str(total_contrib),
+            _display_metric_value(total_contrib),
             format_average_contribution(per_week_contrib, included_headers),
-            *[str(per_week_contrib.get(wh, "")) for wh in week_headers],
+            *[_display_metric_value(per_week_contrib.get(wh)) for wh in week_headers],
         ])
-        decks_rows.append([pname, role, str(total_decks), *[str(per_week_decks.get(wh, "")) for wh in week_headers]])
+        decks_rows.append([
+            pname,
+            role,
+            _display_metric_value(total_decks),
+            *[_display_metric_value(per_week_decks.get(wh)) for wh in week_headers],
+        ])
 
     return {
         "mvp_current": mvp_current,
@@ -1001,99 +1164,49 @@ def collect_analytics_data(
         "decks_used_table": {"headers": decks_headers, "rows": decks_rows},
         "week_metadata": week_metadata,
         "week_evaluations": week_evaluations,
+        "phase_statuses": phase_statuses,
+        "strategy_modes": strategy_modes,
+        "strategy_mode": (
+            next(iter(strategy_modes))
+            if len(strategy_modes) == 1
+            else "mixed"
+            if strategy_modes
+            else "normal"
+        ),
+        "strategic_weeks": strategic_week_rows,
+        "normal_analytics_excluded_weeks": sorted(set(normal_analytics_excluded_weeks)),
+        "derived_fields": sorted(metric_estimated_fields),
+        "estimated_fields": sorted(metric_estimated_fields),
         "history": {
             **history_status,
             "available_weeks": len(week_headers),
             "exclusions": exclusion_status,
+            "phase_statuses": phase_statuses,
+            "strategy_modes": strategy_modes,
+            "strategy_mode": (
+                next(iter(strategy_modes))
+                if len(strategy_modes) == 1
+                else "mixed"
+                if strategy_modes
+                else "normal"
+            ),
+            "strategic_weeks": strategic_week_rows,
+            "normal_analytics_excluded_weeks": sorted(set(normal_analytics_excluded_weeks)),
+            "estimated_fields": sorted(metric_estimated_fields),
         },
     }
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--analytics-url", default=ANALYTICS_URL_DEFAULT)
-    ap.add_argument("--members-url", default=CLAN_MEMBERS_URL_DEFAULT)
-    ap.add_argument("--limit", type=int, default=0, help="Limit printed rows per table (0 = no limit)")
-    ap.add_argument("--top", type=int, default=10, help="Top N for MVP/leaderboards")
-    args = ap.parse_args()
-
-    try:
-        tag_to_name_clean, name_clean_to_tag, tag_to_role = get_current_members_with_roles(args.members_url)
-    except Exception as e:
-        print(f"Failed to fetch current members: {e}", file=sys.stderr)
-        return 1
-
-    current_tags = set(tag_to_name_clean.keys())
-    if not current_tags:
-        print("Could not extract current members from the clan page.", file=sys.stderr)
-        return 1
-
-    try:
-        html = fetch(args.analytics_url)
-    except Exception as e:
-        print(f"Failed to fetch analytics page: {e}", file=sys.stderr)
-        return 1
-
-    soup = BeautifulSoup(html, "html.parser")
-    contribution_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "C"})
-    decks_table = find_table_by_headers(soup, must_have={"Player", "M", "P", "D"})
-
-    limit = args.limit if args.limit > 0 else None
-    print(f"\nCurrent members detected: {len(current_tags)}")
-
-    contrib_headers2: Optional[List[str]] = None
-    contrib_rows2: Optional[List[List[str]]] = None
-
-    if contribution_table:
-        headers, rows, tags_per_row, names_per_row = parse_table_with_tag_or_name(contribution_table)
-        f_rows, f_tags, f_names = filter_rows_keep_alignment(rows, tags_per_row, names_per_row, current_tags, name_clean_to_tag)
-        headers2, rows2 = add_role_column(headers, f_rows, f_tags, f_names, name_clean_to_tag, tag_to_role)
-        contrib_headers2, contrib_rows2 = headers2, rows2
-
-        print(f"\nContribution rows before filter: {len(rows)} | after filter: {len(f_rows)}")
-        print(format_table("Contribution (current members only)", headers2, rows2, limit=limit))
-    else:
-        print("\nContribution table not found.", file=sys.stderr)
-
-    decks_headers2: Optional[List[str]] = None
-    decks_rows2: Optional[List[List[str]]] = None
-
-    if decks_table:
-        headers, rows, tags_per_row, names_per_row = parse_table_with_tag_or_name(decks_table)
-        f_rows, f_tags, f_names = filter_rows_keep_alignment(rows, tags_per_row, names_per_row, current_tags, name_clean_to_tag)
-        headers2, rows2 = add_role_column(headers, f_rows, f_tags, f_names, name_clean_to_tag, tag_to_role)
-        decks_headers2, decks_rows2 = headers2, rows2
-
-        print(f"\nDecks Used rows before filter: {len(rows)} | after filter: {len(f_rows)}")
-        print(format_table("Decks Used (current members only)", headers2, rows2, limit=limit))
-    else:
-        print("\nDecks Used table not found.", file=sys.stderr)
-
-    if contrib_headers2 and contrib_rows2 and decks_headers2 and decks_rows2:
-        contrib_week_headers, _, contrib_map, decks_map, _, player_print_map = build_maps(
-            contrib_headers2, contrib_rows2, decks_headers2, decks_rows2
-        )
-
-        current_season, prev_season = detect_current_and_previous_season(contrib_week_headers)
-
-        if prev_season is not None:
-            print(build_previous_season_mvp_simple(
-                contrib_week_headers, contrib_map, decks_map, player_print_map, prev_season, args.top
-            ))
-        else:
-            print("\nVorige seizoen MVP\nNiet genoeg season-data gevonden om een vorig seizoen te bepalen.")
-
-        if current_season is not None:
-            print(build_current_leaderboard_simple(
-                contrib_week_headers, contrib_map, decks_map, player_print_map, current_season, args.top
-            ))
-        else:
-            print("\nHuidig seizoen leaderboard\nGeen season-data gevonden.")
-
-        print_mvp_explanations_simple(prev_season, current_season)
-
+    """Print the official API analytics payload for local operators."""
+    payload = collect_analytics_data()
+    print(format_table(
+        "MVP current",
+        ["Player", "Score"],
+        [[row.get("player", ""), str(row.get("score", ""))]
+         for row in payload.get("mvp_current", [])],
+    ))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

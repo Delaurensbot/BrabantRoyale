@@ -1,26 +1,32 @@
 # Clan War Stats on Vercel
 
-Deze repo draait een simpele statische pagina met een Python Serverless Function op Vercel. De frontend haalt data op via `/api/cwstats`; de Refresh-knop runt het RoyaleAPI-scrapescript opnieuw en toont de nieuwste tekst.
+Deze repo draait een statische pagina met Python Serverless Functions op Vercel.
+De productie-routes lezen uitsluitend via de server-side officiële Clash Royale
+API-client in `api/clash_client.py`. De tijdelijke HTML-bron en prototypepagina
+zijn verwijderd; Supabase wordt alleen gebruikt voor de eigen historische
+snapshots.
 
 ## Belangrijk
-- `/api/cwstats` bestaat en geeft JSON terug met `ok: true` wanneer het scrapen/parsen lukt (data komt nu van RoyaleAPI).
-- De website toont drie blokken (Race, Clan Stats, Battles left) en de kopieerknoppen werken per blok én via klik op de tekst.
-- Lokaal openen via `file://` werkt niet, omdat `/api/cwstats` dan niet bestaat.
+
+- `/api/cwstats`, `/api/analytics`, `/api/scouting` en `/api/war_status` geven
+  officiële API-data met bron-, freshness- en kwaliteitsmetadata.
+- Een upstream-storing wordt niet als een nulprestatie gepresenteerd: routes
+  geven een expliciete fout-, partiële of stale-status terug.
+- `/api/war_monitor` is een server-to-server POST-route en vereist de ingest-
+  secret; secrets komen nooit in HTML, client-JavaScript of logs.
+- Lokaal openen via `file://` werkt niet, omdat de `/api/*`-routes dan niet
+  bestaan.
 
 ## Deploy
-1. Push de main branch naar GitHub.
-2. Ga in Vercel naar **New Project** en importeer de repo.
-3. Kies framework **Other** en laat het build-commando leeg (niet nodig).
-4. Deploy.
-5. Test in de browser:
-   - `https://<project>.vercel.app/api/cwstats` moet JSON tonen.
-   - `https://<project>.vercel.app` moet de pagina tonen en data ophalen.
 
+Deploy uitsluitend een gecontroleerde commit met de aanwezige Vercel-workflow.
+De volledige release-, smoke-test-, monitoring- en rollbackprocedure staat in
+[RELEASE_T17.md](RELEASE_T17.md). Controleer vóór release altijd dat de
+rollback-tag `brabant-royale-pre-migration` intact is.
 
-## Temporary clan member test route
-- API route: `/api/test-clan` (server-side Vercel Python function).
-- Temporary page: `/test-clan.html`.
-- Required environment variable: `CLASH_ROYALE_API_KEY` (set in Vercel project settings).
+De productie-URL is `https://brabant-royale.vercel.app` wanneer het gekoppelde
+Vercel-project die standaardnaam gebruikt. Test na een deploy minimaal de
+routes en velden die in [RELEASE_T17.md](RELEASE_T17.md) staan.
 
 ## Langdurige analytics met Supabase
 
@@ -87,6 +93,17 @@ controleert uitsluitend een SHA-256-hash via RLS. De key geeft geen algemene
 database- of Supabase-beheerrechten en er staat nooit een Supabase secret key in
 de frontend.
 
+### Configureerbaar clanbeleid en leidersbesluiten (T13)
+
+T13 voegt `public.clan_policy_settings` en het admin-only auditlog
+`public.leader_decisions` toe. Beleid is server-side leesbaar via
+`GET /api/clan_policy?clan=<CLAN_TAG>` en schrijfbaar met het bestaande
+`X-Analytics-Admin-Key` via `POST`, `PUT` of `PATCH /api/clan_policy`.
+Leidersbesluiten worden uitsluitend via `/api/leader_decisions` met diezelfde
+admin-key gelezen of toegevoegd; actor, reden en individuele besluiten komen
+niet in publieke responses. Defaults, bounds, responsevorm en aannames staan
+in [`CLAN_POLICY_CONTRACT.md`](CLAN_POLICY_CONTRACT.md).
+
 ### Nieuwe spelers screenen
 
 `/api/scouting?tag=<PLAYER_TAG>&clan=<CLAN_TAG>` haalt een officieel
@@ -95,3 +112,22 @@ war-historie. Profieldata is alleen een voorselectie; externe spelers houden
 altijd een proefperiodeadvies totdat minimaal twee eigen war-weken zijn
 waargenomen. De berekening en beperkingen staan in
 `SCOUTING_FRAMEWORK_REPORT.md`.
+
+## Live war monitor
+
+`.github/workflows/live-war-monitor.yml` roept de beveiligde productie-route
+`POST /api/war_monitor` iedere vijf minuten aan en kan ook handmatig worden
+gestart. Stel onder **Repository settings > Secrets and variables > Actions**
+het secret `WAR_MONITOR_SECRET` in met dezelfde waarde als de Vercel-variable
+voor T08. De waarde staat niet in de repository en wordt alleen als
+`X-War-Monitor-Secret`-header verstuurd.
+
+De workflow gebruikt standaard
+`https://brabant-royale.vercel.app/api/war_monitor`. Een andere productie-URL
+kan veilig als niet-geheime Actions-repositoryvariable `WAR_MONITOR_URL` worden
+ingesteld. GitHub Actions schedules zijn best-effort en kunnen vertraagd
+starten; `*/5` is de minimale praktische intervalgrens van het platform, geen
+garantie op exacte uitvoering. Vercel Hobby past niet bij deze frequentie.
+Geplande en handmatige monitorruns worden geserialiseerd en een lopende run
+wordt niet geannuleerd. De bestaande maandagworkflow
+`.github/workflows/snapshot-clan-history.yml` blijft de weekhistory opslaan.

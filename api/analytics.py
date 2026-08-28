@@ -3,7 +3,10 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
-from Royale_api import get_clan_config
+try:
+    from api.config import get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from config import get_clan_config
 from war_analytics_metrics import collect_analytics_data
 
 
@@ -31,8 +34,11 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
 
-        except Exception as e:
-            payload = {"ok": False, "error": str(e)}
+        except Exception:
+            payload = {
+                "ok": False,
+                "error": "Official analytics data is temporarily unavailable.",
+            }
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
             self.send_response(500)

@@ -3,9 +3,10 @@ import json
 import os
 from urllib.parse import parse_qs, urlparse
 
-import requests
-
-ROYAL_API_BASE_URL = "https://proxy.royaleapi.dev/v1"
+try:
+    from api.clash_client import ClashClientError, ClashRoyaleClient, normalize_tag
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from clash_client import ClashClientError, ClashRoyaleClient, normalize_tag
 
 
 def parse_player_from_query(path: str) -> str:
@@ -17,12 +18,13 @@ def parse_player_from_query(path: str) -> str:
 
 
 def normalize_player_tag(raw_tag: str) -> str:
-    clean = (raw_tag or "").replace("#", "").replace("%23", "")
-    clean = "".join(ch for ch in clean if ch.isalnum())
-    return clean.upper()
+    try:
+        return normalize_tag(raw_tag)
+    except ClashClientError:
+        return ""
 
 
-def fetch_player_summary(pid: str) -> dict:
+def fetch_player_summary(pid: str, *, client=None) -> dict:
     api_key = os.environ.get("CLASH_ROYALE_API_KEY")
     if not api_key:
         raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
@@ -31,21 +33,16 @@ def fetch_player_summary(pid: str) -> dict:
     if not clean_pid:
         raise RuntimeError("Missing or invalid player tag.")
 
-    endpoint = f"{ROYAL_API_BASE_URL}/players/%23{clean_pid}"
-    response = requests.get(
-        endpoint,
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=25,
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Clash API error {response.status_code} for /players/%23{clean_pid}")
-
-    data = response.json() if response.content else {}
+    official_client = client or ClashRoyaleClient(api_key=api_key)
+    response = official_client.get_player(clean_pid)
+    data = response.data if isinstance(response.data, dict) else {}
     return {
         "pid": clean_pid,
         "acc_lvl": str(data.get("expLevel") or "-"),
         "cw2_wins": str(data.get("warDayWins") or 0),
         "url": f"https://royaleapi.com/player/{clean_pid}",
+        "source": response.source,
+        "fetched_at": response.fetched_at,
     }
 
 
@@ -59,13 +56,13 @@ def classify_error(exc: Exception) -> tuple[int, str]:
     if "missing clash_royale_api_key" in lower:
         return 500, message
 
-    if "clash api error" in lower:
+    if isinstance(exc, ClashClientError) or "clash api error" in lower:
         return 502, "Official Clash API request failed. Try again shortly."
 
     if "httpsconnectionpool" in lower or "network" in lower or "proxy" in lower:
         return 502, "Network/proxy error while contacting official Clash API. Retry in a moment."
 
-    return 500, message
+    return 500, "Player summary is temporarily unavailable."
 
 
 class handler(BaseHTTPRequestHandler):
@@ -91,7 +88,6 @@ class handler(BaseHTTPRequestHandler):
             payload = {
                 "ok": False,
                 "error": friendly_message,
-                "details": str(exc),
             }
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 

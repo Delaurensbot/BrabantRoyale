@@ -3,7 +3,10 @@ import json
 
 import requests
 
-from Royale_api import get_clan_config
+try:
+    from api.config import get_clan_config
+except ImportError:  # pragma: no cover - useful when loaded as a loose file.
+    from config import get_clan_config
 from supabase_history import (
     EXCLUSIONS_TABLE,
     _supabase_headers,
@@ -123,9 +126,12 @@ class handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as exc:
             status = 400
             response_payload = {"ok": False, "error": str(exc)}
-        except Exception as exc:
+        except Exception:
             status = 500
-            response_payload = {"ok": False, "error": str(exc)}
+            response_payload = {
+                "ok": False,
+                "error": "Opslaan van de weekuitzondering is tijdelijk niet beschikbaar.",
+            }
 
         body = json.dumps(response_payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)

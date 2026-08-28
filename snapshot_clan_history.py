@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from Royale_api import CLAN_CONFIGS, get_clan_config
+from api.config import CLAN_CONFIGS, get_clan_config
 from supabase_history import get_supabase_write_config, normalize_tag, snapshot_clan
 
 
