@@ -11,9 +11,10 @@ in git.
 - T16 baseline: `3bc879d63c0cc574fbdd66357b34d589defb4266`.
 - Pre-migration rollback-tag: `brabant-royale-pre-migration`.
 - Verwachte tag-target: `d979fcc5ca165102e7f147d6833214f8f5ca7107`.
-- T17 release commit: vul de gecontroleerde commit-hash in na de laatste
-  lokale verificatie.
-- Productiedeploy: vul `live`, `niet uitgevoerd` of `geblokkeerd` in met reden.
+- T17 release candidate: `7cbe7d58dd781c570734f202536496ea5ca4893c`.
+- Productiedeploy: `geblokkeerd`; de lokale Vercel-CLI ontbrak en
+  `npx vercel whoami` accepteerde geen geldige token. De claimable-preview
+  fallback is niet gebruikt als vervanging voor productie.
 
 ## Productiebronnen en veiligheidsgrenzen
 
@@ -123,3 +124,33 @@ pre-migrationbaseline:
 
 Een rollback herstelt de codebaseline, niet verdwenen upstream-history. Na
 herstel moet de monitorprocedure opnieuw worden geactiveerd en gecontroleerd.
+
+## T17 verificatierecord (2026-08-28)
+
+De lokale release gate op de release candidate was volledig groen:
+
+- `python -m pytest -q`: 315 passed;
+- `python -m compileall -q api supabase_history.py`: geslaagd;
+- Ruff op alle gewijzigde Python-bestanden en tests: geslaagd;
+- `git diff --check`: geslaagd;
+- legacy-, frontend-secret- en unauthorized-files-scan: geslaagd;
+- `brabant-royale-pre-migration` wees naar de verwachte hash.
+
+Een post-T17 productie-smoke-test kon niet worden uitgevoerd omdat de
+productiedeploy veilig is gestopt op ontbrekende/ongeldige Vercel-auth. De
+volgende read-only baselinecontrole op de bestaande productie-URL is wel
+uitgevoerd; deze bewijst niet dat T17 live staat:
+
+| Methode en route | Baseline-uitkomst vóór T17-deploy |
+|---|---|
+| `GET /api/cwstats?clan=9YP8UY` | HTTP 200, JSON, `ok: true`; de oudere live-respons bevatte de T17-metadata (`source`, `fetched_at`, `data_quality`, race/freshness/eventvelden) niet betrouwbaar |
+| `GET /api/analytics?clan=9YP8UY` | HTTP 200, JSON, `ok: true`; oudere live-respons bevatte geen gestandaardiseerde T17-bron/freshnessvelden |
+| `GET /api/scouting?tag=%23PLAYER1&clan=9YP8UY` | HTTP 404; route niet aanwezig in de bestaande live deployment, dus geen T17-resultaat |
+| `GET /api/war_status?clan=9YP8UY` | HTTP 404; route niet aanwezig in de bestaande live deployment, dus geen T17-resultaat |
+| `POST /api/war_monitor` zonder credential | HTTP 404; route niet aanwezig, daarom is alleen geen data-mutatie uitgevoerd en is de auth-guard niet live getest |
+
+Er zijn geen response-body’s, playerdetails, leadergegevens, tokens of andere
+secrets gelogd. Er is geen productie-data gewijzigd. Na herstel van Vercel-auth
+moeten alle vijf post-release smoke-tests opnieuw worden uitgevoerd en moet
+dit record worden aangevuld met de echte deploymentstatus en geselecteerde
+metadata.
