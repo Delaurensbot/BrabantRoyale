@@ -134,6 +134,25 @@ def test_missing_profile_fields_stay_unknown_instead_of_becoming_zero():
     assert "None" not in encoded
 
 
+def test_sufficient_war_data_with_unknown_account_readiness_stays_trial():
+    payload = build_fit_payload(
+        {
+            "tag": "#PLAYER1",
+            "name": "Alice",
+            "clan": {"tag": f"#{CLAN_TAG}", "name": "Brabant Royale"},
+        },
+        war_rows(),
+        clan_tag=CLAN_TAG,
+    )
+
+    recommendation = payload["recommendation"]
+    assert payload["war"]["sufficient"] is True
+    assert payload["account_readiness"]["score"] is None
+    assert recommendation["destination"] == "trial"
+    assert recommendation["score"] is None
+    assert "account readiness: unknown" in recommendation["reason"].lower()
+
+
 @pytest.mark.parametrize(
     ("payload_profile", "rows", "expected"),
     [

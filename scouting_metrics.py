@@ -929,6 +929,14 @@ def recommend_destination(
             "account_readiness_plus_own_war" if score is not None else "unavailable"
         )
         confidence = "hoog" if sample_size >= 6 else "middel"
+    elif profile_score is None:
+        # Sufficient war evidence cannot replace missing account-readiness
+        # evidence.  Keep the permanent destination conservative unless the
+        # explicit reliability reject rule above applies.
+        destination = "trial"
+        score = None
+        score_basis = "unavailable"
+        confidence = "laag"
     elif (
         profile_score is not None
         and profile_score >= 75
@@ -988,6 +996,11 @@ def recommend_destination(
     )
     if destination == "reject":
         reasons.append("Reliability ligt onder de expliciete reject-grens van 70%.")
+    elif destination == "trial" and war_sufficient:
+        reasons.append(
+            "Account readiness: unknown; voldoende war-data vervangt ontbrekende "
+            "profieldata niet, dus de bestemming blijft trial."
+        )
     elif destination == "main":
         reasons.append(
             "Alle main-drempels zijn bekend en gehaald: readiness ≥75, "
