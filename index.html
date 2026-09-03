@@ -535,6 +535,26 @@
     return true;
   }
 
+  function renderOfficialOverview(rows) {
+    if (!Array.isArray(rows) || !rows.length) return false;
+
+    const headCells = ["Rank", "Clan", "Decks", "Avg/deck", "Projected", "Boat", "Medals"];
+    const tableRows = rows.map((row, index) => [
+      String(index + 1),
+      row?.name || "-",
+      `${Number(row?.decks_used_today || 0)}/${Number(row?.decks_total_today || 0)}`,
+      row?.avg_medals_per_deck != null ? formatMetric(row.avg_medals_per_deck, 2) : "-",
+      formatMetric(row?.projected_medals),
+      formatMetric(row?.repair_points),
+      formatMetric(row?.medals),
+    ]);
+
+    overviewData = { headCells, rows: tableRows };
+    overviewSortState = { index: -1, direction: "desc" };
+    buildOverviewTable(headCells, tableRows);
+    return true;
+  }
+
   function renderOverviewTable(text) {
     const container = el("overview");
     container.innerHTML = "";
@@ -755,7 +775,9 @@
       bestPossibleMedals = Number(direct.best_finish);
       worstRank = Number(direct.worst_rank);
       worstPossibleMedals = Number(direct.worst_finish);
-      hintText = `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
+      hintText = direct.model === "official_api_derived"
+        ? "Lokaal berekende schatting op officiële Clash Royale API-data."
+        : `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
     } else {
       if (!rows.length) {
         container.className = "empty";
@@ -1083,7 +1105,7 @@
 
     const thead = document.createElement("thead");
     const headTr = document.createElement("tr");
-    ["#", "Name", "Role", "Today/Total", "Boat", "Medals (API)"].forEach((label) => {
+    ["#", "Name", "Role", "Today/Total", "Boat", "Medals"].forEach((label) => {
       const th = document.createElement("th");
       th.textContent = label;
       headTr.appendChild(th);
@@ -1125,6 +1147,64 @@
     table.appendChild(tbody);
     container.appendChild(table);
     return true;
+  }
+
+  function formatOfficialClanAvg(data) {
+    const rows = Array.isArray(data?.overview_rows) ? data.overview_rows : [];
+    const current = rows.find((row) => normalizeClanTag(row?.tag) === currentClanTag) || {};
+    const average = current.avg_medals_per_deck != null
+      ? formatMetric(current.avg_medals_per_deck, 2)
+      : "-";
+    const projected = current.projected_medals != null ? String(Number(current.projected_medals)) : "-";
+    const medals = Number(data?.race_state?.fame || 0) + Number(data?.race_state?.repair_points || 0);
+
+    return [
+      "Clan avg --> Projected",
+      `${current.name || data?.clan?.name || clanName(currentClanTag)} ${average} --> ${projected}`,
+      `Members: ${Number(data?.clan?.members || 0)} | War trophies: ${Number(data?.clan?.war_trophies || 0)}`,
+      `Current medals model: fame + repair = ${medals}`,
+    ].join("\n\n");
+  }
+
+  function makeOfficialRiskText(players) {
+    const buckets = { 3: [], 2: [], 1: [] };
+    (players || []).forEach((player) => {
+      const left = Number(player?.attacks_left_today || 0);
+      if (buckets[left]) buckets[left].push(stripPlayerTag(player?.name));
+    });
+
+    const lines = ["Spelers met nog losse aanvallen:"];
+    [3, 2, 1].forEach((left) => {
+      if (!buckets[left].length) return;
+      lines.push("", `${left} attacks left:`);
+      buckets[left].forEach((name) => lines.push(`- ${name}`));
+    });
+    if (lines.length === 1) lines.push("", "Geen risico spelers gevonden (niemand met 1-3 open).");
+    return lines.join("\n");
+  }
+
+  function makeOfficialBattlesText(players) {
+    const buckets = { 4: [], 3: [], 2: [], 1: [] };
+    (players || []).forEach((player) => {
+      const left = Number(player?.attacks_left_today || 0);
+      if (buckets[left]) buckets[left].push(stripPlayerTag(player?.name));
+    });
+
+    const lines = ["Battles left (today):"];
+    [4, 3, 2, 1].forEach((left) => {
+      if (!buckets[left].length) return;
+      lines.push("", `${left} attacks left:`);
+      buckets[left].forEach((name) => lines.push(`- ${name}`));
+    });
+    if (lines.length === 1) lines.push("", "Iedereen is klaar voor vandaag.");
+    return lines.join("\n");
+  }
+
+  function buildOfficialShortStory(data) {
+    const rank = data?.finish_outlook?.projected_rank || "-";
+    const score = Number(data?.finish_outlook?.projected_finish || 0);
+    const battles = Number(data?.finish_outlook?.battles_left || 0);
+    return `${data?.clan?.name || clanName(currentClanTag)} draait nu op een berekende ${rank}e plek met model-score ${score}. Open decks vandaag: ${battles}.`;
   }
 
   function renderDay1HighFameTable(players, text) {
@@ -1316,57 +1396,52 @@
     el("errorBox").style.display = "none";
     el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
 
-    const url = `/api/cwstats?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`;
-    const res = await fetch(url, { cache: "no-store" });
-
-    if (!res.ok) {
+    const timestamp = Date.now();
+    const [officialRes, legacyRes] = await Promise.all([
+      fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${timestamp}`, { cache: "no-store" }),
+      fetch(`/api/cwstats?clan=${encodeURIComponent(currentClanTag)}&t=${timestamp}`, { cache: "no-store" }).catch(() => null),
+    ]);
+    const officialData = await officialRes.json();
+    if (!officialRes.ok || !officialData?.ok) {
+      const message = officialData?.error || `Officiële Clash Royale API error (${officialRes.status})`;
       el("status").textContent = "";
       el("errorBox").style.display = "block";
-      el("errorBox").textContent = "API error (" + res.status + ")";
-      throw new Error("API error " + res.status);
+      el("errorBox").textContent = `API error: ${message}`;
+      throw new Error(message);
     }
 
-    const data = await res.json();
+    let data = {};
+    if (legacyRes?.ok) {
+      const legacyData = await legacyRes.json();
+      if (legacyData?.ok) data = legacyData;
+    }
+
     renderClanAccessWarning(data);
     renderColosseumNotice(data);
-    if (!data.ok) {
-      el("status").textContent = "";
-      el("errorBox").style.display = "block";
-      el("errorBox").textContent = "API error: " + (data.error || "unknown");
-      throw new Error(data.error || "unknown");
-    }
 
-    let mergedOverviewText = data.race_overview_text || "";
-    let officialPlayers = [];
-    try {
-      const prototypeRes = await fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${Date.now()}`, { cache: "no-store" });
-      if (prototypeRes.ok) {
-        const prototypeData = await prototypeRes.json();
-        if (prototypeData?.ok) {
-          mergedOverviewText = mergeOverviewDecksFromPrototype(
-            mergedOverviewText,
-            prototypeData.overview_rows || []
-          );
-          officialPlayers = Array.isArray(prototypeData.players) ? prototypeData.players : [];
-        }
-      }
-    } catch (_) {
-      // Silent fallback: keep the scraped data when the official API is unavailable.
-    }
+    const officialPlayers = Array.isArray(officialData.players) ? officialData.players : [];
 
-    renderWarPhase(data);
-    if (!renderOverviewFromRaceRows(data.race_rows || [])) {
-      renderOverviewTable(mergedOverviewText);
+    if (!renderOfficialOverview(officialData.overview_rows || [])) {
+      el("overview").className = "empty";
+      el("overview").textContent = "(geen officiële racedata)";
     }
+    el("overviewPhase").textContent = "Bron: officiële Clash Royale API via RoyaleAPI proxy";
+    el("overviewPhaseBadge").textContent = "Live API";
     renderStrategy(data);
-    renderFinishOutlook(data);
-    const formattedClanAvg = formatClanAvgProjection(data.clan_avg_projection_text || "");
+    renderFinishOutlook({
+      ...data,
+      clan_tag: officialData.clan_tag,
+      finish_outlook: officialData.finish_outlook || {},
+      total_players_participated: officialData.finish_outlook?.total_players_participated,
+    });
+    const formattedClanAvg = formatOfficialClanAvg(officialData);
     el("clanAvg").textContent = formattedClanAvg;
     if (!renderOfficialPlayersTable(officialPlayers)) {
-      renderPlayersTable(data.players_text || "");
+      el("players").className = "empty";
+      el("players").textContent = "(geen officiële spelersdata)";
     }
-    const battlesText = stripPlayerTagsInTableText(data.battles_left_text || "");
-    const riskText = stripPlayerTagsInTableText(data.risk_left_text || "");
+    const battlesText = makeOfficialBattlesText(officialPlayers);
+    const riskText = makeOfficialRiskText(officialPlayers);
     el("battles").textContent = battlesText || "(geen data)";
     el("risk").textContent = riskText || "(geen data)";
 
@@ -1400,7 +1475,7 @@
       }
     }
 
-    const storyText = buildDynamicShortStory(data);
+    const storyText = buildOfficialShortStory(officialData);
     el("story").textContent = storyText || "(geen data)";
     updateLength("clanAvg", formattedClanAvg);
     updateLength("battles", battlesText);
