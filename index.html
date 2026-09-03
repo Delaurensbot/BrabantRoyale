@@ -776,7 +776,9 @@
       worstRank = Number(direct.worst_rank);
       worstPossibleMedals = Number(direct.worst_finish);
       hintText = direct.model === "official_api_derived"
-        ? "Lokaal berekende schatting op officiële Clash Royale API-data."
+        ? (Number(direct.projection_multiplier) === 4
+          ? "Colosseumprojectie: officiële API-dagprojectie × 4 voor de cumulatieve vierdaagse score."
+          : "Dagprojectie op officiële Clash Royale API-data.")
         : `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
     } else {
       if (!rows.length) {
@@ -1376,7 +1378,9 @@
     const noticeEl = el("colosseumNotice");
     if (!noticeEl) return;
 
-    const isColosseum = Boolean(data.cwstats_colosseum_weekend);
+    const isColosseum = Boolean(
+      data?.race_state?.is_colosseum_weekend || data?.cwstats_colosseum_weekend
+    );
     if (!isColosseum) {
       noticeEl.style.display = "none";
       noticeEl.textContent = "";
@@ -1388,7 +1392,7 @@
       ? `Actieve dag: Day ${activeDay}. `
       : "";
 
-    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}Score telt op over Day 1 t/m Day 4 en avg/deck wordt nu geïmporteerd van cwstats.com.`;
+    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}De score telt cumulatief over vier dagen; projected is de officiële API-dagprojectie × 4.`;
     noticeEl.style.display = "block";
   }
 
@@ -1417,7 +1421,7 @@
     }
 
     renderClanAccessWarning(data);
-    renderColosseumNotice(data);
+    renderColosseumNotice({ ...data, race_state: officialData.race_state });
 
     const officialPlayers = Array.isArray(officialData.players) ? officialData.players : [];
 
@@ -1426,7 +1430,9 @@
       el("overview").textContent = "(geen officiële racedata)";
     }
     el("overviewPhase").textContent = "Bron: officiële Clash Royale API via RoyaleAPI proxy";
-    el("overviewPhaseBadge").textContent = "Live API";
+    el("overviewPhaseBadge").textContent = officialData.race_state?.is_colosseum_weekend
+      ? "Colosseum ×4"
+      : "Live API · per dag";
     renderStrategy(data);
     renderFinishOutlook({
       ...data,

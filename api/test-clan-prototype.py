@@ -11,6 +11,8 @@ DEFAULT_CLAN_TAG = "9YP8UY"
 ALLOWED_CLANS = {"9YP8UY", "GPCLVLPP", "RLQQQC99"}
 MAX_DECKS_PER_PLAYER = 4
 MAX_CLAN_DECKS_PER_DAY = 200
+COLOSSEUM_SECTION_INDEX = 4
+COLOSSEUM_PROJECTION_DAYS = 4
 
 
 def normalize_tag(raw_tag: str) -> str:
@@ -37,7 +39,16 @@ def int_value(value, default=0):
         return default
 
 
-def build_overview_rows(clans):
+def is_colosseum_race(race_data):
+    return int_value((race_data or {}).get("sectionIndex"), -1) == COLOSSEUM_SECTION_INDEX
+
+
+def projection_multiplier_for_race(race_data):
+    return COLOSSEUM_PROJECTION_DAYS if is_colosseum_race(race_data) else 1
+
+
+def build_overview_rows(clans, projection_multiplier=1):
+    projection_multiplier = max(1, int_value(projection_multiplier, 1))
     rows = []
     for row in clans:
         participants = row.get("participants", []) or []
@@ -50,7 +61,8 @@ def build_overview_rows(clans):
         medals = fame + repair
 
         avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
-        projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
+        daily_projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
+        projected = daily_projected * projection_multiplier
 
         rows.append(
             {
@@ -63,6 +75,7 @@ def build_overview_rows(clans):
                 "decks_total_today": decks_total,
                 "decks_remaining_today": decks_remaining,
                 "avg_medals_per_deck": avg_per_deck,
+                "daily_projected_medals": daily_projected,
                 "projected_medals": projected,
             }
         )
@@ -107,7 +120,7 @@ def build_players(member_items, participant_rows):
     return players
 
 
-def build_finish_outlook(clan_tag, overview_rows, players):
+def build_finish_outlook(clan_tag, overview_rows, players, projection_multiplier=1):
     ours = None
     for row in overview_rows:
         if str(row.get("tag", "")).replace("#", "") == clan_tag:
@@ -124,11 +137,17 @@ def build_finish_outlook(clan_tag, overview_rows, players):
     current_medals = int_value(ours.get("medals"))
     remaining_decks = int_value(ours.get("decks_remaining_today"))
     projected_finish = int_value(ours.get("projected_medals"))
-    best_finish = int(round(current_medals + (remaining_decks * max_avg)))
-    worst_finish = int(round(current_medals + (remaining_decks * min_avg)))
+    projection_multiplier = max(1, int_value(projection_multiplier, 1))
+    best_finish = int(round(current_medals + (remaining_decks * max_avg))) * projection_multiplier
+    worst_finish = int(round(current_medals + (remaining_decks * min_avg))) * projection_multiplier
 
     def rank_for(score: int):
-        better = sum(1 for row in overview_rows if int_value(row.get("projected_medals")) > score)
+        better = sum(
+            1
+            for row in overview_rows
+            if str(row.get("tag", "")).replace("#", "") != clan_tag
+            and int_value(row.get("projected_medals")) > score
+        )
         return better + 1
 
     battles_left = sum(int_value(p.get("attacks_left_today")) for p in players)
@@ -146,6 +165,8 @@ def build_finish_outlook(clan_tag, overview_rows, players):
         "worst_rank": rank_for(worst_finish),
         "worst_finish": worst_finish,
         "model": "official_api_derived",
+        "projection_multiplier": projection_multiplier,
+        "projection_scope": "colosseum_4_days" if projection_multiplier > 1 else "single_day",
     }
 
 
@@ -173,9 +194,16 @@ class handler(BaseHTTPRequestHandler):
             own_clan = race_data.get("clan", {}) if isinstance(race_data, dict) else {}
             participant_rows = own_clan.get("participants", []) if isinstance(own_clan, dict) else []
 
-            overview_rows = build_overview_rows(race_clans)
+            is_colosseum = is_colosseum_race(race_data)
+            projection_multiplier = projection_multiplier_for_race(race_data)
+            overview_rows = build_overview_rows(race_clans, projection_multiplier)
             players = build_players(members, participant_rows)
-            finish_outlook = build_finish_outlook(clan_tag, overview_rows, players)
+            finish_outlook = build_finish_outlook(
+                clan_tag,
+                overview_rows,
+                players,
+                projection_multiplier,
+            )
 
             is_open = str(clan_data.get("type", "")).lower() == "open"
 
@@ -196,6 +224,8 @@ class handler(BaseHTTPRequestHandler):
                     "race_state": {
                         "section_index": race_data.get("sectionIndex"),
                         "period_index": race_data.get("periodIndex"),
+                        "is_colosseum_weekend": is_colosseum,
+                        "projection_multiplier": projection_multiplier,
                         "fame": int_value(own_clan.get("fame")),
                         "repair_points": int_value(own_clan.get("repairPoints")),
                         "participants": len(participant_rows),
@@ -208,7 +238,7 @@ class handler(BaseHTTPRequestHandler):
                     "gaps": {
                         "high_fame_day_cards": "not_directly_available",
                         "cwstats_finish_model": "replaced_with_local_estimate",
-                        "colosseum_context": "not_directly_available",
+                        "colosseum_context": "section_index_4",
                     },
                 },
             )
