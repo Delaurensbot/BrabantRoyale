@@ -12,10 +12,34 @@ def race_clan(name, tag, fame=800, decks_used=4):
     return {
         "name": name,
         "tag": tag,
-        "fame": fame,
+        # The API currently reports stale zeroes here while participant scores
+        # are live, so this fixture mirrors the production response.
+        "fame": 0,
         "repairPoints": 0,
-        "participants": [{"decksUsedToday": decks_used}],
+        "participants": [{"fame": fame, "decksUsedToday": decks_used}],
     }
+
+
+def test_overview_uses_live_participant_scores_when_clan_totals_are_stale():
+    clan = {
+        "name": "Brabant Royale",
+        "tag": "#9YP8UY",
+        "fame": 0,
+        "repairPoints": 0,
+        "participants": [
+            {"fame": 800, "repairPoints": 50, "decksUsedToday": 4},
+            {"fame": 600, "repairPoints": 25, "decksUsedToday": 3},
+        ],
+    }
+
+    row = MODULE.build_overview_rows([clan])[0]
+
+    assert row["fame"] == 1400
+    assert row["repair_points"] == 75
+    assert row["medals"] == 1475
+    assert row["decks_used_today"] == 7
+    assert row["avg_medals_per_deck"] == 210.71
+    assert row["projected_medals"] == 42142
 
 
 def test_section_four_uses_four_day_colosseum_projection():
