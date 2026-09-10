@@ -56,8 +56,12 @@ def build_overview_rows(clans, projection_multiplier=1):
         decks_total = MAX_CLAN_DECKS_PER_DAY
         decks_remaining = max(0, decks_total - decks_used)
 
-        fame = int_value(row.get("fame"))
-        repair = int_value(row.get("repairPoints"))
+        # The current river-race response can leave the aggregate clan score at
+        # zero while its official participant rows already contain live scores.
+        # Derive every overview total from those same rows so the clan overview
+        # stays consistent with the players table.
+        fame = sum(int_value(participant.get("fame")) for participant in participants)
+        repair = sum(int_value(participant.get("repairPoints")) for participant in participants)
         medals = fame + repair
 
         avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
@@ -226,8 +230,8 @@ class handler(BaseHTTPRequestHandler):
                         "period_index": race_data.get("periodIndex"),
                         "is_colosseum_weekend": is_colosseum,
                         "projection_multiplier": projection_multiplier,
-                        "fame": int_value(own_clan.get("fame")),
-                        "repair_points": int_value(own_clan.get("repairPoints")),
+                        "fame": sum(int_value(p.get("fame")) for p in participant_rows),
+                        "repair_points": sum(int_value(p.get("repairPoints")) for p in participant_rows),
                         "participants": len(participant_rows),
                         "decks_used_today": sum(int_value(p.get("decksUsedToday")) for p in participant_rows),
                     },
