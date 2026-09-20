@@ -1,0 +1,1562 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Brabant Royale · River Race V2</title>
+  <style>
+    :root {
+      --bg: #0c0e16;
+      --bg-soft: #141829;
+      --card: rgba(22, 26, 40, 0.9);
+      --card-border: rgba(177, 92, 255, 0.28);
+      --text: #eef2ff;
+      --muted: rgba(238, 242, 255, 0.76);
+      --purple: #b15cff;
+      --purple-soft: rgba(177, 92, 255, 0.24);
+      --green: #74ff8d;
+      --green-soft: rgba(116, 255, 141, 0.2);
+    }
+    body { font-family: system-ui, Arial; max-width: 1100px; margin: 28px auto; padding: 0 16px; color: var(--text); background: radial-gradient(circle at 22% 16%, rgba(177, 92, 255, 0.3), transparent 36%), radial-gradient(circle at 76% 0%, rgba(116, 255, 141, 0.24), transparent 28%), linear-gradient(165deg, var(--bg-soft), var(--bg)); }
+    h1 { margin: 0 0 10px; }
+    .top { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .muted { color: var(--muted); }
+    .clanSwitch { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+    .clanButton { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(20, 24, 36, 0.9); cursor: pointer; color: inherit; }
+    .clanButton--active { border-color: var(--green); box-shadow: 0 0 0 1px rgba(116, 255, 141, 0.4), 0 10px 24px rgba(0,0,0,0.36); }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border); background: linear-gradient(145deg, rgba(177, 92, 255, 0.22), rgba(116, 255, 141, 0.08)); color: inherit; cursor: pointer; box-shadow: 0 8px 18px rgba(0,0,0,0.25); }
+    button:hover { border-color: rgba(116, 255, 141, 0.85); background: linear-gradient(145deg, rgba(177, 92, 255, 0.34), rgba(116, 255, 141, 0.18)); }
+    .ctaLink { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px; text-decoration: none; font-weight: 700; color: var(--text); background: linear-gradient(135deg, rgba(177, 92, 255, 0.4), rgba(116, 255, 141, 0.15)); border: 1px solid rgba(177, 92, 255, 0.5); box-shadow: 0 10px 28px rgba(0,0,0,0.28); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+    .ctaLink:hover { border-color: rgba(116, 255, 141, 0.85); transform: translateY(-1px); box-shadow: 0 12px 30px rgba(0,0,0,0.35); }
+    .error { margin: 12px 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(255,0,0,0.12); border: 1px solid rgba(255,0,0,0.25); display:none; }
+    .openClanWarning { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 70, 70, 0.75); background: rgba(255, 0, 0, 0.2); color: #ffdede; font-weight: 800; letter-spacing: 0.2px; display: none; }
+    .colosseumNotice { margin: 8px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 181, 71, 0.85); background: rgba(255, 181, 71, 0.14); color: #ffe6bd; font-weight: 700; letter-spacing: 0.15px; display: none; }
+    .phaseBadge { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 999px; background: rgba(116, 255, 141, 0.12); border: 1px solid rgba(116, 255, 141, 0.34); color: var(--text); font-size: 13px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; align-items: start; }
+    .fullRow { grid-column: 1 / -1; }
+    .card { border-radius: 16px; padding: 14px; background: var(--card); border: 1px solid var(--card-border); box-shadow: 0 20px 60px rgba(0,0,0,0.28); }
+    .cardHead { display:flex; justify-content: space-between; align-items:center; margin-bottom: 10px; }
+    .cardHeadStack { display: grid; gap: 4px; }
+    .title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+    pre { margin: 0; padding: 12px; border-radius: 12px; background: rgba(12, 16, 27, 0.85); border: 1px solid rgba(177, 92, 255, 0.35); min-height: 260px; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; cursor: pointer; }
+    .toast { font-size: 13px; opacity: 0.8; height: 18px; margin-top: 8px; }
+    .overviewTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .overviewTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .overviewTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .overviewTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .overviewTable .clanName { font-weight: 700; font-size: 15px; }
+    .overviewTable .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 12px; margin-right: 6px; }
+    .overviewTable .sortButton { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; }
+    .overviewTable .sortButton:hover { text-decoration: underline; }
+    .subtle { color: rgba(232,235,240,0.75); font-size: 13px; }
+    .empty { padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.12); text-align: center; }
+    .playersTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .playersTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .playersTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .playersTable tbody tr:nth-child(odd) { background: rgba(255,255,255,0.02); }
+    .playersTable .role { font-weight: 700; letter-spacing: 0.2px; }
+    .playersTable .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; background: var(--purple-soft); border: 1px solid rgba(177, 92, 255, 0.45); font-size: 12px; margin-left: 6px; }
+    .simpleTable { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .simpleTable thead th { text-align: left; padding: 10px 12px; background: linear-gradient(135deg, rgba(177, 92, 255, 0.35), rgba(116, 255, 141, 0.2)); border-bottom: 1px solid rgba(177, 92, 255, 0.35); font-weight: 700; font-size: 14px; letter-spacing: 0.1px; }
+    .simpleTable tbody td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
+    .simpleTable tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .finishOutlook { display: grid; gap: 14px; }
+    .finishTopStats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .finishStatBox { border-radius: 12px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .finishStatLabel { font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+    .finishStatValue { margin-top: 4px; font-size: 36px; line-height: 1; font-weight: 800; }
+    .finishCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .finishCard { display: flex; align-items: center; gap: 14px; border-radius: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+    .finishMetaTitle { color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; font-size: 12px; font-weight: 700; }
+    .finishMetaRank { font-size: 32px; line-height: 1; font-weight: 800; }
+    .finishMetaScore { font-size: 28px; line-height: 1.1; font-weight: 700; }
+    .ring { --p: 0; --ring-color: var(--purple); width: 90px; height: 90px; border-radius: 50%; position: relative; flex: 0 0 auto; background: conic-gradient(var(--ring-color) calc(var(--p) * 1%), rgba(255,255,255,0.16) 0); }
+    .ring::before { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: rgba(12, 16, 27, 0.92); border: 1px solid rgba(255,255,255,0.08); }
+    .ringValue { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; font-size: 31px; font-weight: 800; }
+    .ring--projected { --ring-color: #f5b83d; }
+    .ring--best { --ring-color: #55d66a; }
+    .ring--worst { --ring-color: #ff5c5c; }
+    .finishHint { color: var(--muted); font-size: 13px; }
+    .strategyPanel { display: grid; gap: 14px; }
+    .strategyLead { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.09); }
+    .strategyStatus { font-size: 20px; font-weight: 800; }
+    .strategyRecommendation { color: var(--muted); line-height: 1.45; }
+    .strategyGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+    .strategyMetric { padding: 10px 12px; border-radius: 10px; background: rgba(12, 16, 27, 0.62); border: 1px solid rgba(255,255,255,0.08); }
+    .strategyMetricLabel { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.35px; }
+    .strategyMetricValue { margin-top: 4px; font-size: 22px; font-weight: 800; }
+    .strategyTargets { display: grid; gap: 8px; }
+    .strategyTarget { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245, 184, 61, 0.32); background: rgba(245, 184, 61, 0.08); }
+    .strategyTargetTitle { font-weight: 800; }
+    .strategyTargetMeta { color: var(--muted); font-size: 13px; }
+    .strategyBadges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .strategyBadge { display: inline-flex; width: fit-content; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--muted); font-size: 12px; font-weight: 700; }
+    .strategySectionTitle { margin-top: 2px; font-size: 15px; font-weight: 800; }
+    .compactTable { width: 100%; border-collapse: collapse; }
+    .compactTable th, .compactTable td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 13px; }
+    .compactTable th { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: 0.25px; }
+    .strategyReasons { margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.5; }
+    .dataQuality { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .hiddenCopy { display: none; }
+    @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } pre { min-height: 180px; } }
+    @media (max-width: 640px) {
+      body { padding: 0 12px; }
+      .top { flex-direction: column; align-items: stretch; gap: 10px; }
+      .top button, .ctaLink { width: 100%; justify-content: center; text-align: center; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+  <link rel="stylesheet" href="/v2/dashboard.css" />
+  <link rel="stylesheet" href="/v2/river.css" />
+</head>
+<body>
+  <section id="riverHero" aria-label="Interactieve River Race"></section>
+  <main id="dashboard">
+  <p class="v2-eyebrow">ALLE RACEDATA · HET VERTROUWDE OVERZICHT</p>
+  <h1>Clan War Stats</h1>
+  <div class="clanSwitch" id="clanSwitch"></div>
+  <div class="muted" id="clanLabel"></div>
+  <div class="openClanWarning" id="openClanWarning">CLAN STAAT OP OPEN ZET TERUG NAAR INVITE ONLY</div>
+  <div class="colosseumNotice" id="colosseumNotice"></div>
+  <div class="top">
+    <div class="muted">Last updated: <span id="updated">-</span></div>
+    <button id="refresh">Refresh</button>
+    <div class="muted" id="status"></div>
+    <a class="ctaLink" id="analyticsLink" href="/analytics.html">Analytics <span aria-hidden="true">→</span></a>
+    <a class="ctaLink" id="joinLink" href="/join.html">Recent joins <span aria-hidden="true">→</span></a>
+    <!-- Temporary placeholder link to quickly open the clan-member test page. -->
+    <a class="ctaLink" id="testClanLink" href="/test-clan.html">Temp test page <span aria-hidden="true">→</span></a>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+
+  <div class="grid">
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="cardHeadStack">
+          <div class="title">Race Overview</div>
+          <div class="subtle" id="overviewPhase">War status laden...</div>
+        </div>
+        <div class="phaseBadge" id="overviewPhaseBadge">-</div>
+      </div>
+      <div id="overview" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Clan finish outlook</div>
+      </div>
+      <div id="finishOutlook" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Alle clans avg/projection</div>
+        <button data-copy="clanAvg">Copy</button>
+      </div>
+      <pre id="clanAvg" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="clanAvgToast"></div>
+      <div class="muted" id="clanAvgLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Spelers met nog losse aanvallen</div>
+        <button data-copy="risk">Copy</button>
+      </div>
+      <pre id="risk" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="riskToast"></div>
+      <div class="muted" id="riskLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Short story</div>
+        <button data-copy="story">Copy</button>
+      </div>
+      <pre id="story" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="storyToast"></div>
+      <div class="muted" id="storyLen"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardHead">
+        <div class="title">Battles left (today)</div>
+        <button data-copy="battles">Copy</button>
+      </div>
+      <pre id="battles" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="battlesToast"></div>
+      <div class="muted" id="battlesLen"></div>
+    </div>
+
+    <div class="card" id="highFameCard" style="display: none;">
+      <div class="cardHead">
+        <div class="title">Spelers 3000+ 🌟</div>
+        <button data-copy="highFame">Copy</button>
+      </div>
+      <pre id="highFame" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="highFameToast"></div>
+      <div class="muted" id="highFameLen"></div>
+    </div>
+
+    <div class="card" id="day1Card" style="display: none;">
+      <div class="cardHead">
+        <div class="title">Spelers 800+</div>
+        <button data-copy="day1HighFame">Copy</button>
+      </div>
+      <div class="muted" id="day1HighFameUnique"></div>
+      <div id="day1HighFameWrap" class="empty">Alleen zichtbaar op dag 1</div>
+      <pre id="day1HighFame" class="hiddenCopy" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="day1HighFameToast"></div>
+      <div class="muted" id="day1HighFameLen"></div>
+    </div>
+
+    <div class="card" id="day4Card">
+      <div class="cardHead">
+        <div class="title">Spelers die nog 3k kunnen halen!</div>
+        <button data-copy="day4">Copy</button>
+      </div>
+      <pre id="day4" title="Klik om te kopieren">(loading...)</pre>
+      <div class="toast" id="day4Toast"></div>
+      <div class="muted" id="day4Len"></div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Players</div>
+      </div>
+      <div id="players" class="empty">(loading...)</div>
+    </div>
+
+    <div class="card fullRow">
+      <div class="cardHead">
+        <div class="title">Strategieadvies</div>
+      </div>
+      <div id="strategy" class="empty">(loading...)</div>
+    </div>
+  </div>
+
+</main>
+<script src="/v2/river.js"></script>
+<script>
+  const el = (id) => document.getElementById(id);
+  const CLANS = {
+    "9YP8UY": { name: "Brabant Royale" },
+    "GPCLVLPP": { name: "Brabant Royale 2" },
+    "RLQQQC99": { name: "Brabant Royale 3" },
+  };
+  const DEFAULT_CLAN = "9YP8UY";
+
+  function updateLength(id, text, limit) {
+    const target = el(id + "Len");
+    if (!target) return;
+    const len = (text || "").length;
+    if (limit) {
+      target.textContent = len ? `Length: ${len} / ${limit}` : "";
+    } else {
+      target.textContent = len ? `Length: ${len}` : "";
+    }
+  }
+
+  function normalizeClanTag(tag) {
+    return (tag || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  }
+
+  function normalizeClanName(name) {
+    return (name || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/^\d+\s+/, "")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function clanName(tag) {
+    return (CLANS[tag] && CLANS[tag].name) || CLANS[DEFAULT_CLAN].name;
+  }
+
+  function stripPlayerTag(value) {
+    const text = String(value || "").trim();
+    return text.replace(/\s*#[A-Za-z0-9]+\b/g, "").trim();
+  }
+
+  function stripPlayerTagsInTableText(value) {
+    const text = String(value || "");
+    return text.replace(/\s#[A-Za-z0-9]{5,}\b/g, "");
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function formatMetric(value, decimals = 0) {
+    if (value == null || value === "") return "-";
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return new Intl.NumberFormat("en-US", {
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals,
+    }).format(n);
+  }
+
+  function humanizeStrategyValue(value) {
+    const labels = {
+      POSITION_LOCKED_THROW: "Positie vast",
+      COLOSSEUM_LOCKED_THROW: "Colosseumpositie vast",
+      EARLY_FINISH_BALANCING: "Early-finish balans",
+      DATA_INCOMPLETE: "Data incompleet",
+      CONTROLLED_PUSH: "Gecontroleerd pushen",
+      COLOSSEUM_PUSH: "Colosseum push",
+      PROTECT_CURRENT_POSITION: "Huidige positie beschermen",
+      POSITION_UNREACHABLE: "Doel niet haalbaar",
+      SAFE_LOSS_WINDOW: "Veilige lossruimte",
+      ALL_OUT: "All-out",
+      "data-derived": "Gebaseerd op data",
+      mixed: "Combinatie van data en communitykennis",
+      high: "Hoge betrouwbaarheid",
+      medium: "Gemiddelde betrouwbaarheid",
+      low: "Lage betrouwbaarheid",
+      "projected-target": "Projectiedoel",
+      stretch: "Stretch-doel",
+      unlikely: "Onwaarschijnlijk",
+      impossible: "Niet haalbaar",
+      safe: "Veilig",
+    };
+    return labels[value] || value || "-";
+  }
+
+  function humanizeDataQuality(value) {
+    const text = String(value || "");
+    return text
+      .replace("deckCapacity", "deckcapaciteit")
+      .replace("decksUsed", "gebruikte decks")
+      .replace("opponentBounds", "tegenstanderbounds")
+      .replace("inferred-from-medals-and-average", "afgeleid uit medailles en avg/deck")
+      .replace("inferred-from-projection", "afgeleid uit projected score")
+      .replace("unknown", "onbekend");
+  }
+
+  function formatDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return "-";
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    return `${hours}u ${String(minutes).padStart(2, "0")}m`;
+  }
+
+  function updateClanNavLinks() {
+    const query = `?clan=${encodeURIComponent(currentClanTag)}`;
+    const analyticsLink = el("analyticsLink");
+    const joinLink = el("joinLink");
+    const testClanLink = el("testClanLink");
+    if (analyticsLink) analyticsLink.href = `/analytics.html${query}`;
+    if (joinLink) joinLink.href = `/join.html${query}`;
+    if (testClanLink) testClanLink.href = `/test-clan.html${query}`;
+  }
+
+  function updateClanLabel() {
+    const label = el("clanLabel");
+    if (label) {
+      label.textContent = `Data voor ${clanName(currentClanTag)} (${currentClanTag})`;
+    }
+  }
+
+  function setClan(tag, skipFetch = false) {
+    const normalized = normalizeClanTag(tag);
+    currentClanTag = CLANS[normalized] ? normalized : DEFAULT_CLAN;
+
+    document.querySelectorAll(".clanButton").forEach((btn) => {
+      if (btn.dataset.clan === currentClanTag) {
+        btn.classList.add("clanButton--active");
+      } else {
+        btn.classList.remove("clanButton--active");
+      }
+    });
+
+    updateClanLabel();
+    updateClanNavLinks();
+    if (!skipFetch) {
+      fetchData().catch(() => {});
+    }
+  }
+
+  function renderClanButtons() {
+    const switchEl = el("clanSwitch");
+    if (!switchEl) return;
+    switchEl.innerHTML = "";
+
+    Object.entries(CLANS).forEach(([tag, info]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "clanButton";
+      btn.dataset.clan = tag;
+      btn.textContent = `${info.name} (${tag})`;
+      btn.addEventListener("click", () => setClan(tag));
+      switchEl.appendChild(btn);
+    });
+  }
+
+  let overviewData = { headCells: [], rows: [] };
+  let overviewSortState = { index: -1, direction: "desc" };
+  let currentClanTag = DEFAULT_CLAN;
+
+  function parseOverviewValue(value, columnName) {
+    const col = (columnName || "").toLowerCase();
+    const raw = (value || "").trim();
+
+    if (col.includes("decks")) {
+      const m = raw.match(/^(\d+)\s*\/\s*(\d+)/);
+      if (!m) return Number.NEGATIVE_INFINITY;
+      return parseInt(m[1], 10);
+    }
+
+    return parseMetricNumber(raw, col.includes("avg"));
+  }
+
+  function sortOverviewRows(index) {
+    if (typeof index !== "number" || index < 0 || index >= overviewData.headCells.length) {
+      buildOverviewTable(overviewData.headCells, overviewData.rows);
+      return;
+    }
+
+    if (overviewSortState.index === index) {
+      overviewSortState.direction = overviewSortState.direction === "asc" ? "desc" : "asc";
+    } else {
+      overviewSortState = { index, direction: "desc" };
+    }
+
+    const directionFactor = overviewSortState.direction === "asc" ? 1 : -1;
+    const columnName = overviewData.headCells[index];
+    const sortedRows = [...overviewData.rows].sort((a, b) => {
+      const aVal = parseOverviewValue(a[index], columnName);
+      const bVal = parseOverviewValue(b[index], columnName);
+
+      const bothNumeric = typeof aVal === "number" && typeof bVal === "number";
+      if (bothNumeric && aVal !== bVal) {
+        return (aVal - bVal) * directionFactor;
+      }
+
+      const aText = (a[index] || "").toString();
+      const bText = (b[index] || "").toString();
+      const textCompare = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" });
+      if (textCompare !== 0) {
+        return textCompare * directionFactor;
+      }
+
+      if (bothNumeric && aVal === bVal) {
+        return (a[0] || "").localeCompare(b[0] || "");
+      }
+      return (a[0] || "").localeCompare(b[0] || "");
+    });
+
+    buildOverviewTable(overviewData.headCells, sortedRows);
+  }
+
+  function buildOverviewTable(headCells, rows) {
+    const container = el("overview");
+    container.innerHTML = "";
+    container.className = "tableWrap";
+    const clanIdx = headCells.findIndex((cell) => (cell || "").toLowerCase().includes("clan"));
+    const decksIdx = headCells.findIndex((cell) => (cell || "").toLowerCase().includes("decks"));
+
+    const table = document.createElement("table");
+    table.className = "overviewTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    headCells.forEach((cell, idx) => {
+      const th = document.createElement("th");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sortButton";
+      const isActive = overviewSortState.index === idx;
+      const arrow = isActive ? (overviewSortState.direction === "asc" ? " ↑" : " ↓") : "";
+      btn.textContent = `${cell || ""}${arrow}`;
+      btn.addEventListener("click", () => sortOverviewRows(idx));
+      th.appendChild(btn);
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach((parts) => {
+      const tr = document.createElement("tr");
+
+      parts.forEach((p, idx) => {
+        const td = document.createElement("td");
+        if (idx === clanIdx) {
+          td.className = "clanName";
+          td.textContent = p;
+        } else if (idx === decksIdx) {
+          td.innerHTML = `<span class="pill">${p || "-"}</span>`;
+        } else {
+          td.textContent = p || "-";
+        }
+        tr.appendChild(td);
+      });
+
+      while (tr.children.length < headCells.length) {
+        const td = document.createElement("td");
+        td.textContent = "-";
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function renderOverviewFromRaceRows(raceRows) {
+    if (!Array.isArray(raceRows) || !raceRows.length) return false;
+
+    const headCells = ["Rank", "Clan", "Decks", "Avg/deck", "Projected", "Boat movement", "Medals"];
+    const rows = raceRows.map((row) => {
+      const decks = row.decks || null;
+      const used = decks ? decks.used : row.decksUsedToday;
+      const total = decks ? decks.total : row.estimatedDeckCapacityToday;
+      const deckText = used != null && total != null && Number.isFinite(Number(used)) && Number.isFinite(Number(total))
+        ? `${used}/${total}`
+        : "-";
+      return [
+        row.current_rank != null ? String(row.current_rank) : row.currentRank != null ? String(row.currentRank) : "-",
+        row.name || "-",
+        deckText,
+        row.avg != null ? formatMetric(row.avg, 2) : row.todayAveragePerDeck != null ? formatMetric(row.todayAveragePerDeck, 2) : "-",
+        row.projected != null ? formatMetric(row.projected) : "-",
+        row.boat_points != null ? formatMetric(row.boat_points) : row.boatValueRaw != null ? formatMetric(row.boatValueRaw) : "-",
+        row.medals != null ? formatMetric(row.medals) : row.currentMedals != null ? formatMetric(row.currentMedals) : "-",
+      ];
+    });
+
+    overviewData = { headCells, rows };
+    overviewSortState = { index: -1, direction: "desc" };
+    buildOverviewTable(headCells, rows);
+    return true;
+  }
+
+  function renderOfficialOverview(rows) {
+    if (!Array.isArray(rows) || !rows.length) return false;
+
+    const isColosseum = rows.some((row) => row?.score_scope === "colosseum_cumulative");
+    const headCells = [
+      "Rank",
+      "Clan",
+      "Decks",
+      isColosseum ? "Avg/deck (4 days)" : "Avg/deck (today)",
+      "Projected",
+      "Boat",
+      isColosseum ? "Medals (4 days)" : "Medals (today)",
+    ];
+    const tableRows = rows.map((row, index) => [
+      String(index + 1),
+      row?.name || "-",
+      `${Number(row?.decks_used_today || 0)}/${Number(row?.decks_total_today || 0)}`,
+      row?.avg_medals_per_deck != null ? formatMetric(row.avg_medals_per_deck, 2) : "-",
+      formatMetric(row?.projected_medals),
+      formatMetric(row?.boat_points),
+      formatMetric(row?.medals),
+    ]);
+
+    overviewData = { headCells, rows: tableRows };
+    overviewSortState = { index: -1, direction: "desc" };
+    buildOverviewTable(headCells, tableRows);
+    return true;
+  }
+
+  function renderOverviewTable(text) {
+    const container = el("overview");
+    container.innerHTML = "";
+
+    if (!text || !text.trim()) {
+      container.className = "empty";
+      container.textContent = "(geen data)";
+      return;
+    }
+
+    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
+
+    if (!dataLines.length) {
+      container.className = "empty";
+      container.textContent = text;
+      return;
+    }
+
+    const [header, ...rows] = dataLines;
+    const headCells = header.split("|").map(c => c.trim());
+    const parsedRows = rows.map(line => line.split("|").map(p => p.trim()));
+    overviewData = { headCells, rows: parsedRows };
+    const defaultIndex = headCells.findIndex((cell) => cell.toLowerCase().includes("medals"));
+    overviewSortState = { index: -1, direction: "desc" };
+    if (defaultIndex >= 0) {
+      sortOverviewRows(defaultIndex);
+    } else {
+      buildOverviewTable(headCells, parsedRows);
+    }
+  }
+
+  function mergeOverviewDecksFromPrototype(overviewText, prototypeRows) {
+    if (!overviewText || !Array.isArray(prototypeRows) || !prototypeRows.length) {
+      return overviewText;
+    }
+
+    const lines = overviewText.split("\n");
+    const dataLineIndexes = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.includes("|") && !/^[-|—\s]+$/.test(line));
+
+    if (dataLineIndexes.length < 2) return overviewText;
+
+    const [headerRef, ...rowRefs] = dataLineIndexes;
+    const headerCells = headerRef.line.split("|").map((cell) => cell.trim().toLowerCase());
+    const clanIdx = headerCells.findIndex((cell) => cell.includes("clan"));
+    const decksIdx = headerCells.findIndex((cell) => cell.includes("decks"));
+
+    if (clanIdx === -1 || decksIdx === -1) return overviewText;
+
+    const decksByClan = new Map();
+    prototypeRows.forEach((row) => {
+      const key = normalizeClanName(row?.name || "");
+      if (!key) return;
+      const used = Number(row?.decks_used_today);
+      const total = Number(row?.decks_total_today);
+      if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0) return;
+      decksByClan.set(key, `${used}/${total}`);
+    });
+
+    rowRefs.forEach(({ line, index }) => {
+      const cells = line.split("|").map((cell) => cell.trim());
+      const key = normalizeClanName(cells[clanIdx] || "");
+      const decksValue = decksByClan.get(key);
+      if (!decksValue) return;
+      cells[decksIdx] = decksValue;
+      lines[index] = cells.join(" | ");
+    });
+
+    return lines.join("\n");
+  }
+
+
+  function parseMetricNumber(value, allowDecimal = false) {
+    if (value == null) return null;
+    const raw = String(value).trim().replace(/\s+/g, "");
+    if (!raw) return null;
+
+    if (!allowDecimal) {
+      const digitsOnly = raw.replace(/[^\d]/g, "");
+      if (!digitsOnly) return null;
+      const n = Number(digitsOnly);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    let normalized = raw;
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+      if (lastComma > lastDot) {
+        normalized = normalized.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
+    } else if (hasComma) {
+      if (/,[0-9]{1,2}$/.test(normalized)) {
+        normalized = normalized.replace(",", ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
+    } else if (hasDot) {
+      if (/\.[0-9]{1,2}$/.test(normalized)) {
+        // decimal dot, keep as-is
+      } else {
+        normalized = normalized.replace(/\./g, "");
+      }
+    }
+
+    normalized = normalized.replace(/[^\d.-]/g, "");
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseDecksCell(value) {
+    const m = (value || "").match(/(\d+)\s*\/\s*(\d+)/);
+    if (!m) return { used: null, total: null, remaining: null };
+    const used = Number(m[1]);
+    const total = Number(m[2]);
+    return { used, total, remaining: Math.max(0, total - used) };
+  }
+
+  function getOverviewRowsWithMetrics() {
+    const head = overviewData.headCells || [];
+    const rows = overviewData.rows || [];
+    if (!head.length || !rows.length) return [];
+
+    const idxBy = (needle) => head.findIndex((cell) => (cell || "").toLowerCase().includes(needle));
+    const idxClan = idxBy("clan");
+    const idxDecks = idxBy("decks");
+    const idxAvg = idxBy("avg");
+    const idxProjected = idxBy("projected");
+    const idxMedals = idxBy("medals");
+
+    return rows.map((row) => {
+      const decks = parseDecksCell(row[idxDecks] || "");
+      return {
+        clan: row[idxClan] || "",
+        avg: parseMetricNumber(row[idxAvg], true),
+        projected: parseMetricNumber(row[idxProjected]),
+        medals: parseMetricNumber(row[idxMedals]),
+        decksUsed: decks.used,
+        decksTotal: decks.total,
+        decksRemaining: decks.remaining,
+      };
+    });
+  }
+
+  function parseClanStats(text) {
+    const raw = text || "";
+    const battles = raw.match(/battles left:\s*([\d.,]+)/i);
+    const duels = raw.match(/duels left:\s*([\d.,]+)/i);
+    const participants = raw.match(/total players participated:\s*([\d.,]+)/i);
+    return {
+      battlesLeft: battles ? parseMetricNumber(battles[1]) : null,
+      duelsLeft: duels ? parseMetricNumber(duels[1]) : null,
+      totalPlayersParticipated: participants ? parseMetricNumber(participants[1]) : null,
+    };
+  }
+
+  function formatRank(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 1) return "-";
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${n}st`;
+    if (mod10 === 2 && mod100 !== 12) return `${n}nd`;
+    if (mod10 === 3 && mod100 !== 13) return `${n}rd`;
+    return `${n}th`;
+  }
+
+  function renderFinishOutlook(data) {
+    const container = el("finishOutlook");
+    const rows = getOverviewRowsWithMetrics();
+    const localeFmt = new Intl.NumberFormat("en-US");
+
+    const rankProgress = (rank) => {
+      const safeRank = Number.isFinite(Number(rank)) ? Number(rank) : (rows.length || 5);
+      const total = Math.max(1, rows.length || 5);
+      return Math.max(8, Math.min(100, ((total - safeRank + 1) / total) * 100));
+    };
+
+    const direct = data.finish_outlook || {};
+    const directScoreUnavailable = direct.score_available === false;
+    const directHasAll = [
+      direct.battles_left,
+      direct.duels_left,
+      direct.projected_rank,
+      direct.projected_finish,
+      direct.best_rank,
+      direct.best_finish,
+      direct.worst_rank,
+      direct.worst_finish,
+    ].every((v) => Number.isFinite(Number(v)));
+
+    let battlesLeft;
+    let duelsLeft;
+    let totalPlayersParticipated;
+    let projectedRank;
+    let projectedMedals;
+    let bestRank;
+    let bestPossibleMedals;
+    let worstRank;
+    let worstPossibleMedals;
+    let hintText;
+
+    if (directHasAll || directScoreUnavailable) {
+      battlesLeft = Number(direct.battles_left);
+      duelsLeft = Number(direct.duels_left);
+      totalPlayersParticipated = Number.isFinite(Number(data.total_players_participated))
+        ? Number(data.total_players_participated)
+        : null;
+      projectedRank = directScoreUnavailable ? null : Number(direct.projected_rank);
+      projectedMedals = directScoreUnavailable ? null : Number(direct.projected_finish);
+      bestRank = directScoreUnavailable ? null : Number(direct.best_rank);
+      bestPossibleMedals = directScoreUnavailable ? null : Number(direct.best_finish);
+      worstRank = directScoreUnavailable ? null : Number(direct.worst_rank);
+      worstPossibleMedals = directScoreUnavailable ? null : Number(direct.worst_finish);
+      hintText = directScoreUnavailable
+        ? "Dagscore niet berekend: een vereiste officiële periodLog ontbreekt."
+        : direct.model === "official_api_derived"
+        ? (direct.projection_scope === "colosseum_remaining_days"
+          ? "Colosseumprojectie: cumulatieve score plus de nog beschikbare decks van vandaag en resterende racedagen."
+          : "Dagprojectie op officiële Clash Royale API-data.")
+        : `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
+    } else {
+      if (!rows.length) {
+        container.className = "empty";
+        container.textContent = "(geen data)";
+        return;
+      }
+
+      const ourClanName = (data.clan_name || clanName(currentClanTag) || "").trim().toLowerCase();
+      const ours = rows.find((r) => (r.clan || "").trim().toLowerCase() === ourClanName) || rows[0];
+      const currentMedals = ours.medals || 0;
+      projectedMedals = ours.projected != null
+        ? Math.round(ours.projected)
+        : Math.round(currentMedals + ((ours.avg || 0) * (ours.decksRemaining || 0)));
+
+      const avgPool = rows.map((r) => r.avg).filter((v) => Number.isFinite(v));
+      const minAvg = avgPool.length ? Math.min(...avgPool) : (ours.avg || 0);
+      const maxAvg = avgPool.length ? Math.max(...avgPool) : (ours.avg || 0);
+      const remainingDecks = ours.decksRemaining || 0;
+
+      worstPossibleMedals = Math.round(currentMedals + (remainingDecks * minAvg));
+      bestPossibleMedals = Math.round(currentMedals + (remainingDecks * maxAvg));
+
+      const rankFor = (score) => {
+        const better = rows.filter((r) => {
+          const baseScore = r.projected != null ? r.projected : r.medals;
+          if (baseScore == null) return false;
+          return r !== ours && baseScore > score;
+        }).length;
+        return Math.min(rows.length, better + 1);
+      };
+
+      projectedRank = rankFor(projectedMedals);
+      bestRank = rankFor(bestPossibleMedals);
+      worstRank = rankFor(worstPossibleMedals);
+
+      const stats = parseClanStats(data.clan_stats_text || "");
+      battlesLeft = stats.battlesLeft;
+      duelsLeft = stats.duelsLeft;
+      totalPlayersParticipated = Number.isFinite(Number(data.total_players_participated))
+        ? Number(data.total_players_participated)
+        : stats.totalPlayersParticipated;
+      hintText = "Schatting op basis van huidige score, resterende decks en de huidige avg/deck-range van alle clans.";
+    }
+
+    container.className = "finishOutlook";
+    container.innerHTML = `
+      <div class="finishTopStats">
+        <div class="finishStatBox">
+          <div class="finishStatLabel">Battles left</div>
+          <div class="finishStatValue">${battlesLeft != null ? localeFmt.format(battlesLeft) : "-"}</div>
+        </div>
+        <div class="finishStatBox">
+          <div class="finishStatLabel">Duels left</div>
+          <div class="finishStatValue">${duelsLeft != null ? localeFmt.format(duelsLeft) : "-"}</div>
+        </div>
+        <div class="finishStatBox">
+          <div class="finishStatLabel">Total players participated</div>
+          <div class="finishStatValue">${totalPlayersParticipated != null ? localeFmt.format(totalPlayersParticipated) : "-"}</div>
+        </div>
+      </div>
+
+      <div class="finishCards">
+        <div class="finishCard">
+          <div class="ring ring--projected" style="--p:${rankProgress(projectedRank)}">
+            <span class="ringValue">${formatRank(projectedRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Projected finish</div>
+            <div class="finishMetaScore">${projectedMedals != null ? localeFmt.format(projectedMedals) : "-"}</div>
+          </div>
+        </div>
+
+        <div class="finishCard">
+          <div class="ring ring--best" style="--p:${rankProgress(bestRank)}">
+            <span class="ringValue">${formatRank(bestRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Best possible finish</div>
+            <div class="finishMetaScore">${bestPossibleMedals != null ? localeFmt.format(bestPossibleMedals) : "-"}</div>
+          </div>
+        </div>
+
+        <div class="finishCard">
+          <div class="ring ring--worst" style="--p:${rankProgress(worstRank)}">
+            <span class="ringValue">${formatRank(worstRank)}</span>
+          </div>
+          <div class="finishMeta">
+            <div class="finishMetaTitle">Worst possible finish</div>
+            <div class="finishMetaScore">${worstPossibleMedals != null ? localeFmt.format(worstPossibleMedals) : "-"}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finishHint">${hintText}</div>
+    `;
+  }
+
+  function renderWarPhase(data) {
+    const phase = data?.war_phase || {};
+    const label = phase.label || "War status onbekend";
+    const source = phase.source && phase.source !== "unknown" ? `Bron: ${phase.source}` : "Bron onbekend";
+    const confidence = phase.confidence ? `, ${phase.confidence}` : "";
+
+    const badge = el("overviewPhaseBadge");
+    const detail = el("overviewPhase");
+    if (badge) badge.textContent = label;
+    if (detail) detail.textContent = `${source}${confidence}`;
+  }
+
+  function renderStrategy(data) {
+    const container = el("strategy");
+    if (!container) return;
+
+    const strategy = data?.strategy || {};
+    if (!strategy.headline && !strategy.summary && !strategy.status && !strategy.recommendation) {
+      container.className = "empty";
+      container.textContent = "(geen strategie beschikbaar)";
+      return;
+    }
+
+    const action = strategy.actionPlan || {};
+    const context = data?.war_context || {};
+    const dataQuality = data?.data_quality || {};
+    const rankTargets = Array.isArray(data?.rank_targets) ? data.rank_targets : [];
+    const projections = Array.isArray(data?.projections) ? data.projections : [];
+    const clansById = new Map((data?.race_rows || []).map((row) => [row.id || normalizeClanName(row.name), row]));
+
+    const requiredAvg = strategy.requiredAveragePerDeck != null
+      ? formatMetric(strategy.requiredAveragePerDeck, 2)
+      : "-";
+    const reasons = Array.isArray(strategy.rationale) ? strategy.rationale.slice(0, 3) : [];
+    const warnings = [
+      ...(Array.isArray(strategy.warnings) ? strategy.warnings : []),
+      ...(Array.isArray(dataQuality.missingFields) && dataQuality.missingFields.length ? [`Ontbrekend: ${dataQuality.missingFields.map(humanizeDataQuality).join(", ")}`] : []),
+      ...(Array.isArray(dataQuality.estimatedFields) && dataQuality.estimatedFields.length ? [`Geschat: ${dataQuality.estimatedFields.map(humanizeDataQuality).join(", ")}`] : []),
+    ];
+    const assumptions = Array.isArray(strategy.assumptions) ? strategy.assumptions.slice(0, 3) : [];
+
+    const ladderHtml = rankTargets.length
+      ? `
+        <div class="strategySectionTitle">Target ladder</div>
+        <table class="compactTable">
+          <thead><tr><th>Positie</th><th>Avg nodig</th><th>Min wins</th><th>Veilige losses</th><th>Status</th></tr></thead>
+          <tbody>
+            ${rankTargets.map((target) => `
+              <tr>
+                <td>${escapeHtml(target.rank)}</td>
+                <td>${escapeHtml(target.requiredAveragePerDeck != null ? formatMetric(target.requiredAveragePerDeck, 2) : "-")}</td>
+                <td>${escapeHtml(target.minimumWinsNeeded != null ? formatMetric(target.minimumWinsNeeded) : "-")}</td>
+                <td>${escapeHtml(target.safeLossesAllowed != null ? formatMetric(target.safeLossesAllowed) : "-")}</td>
+                <td>${escapeHtml(humanizeStrategyValue(target.status))}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `
+      : "";
+
+    const projectionHtml = projections.length
+      ? `
+        <div class="strategySectionTitle">Scenariovergelijking</div>
+        <table class="compactTable">
+          <thead><tr><th>Clan</th><th>Floor</th><th>Expected</th><th>Ceiling</th><th>Decks</th></tr></thead>
+          <tbody>
+            ${projections.map((projection) => {
+              const clan = clansById.get(projection.clanId) || {};
+              return `
+                <tr>
+                  <td>${escapeHtml(clan.name || projection.clanId || "-")}</td>
+                  <td>${escapeHtml(formatMetric(projection.floorFinal))}</td>
+                  <td>${escapeHtml(formatMetric(projection.expectedFinal))}</td>
+                  <td>${escapeHtml(formatMetric(projection.ceilingFinal))}</td>
+                  <td>${escapeHtml(projection.expectedRemainingDecks != null ? formatMetric(projection.expectedRemainingDecks) : "-")}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `
+      : "";
+
+    const reasonsHtml = reasons.length
+      ? `<ul class="strategyReasons">${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul>`
+      : `<div class="dataQuality">Geen extra rationale beschikbaar.</div>`;
+    const warningHtml = warnings.length
+      ? `<div class="dataQuality">${warnings.map(escapeHtml).join("<br>")}</div>`
+      : `<div class="dataQuality">Geen kritieke ontbrekende velden gevonden.</div>`;
+    const assumptionsHtml = assumptions.length
+      ? `<div class="dataQuality">${assumptions.map(escapeHtml).join("<br>")}</div>`
+      : "";
+
+    container.className = "strategyPanel";
+    container.innerHTML = `
+      <div class="strategyLead">
+        <div class="strategyStatus">${escapeHtml(strategy.headline || strategy.status || "-")}</div>
+        <div class="strategyRecommendation">${escapeHtml(strategy.summary || strategy.recommendation || "-")}</div>
+        <div class="strategyBadges">
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.confidence || "low"))}</span>
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.classification || "data-derived"))}</span>
+          <span class="strategyBadge">${escapeHtml(humanizeStrategyValue(strategy.mode || "DATA_INCOMPLETE"))}</span>
+        </div>
+      </div>
+      <div class="strategyGrid">
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Minimaal wins</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.minimumWins))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Veilig verliezen</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.maximumSafeLosses))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Boat attacks</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.recommendedBoatAttacks))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Vasthouden</div>
+          <div class="strategyMetricValue">${escapeHtml(formatMetric(action.decksToHoldTemporarily))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Reset over</div>
+          <div class="strategyMetricValue">${escapeHtml(formatDuration(context.secondsUntilReset))}</div>
+        </div>
+        <div class="strategyMetric">
+          <div class="strategyMetricLabel">Avg nodig</div>
+          <div class="strategyMetricValue">${escapeHtml(requiredAvg)}</div>
+        </div>
+      </div>
+      ${ladderHtml}
+      ${projectionHtml}
+      <div class="strategySectionTitle">Uitleg</div>
+      ${reasonsHtml}
+      <div class="strategySectionTitle">Datakwaliteit</div>
+      ${warningHtml}
+      ${assumptionsHtml}
+    `;
+  }
+
+  function renderPlayersTable(text) {
+    const container = el("players");
+    container.innerHTML = "";
+
+    if (!text || !text.trim()) {
+      container.className = "empty";
+      container.textContent = "(geen data)";
+      return;
+    }
+
+    const lines = text.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    const dataLines = lines.filter(l => l.includes("|") && !/^[-|—\s]+$/.test(l));
+
+    if (!dataLines.length) {
+      container.className = "empty";
+      container.textContent = text;
+      return;
+    }
+
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "playersTable";
+
+    const [header, ...rows] = dataLines;
+    const headCells = header.split("|").map(c => c.trim());
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    headCells.forEach(cell => {
+      const th = document.createElement("th");
+      th.textContent = cell;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    rows.forEach(line => {
+      const parts = line.split("|").map(p => p.trim());
+      const tr = document.createElement("tr");
+
+      parts.forEach((p, idx) => {
+        const td = document.createElement("td");
+        if (idx === 0) {
+          td.className = "role";
+          td.textContent = p;
+        } else if (idx === 1) {
+          td.textContent = stripPlayerTag(p);
+        } else {
+          td.textContent = p || "-";
+        }
+        tr.appendChild(td);
+      });
+
+      while (tr.children.length < headCells.length) {
+        const td = document.createElement("td");
+        td.textContent = "-";
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function displayClanRole(role) {
+    const labels = {
+      leader: "Leader",
+      coLeader: "Co-leader",
+      elder: "Elder",
+      member: "Member",
+    };
+    return labels[role] || role || "-";
+  }
+
+  function renderOfficialPlayersTable(players) {
+    if (!Array.isArray(players) || !players.length) return false;
+
+    const container = el("players");
+    container.innerHTML = "";
+    container.className = "tableWrap";
+
+    const table = document.createElement("table");
+    table.className = "playersTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["#", "Name", "Role", "Today/Total", "Boat", "Medals"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const sortedPlayers = [...players].sort((a, b) => {
+      const fameDifference = Number(b?.fame || 0) - Number(a?.fame || 0);
+      if (fameDifference) return fameDifference;
+
+      const decksDifference = Number(b?.decks_used_today || 0) - Number(a?.decks_used_today || 0);
+      if (decksDifference) return decksDifference;
+
+      return String(a?.name || "").localeCompare(String(b?.name || ""));
+    });
+
+    const tbody = document.createElement("tbody");
+    sortedPlayers.forEach((player, index) => {
+      const tr = document.createElement("tr");
+      const values = [
+        String(index + 1),
+        stripPlayerTag(player?.name) || "-",
+        displayClanRole(player?.role),
+        `${Number(player?.decks_used_today || 0)}/${Number(player?.decks_total_so_far || 0)}`,
+        String(Number(player?.boat_attacks || 0)),
+        String(Number(player?.fame || 0)),
+      ];
+
+      values.forEach((value, cellIndex) => {
+        const td = document.createElement("td");
+        if (cellIndex === 0) td.className = "role";
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+    return true;
+  }
+
+  function formatOfficialClanAvg(data) {
+    if (data?.projection_share_text) return String(data.projection_share_text);
+
+    const rows = Array.isArray(data?.overview_rows) ? data.overview_rows : [];
+    const current = rows.find((row) => normalizeClanTag(row?.tag) === currentClanTag) || {};
+    const average = current.avg_medals_per_deck != null
+      ? formatMetric(current.avg_medals_per_deck, 2)
+      : "-";
+    const projected = current.projected_medals != null ? String(Number(current.projected_medals)) : "-";
+    const medals = Number(current?.medals || 0);
+    const scoreScope = current?.score_scope === "colosseum_cumulative"
+      ? "cumulatief over het Colosseum-weekend"
+      : "alleen vandaag in de River Race";
+
+    return [
+      "Clan avg --> Projected",
+      `${current.name || data?.clan?.name || clanName(currentClanTag)} ${average} --> ${projected}`,
+      `Members: ${Number(data?.clan?.members || 0)} | War trophies: ${Number(data?.clan?.war_trophies || 0)}`,
+      `Current medals (${scoreScope}): ${medals}`,
+    ].join("\n\n");
+  }
+
+  function makeOfficialRiskText(players) {
+    const buckets = { 3: [], 2: [], 1: [] };
+    (players || []).forEach((player) => {
+      const left = Number(player?.attacks_left_today || 0);
+      if (buckets[left]) buckets[left].push(stripPlayerTag(player?.name));
+    });
+
+    const lines = ["Spelers met nog losse aanvallen:"];
+    [3, 2, 1].forEach((left) => {
+      if (!buckets[left].length) return;
+      lines.push("", `${left} attacks left:`);
+      buckets[left].forEach((name) => lines.push(`- ${name}`));
+    });
+    if (lines.length === 1) lines.push("", "Geen risico spelers gevonden (niemand met 1-3 open).");
+    return lines.join("\n");
+  }
+
+  function makeOfficialBattlesText(players) {
+    const buckets = { 4: [], 3: [], 2: [], 1: [] };
+    (players || []).forEach((player) => {
+      const left = Number(player?.attacks_left_today || 0);
+      if (buckets[left]) buckets[left].push(stripPlayerTag(player?.name));
+    });
+
+    const lines = ["Battles left (today):"];
+    [4, 3, 2, 1].forEach((left) => {
+      if (!buckets[left].length) return;
+      lines.push("", `${left} attacks left:`);
+      buckets[left].forEach((name) => lines.push(`- ${name}`));
+    });
+    if (lines.length === 1) lines.push("", "Iedereen is klaar voor vandaag.");
+    return lines.join("\n");
+  }
+
+  function buildOfficialShortStory(data) {
+    if (data?.short_story_text) return String(data.short_story_text);
+
+    const rank = data?.finish_outlook?.projected_rank || "-";
+    const score = Number(data?.finish_outlook?.projected_finish || 0);
+    const battles = Number(data?.finish_outlook?.battles_left || 0);
+    return `${data?.clan?.name || clanName(currentClanTag)} draait nu op een berekende ${rank}e plek met model-score ${score}. Open decks vandaag: ${battles}.`;
+  }
+
+  function renderDay1HighFameTable(players, text) {
+    const card = el("day1Card");
+    const container = el("day1HighFameWrap");
+    const hiddenPre = el("day1HighFame");
+    const uniqueCount = el("day1HighFameUnique");
+
+    if (!card || !container || !hiddenPre || !uniqueCount) return;
+
+    const hasPlayers = Array.isArray(players) && players.length > 0;
+    const hasScoreAbove900 = hasPlayers && players.some((player) => {
+      const fame = Number(player?.fame);
+      return Number.isFinite(fame) && fame > 900;
+    });
+
+    if (!hasPlayers || !text || hasScoreAbove900) {
+      card.style.display = "none";
+      container.innerHTML = "";
+      hiddenPre.textContent = "";
+      uniqueCount.textContent = "";
+      return;
+    }
+
+    card.style.display = "";
+    hiddenPre.textContent = text;
+
+    const uniquePlayers = new Set(
+      players
+        .map((player) => (player?.name || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    uniqueCount.textContent = `Unieke spelers met 800+: ${uniquePlayers.size}`;
+
+    container.className = "tableWrap";
+    container.innerHTML = "";
+
+    const table = document.createElement("table");
+    table.className = "simpleTable";
+
+    const thead = document.createElement("thead");
+    const headTr = document.createElement("tr");
+    ["Speler", "Score"].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headTr.appendChild(th);
+    });
+    thead.appendChild(headTr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    players.forEach((player) => {
+      const tr = document.createElement("tr");
+
+      const nameTd = document.createElement("td");
+      nameTd.textContent = stripPlayerTag(player.name) || "-";
+      tr.appendChild(nameTd);
+
+      const fameTd = document.createElement("td");
+      fameTd.textContent = player.fame != null ? player.fame : "-";
+      tr.appendChild(fameTd);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  function formatClanAvgProjection(text) {
+    if (!text || !text.trim()) return "(geen data)";
+
+    const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const dataLines = lines.filter((line) => line.includes("|"));
+
+    if (!dataLines.length) return text.trim();
+
+    const rows = dataLines
+      .map((line) => line.split("|").map((part) => part.trim()))
+      .filter((parts) => parts.length >= 3 && parts[0].toLowerCase() !== "clan name");
+
+    if (!rows.length) return text.trim();
+
+    const sortedRows = [...rows].sort((a, b) => {
+      const projectedA = parseFloat(a[2]);
+      const projectedB = parseFloat(b[2]);
+
+      const aIsNaN = Number.isNaN(projectedA);
+      const bIsNaN = Number.isNaN(projectedB);
+
+      if (aIsNaN && bIsNaN) return 0;
+      if (aIsNaN) return 1;
+      if (bIsNaN) return -1;
+
+      if (projectedB !== projectedA) return projectedB - projectedA;
+
+      const avgA = parseFloat(a[1]);
+      const avgB = parseFloat(b[1]);
+      if (Number.isNaN(avgA) || Number.isNaN(avgB)) return 0;
+      return avgB - avgA;
+    });
+
+    const formattedRows = sortedRows
+      .map(([name, avg, projected]) => `${name} ${avg || "-"} --> ${projected || "-"}`);
+
+    return ["Clan avg --> Projected", ...formattedRows].join("\n\n");
+  }
+
+  function buildDynamicShortStory(data) {
+    const maxChars = 200;
+    const clan = data?.clan_name || clanName(currentClanTag);
+    const activeDay = Number(data?.cwstats_active_day);
+    const dayText = Number.isFinite(activeDay) && activeDay >= 1 && activeDay <= 4
+      ? `Dag ${activeDay}`
+      : "War update";
+
+    const finishOutlook = data?.finish_outlook || {};
+    const rank = Number(finishOutlook?.projected_rank);
+    const projectedFinish = Number(finishOutlook?.projected_finish);
+    const battlesLeft = Number(finishOutlook?.battles_left);
+    const duelsLeft = Number(finishOutlook?.duels_left);
+    const players = Number(data?.total_players_participated);
+    const isColosseum = Boolean(data?.cwstats_colosseum_weekend);
+
+    const segments = [`${dayText} | ${clan}`];
+    if (Number.isFinite(rank) && rank > 0) segments.push(`geprojecteerd #${rank}`);
+    if (Number.isFinite(projectedFinish) && projectedFinish > 0) segments.push(`${projectedFinish} punten`);
+    if (Number.isFinite(players) && players > 0) segments.push(`${players} spelers actief`);
+    if (Number.isFinite(battlesLeft) && battlesLeft >= 0) segments.push(`${battlesLeft} battles over`);
+    if (Number.isFinite(duelsLeft) && duelsLeft >= 0) segments.push(`${duelsLeft} duels over`);
+    if (isColosseum) segments.push("Colosseum weekend");
+
+    let story = `${segments.join(" • ")}. Samen pushen naar boven! 🔥`;
+    if (story.length > maxChars) {
+      story = story.slice(0, maxChars - 1).trimEnd() + "…";
+    }
+    return story;
+  }
+
+  async function copyText(targetId) {
+    const map = {
+      clanAvg: "clanAvg",
+      battles: "battles",
+      risk: "risk",
+      story: "story",
+      highFame: "highFame",
+      day1HighFame: "day1HighFame",
+      day4: "day4",
+    };
+    const preId = map[targetId];
+    const text = el(preId).textContent || "";
+    await navigator.clipboard.writeText(text);
+
+    const toastId = targetId + "Toast";
+    el(toastId).textContent = "Copied!";
+    setTimeout(() => { el(toastId).textContent = ""; }, 900);
+  }
+
+  function renderClanAccessWarning(data) {
+    const warningEl = el("openClanWarning");
+    if (!warningEl) return;
+
+    const isOpen = (data.clan_access_type || "").toLowerCase() === "open";
+    const isOfficiallyStarted = Boolean(data.cw_official_started);
+    warningEl.style.display = isOpen && isOfficiallyStarted ? "block" : "none";
+  }
+
+  function renderColosseumNotice(data) {
+    const noticeEl = el("colosseumNotice");
+    if (!noticeEl) return;
+
+    const isColosseum = Boolean(
+      data?.race_state?.is_colosseum_weekend || data?.cwstats_colosseum_weekend
+    );
+    if (!isColosseum) {
+      noticeEl.style.display = "none";
+      noticeEl.textContent = "";
+      return;
+    }
+
+    const activeDay = Number(data?.race_state?.battle_day ?? data.cwstats_active_day);
+    const dayText = Number.isFinite(activeDay) && activeDay >= 1 && activeDay <= 4
+      ? `Actieve dag: Day ${activeDay}. `
+      : "";
+
+    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}Medals zijn cumulatief; projected telt alleen de resterende decks van vandaag en volgende Colosseum-dagen erbij op.`;
+    noticeEl.style.display = "block";
+  }
+
+  let v2RequestId = 0;
+  async function fetchData() {
+    const requestId = ++v2RequestId;
+    window.RiverV2?.loading(currentClanTag);
+    try {
+    el("errorBox").style.display = "none";
+    el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
+
+    const timestamp = Date.now();
+    const [officialRes, legacyRes] = await Promise.all([
+      fetch(`/api/test-clan-prototype?clan=${encodeURIComponent(currentClanTag)}&t=${timestamp}`, { cache: "no-store" }),
+      fetch(`/api/cwstats?clan=${encodeURIComponent(currentClanTag)}&t=${timestamp}`, { cache: "no-store" }).catch(() => null),
+    ]);
+    const officialData = await officialRes.json();
+    if (requestId !== v2RequestId) return;
+    if (!officialRes.ok || !officialData?.ok) {
+      const message = officialData?.error || `Officiële Clash Royale API error (${officialRes.status})`;
+      el("status").textContent = "";
+      el("errorBox").style.display = "block";
+      el("errorBox").textContent = `API error: ${message}`;
+      throw new Error(message);
+    }
+
+    let data = {};
+    if (legacyRes?.ok) {
+      const legacyData = await legacyRes.json();
+      if (legacyData?.ok) data = legacyData;
+    }
+
+    if (requestId !== v2RequestId) return;
+    window.RiverV2?.update(officialData);
+    renderClanAccessWarning(data);
+    renderColosseumNotice({ ...data, race_state: officialData.race_state });
+
+    const officialPlayers = Array.isArray(officialData.players) ? officialData.players : [];
+
+    if (!renderOfficialOverview(officialData.overview_rows || [])) {
+      el("overview").className = "empty";
+      el("overview").textContent = "(geen officiële racedata)";
+    }
+    el("overviewPhase").textContent = "Bron: officiële Clash Royale API via RoyaleAPI proxy";
+    el("overviewPhaseBadge").textContent = officialData.race_state?.is_colosseum_weekend
+      ? "Colosseum · cumulatief"
+      : "Live API · per dag";
+    renderStrategy(data);
+    renderFinishOutlook({
+      ...data,
+      clan_tag: officialData.clan_tag,
+      finish_outlook: officialData.finish_outlook || {},
+      total_players_participated: officialData.finish_outlook?.total_players_participated,
+    });
+    const formattedClanAvg = formatOfficialClanAvg(officialData);
+    el("clanAvg").textContent = formattedClanAvg;
+    if (!renderOfficialPlayersTable(officialPlayers)) {
+      el("players").className = "empty";
+      el("players").textContent = "(geen officiële spelersdata)";
+    }
+    const battlesText = makeOfficialBattlesText(officialPlayers);
+    const riskText = makeOfficialRiskText(officialPlayers);
+    el("battles").textContent = battlesText || "(geen data)";
+    el("risk").textContent = riskText || "(geen data)";
+
+    const highFameText = stripPlayerTagsInTableText((data.high_fame_text || "").trim());
+    const highFameCard = el("highFameCard");
+    if (highFameCard) {
+      if (highFameText) {
+        highFameCard.style.display = "";
+        el("highFame").textContent = highFameText;
+      } else {
+        highFameCard.style.display = "none";
+        el("highFame").textContent = "";
+      }
+    }
+
+    const day1Players = Array.isArray(data.day1_high_famers)
+      ? data.day1_high_famers
+      : [];
+    const day1Text = stripPlayerTagsInTableText((data.day1_high_fame_text || "").trim());
+    renderDay1HighFameTable(day1Players, day1Text);
+
+    const day4Text = stripPlayerTagsInTableText((data.day4_last_chance_text || "").trim());
+    const day4Card = el("day4Card");
+    if (day4Card) {
+      if (day4Text) {
+        day4Card.style.display = "";
+        el("day4").textContent = day4Text;
+      } else {
+        day4Card.style.display = "none";
+        el("day4").textContent = "";
+      }
+    }
+
+    const storyText = buildOfficialShortStory(officialData);
+    el("story").textContent = storyText || "(geen data)";
+    updateLength("clanAvg", formattedClanAvg);
+    updateLength("battles", battlesText);
+    updateLength("risk", riskText);
+    updateLength("highFame", highFameText);
+    updateLength("day1HighFame", day1Text);
+    updateLength("day4", day4Text);
+    updateLength("story", storyText, 200);
+
+    el("updated").textContent = new Date().toLocaleString();
+    el("status").textContent = "";
+    } catch (error) {
+      if (requestId !== v2RequestId) return;
+      window.RiverV2?.error("De officiële racedata kon niet worden geladen. Probeer opnieuw via Refresh.");
+      el("status").textContent = "";
+      el("errorBox").style.display = "block";
+      el("errorBox").textContent = `API error: ${error.message}`;
+    }
+  }
+
+  // Buttons
+  el("refresh").addEventListener("click", () => fetchData());
+
+  document.querySelectorAll("button[data-copy]").forEach(btn => {
+    btn.addEventListener("click", () => copyText(btn.dataset.copy));
+  });
+
+  ["clanAvg","battles","risk","story","highFame","day1HighFame","day4"].forEach(id => {
+    el(id).addEventListener("click", () => {
+      copyText(id);
+    });
+  });
+
+  function init() {
+    renderClanButtons();
+    const params = new URLSearchParams(window.location.search);
+    const desired = params.get("clan") || DEFAULT_CLAN;
+    setClan(desired, true);
+    fetchData().catch(() => {});
+  }
+
+  init();
+</script>
+</body>
+</html>
