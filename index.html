@@ -554,7 +554,7 @@
       `${Number(row?.decks_used_today || 0)}/${Number(row?.decks_total_today || 0)}`,
       row?.avg_medals_per_deck != null ? formatMetric(row.avg_medals_per_deck, 2) : "-",
       formatMetric(row?.projected_medals),
-      formatMetric(row?.repair_points),
+      formatMetric(row?.boat_points),
       formatMetric(row?.medals),
     ]);
 
@@ -750,6 +750,7 @@
     };
 
     const direct = data.finish_outlook || {};
+    const directScoreUnavailable = direct.score_available === false;
     const directHasAll = [
       direct.battles_left,
       direct.duels_left,
@@ -772,19 +773,21 @@
     let worstPossibleMedals;
     let hintText;
 
-    if (directHasAll) {
+    if (directHasAll || directScoreUnavailable) {
       battlesLeft = Number(direct.battles_left);
       duelsLeft = Number(direct.duels_left);
       totalPlayersParticipated = Number.isFinite(Number(data.total_players_participated))
         ? Number(data.total_players_participated)
         : null;
-      projectedRank = Number(direct.projected_rank);
-      projectedMedals = Number(direct.projected_finish);
-      bestRank = Number(direct.best_rank);
-      bestPossibleMedals = Number(direct.best_finish);
-      worstRank = Number(direct.worst_rank);
-      worstPossibleMedals = Number(direct.worst_finish);
-      hintText = direct.model === "official_api_derived"
+      projectedRank = directScoreUnavailable ? null : Number(direct.projected_rank);
+      projectedMedals = directScoreUnavailable ? null : Number(direct.projected_finish);
+      bestRank = directScoreUnavailable ? null : Number(direct.best_rank);
+      bestPossibleMedals = directScoreUnavailable ? null : Number(direct.best_finish);
+      worstRank = directScoreUnavailable ? null : Number(direct.worst_rank);
+      worstPossibleMedals = directScoreUnavailable ? null : Number(direct.worst_finish);
+      hintText = directScoreUnavailable
+        ? "Dagscore niet berekend: een vereiste officiële periodLog ontbreekt."
+        : direct.model === "official_api_derived"
         ? (direct.projection_scope === "colosseum_remaining_days"
           ? "Colosseumprojectie: cumulatieve score plus de nog beschikbare decks van vandaag en resterende racedagen."
           : "Dagprojectie op officiële Clash Royale API-data.")
@@ -1176,7 +1179,7 @@
       "Clan avg --> Projected",
       `${current.name || data?.clan?.name || clanName(currentClanTag)} ${average} --> ${projected}`,
       `Members: ${Number(data?.clan?.members || 0)} | War trophies: ${Number(data?.clan?.war_trophies || 0)}`,
-      `Current medals (${scoreScope}): fame + repair = ${medals}`,
+      `Current medals (${scoreScope}): ${medals}`,
     ].join("\n\n");
   }
 

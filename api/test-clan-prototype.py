@@ -55,7 +55,49 @@ def battle_day_for_race(race_data):
     return day_in_section - 2 if 3 <= day_in_section <= 6 else None
 
 
-def build_overview_rows(clans, is_colosseum=False, battle_day=None):
+def normalize_clan_tag(value):
+    return str(value or "").replace("#", "").upper()
+
+
+def completed_points_for_clan(race_data, clan_tag, battle_day):
+    """Return medals from completed battle days, or None when a required log is missing."""
+
+    if battle_day == 1:
+        return 0
+    if battle_day not in {2, 3, 4}:
+        return None
+
+    try:
+        current_period = int((race_data or {}).get("periodIndex"))
+    except (TypeError, ValueError):
+        return None
+
+    expected_periods = set(range(current_period - (battle_day - 1), current_period))
+    points_by_period = {}
+    wanted_tag = normalize_clan_tag(clan_tag)
+
+    for period_log in (race_data or {}).get("periodLogs", []) or []:
+        try:
+            period_index = int(period_log.get("periodIndex"))
+        except (TypeError, ValueError):
+            continue
+        if period_index not in expected_periods:
+            continue
+
+        for item in period_log.get("items", []) or []:
+            item_tag = normalize_clan_tag((item.get("clan") or {}).get("tag"))
+            if item_tag == wanted_tag:
+                points_by_period[period_index] = int_value(item.get("pointsEarned"))
+                break
+
+    if set(points_by_period) != expected_periods:
+        return None
+    return sum(points_by_period.values())
+
+
+def build_overview_rows(clans, race_data=None):
+    is_colosseum = is_colosseum_race(race_data)
+    battle_day = battle_day_for_race(race_data)
     rows = []
     for row in clans:
         participants = row.get("participants", []) or []
@@ -66,33 +108,36 @@ def build_overview_rows(clans, is_colosseum=False, battle_day=None):
 
         participant_fame = sum(int_value(participant.get("fame")) for participant in participants)
         participant_repair = sum(int_value(participant.get("repairPoints")) for participant in participants)
+        cumulative_medals = participant_fame + participant_repair
+        boat_points = int_value(row.get("fame")) + int_value(row.get("repairPoints"))
 
         if is_colosseum:
             # Colosseum score and participant deck usage accumulate over all
             # four battle days.
             fame = participant_fame
             repair = participant_repair
+            medals = cumulative_medals
             average_decks = decks_used_total
             effective_day = battle_day if battle_day in {1, 2, 3, 4} else COLOSSEUM_PROJECTION_DAYS
             future_days = max(0, COLOSSEUM_PROJECTION_DAYS - effective_day)
             projection_decks_remaining = decks_remaining_today + (future_days * decks_total)
             score_scope = "colosseum_cumulative"
+            score_available = True
         else:
-            # During a regular River Race the clan aggregate is today's score,
-            # while participant fame is cumulative and must not be mixed with
-            # decksUsedToday. On day one both scopes are equivalent, so the
-            # participant total is a safe fallback for a temporarily stale zero.
-            fame = int_value(row.get("fame"))
-            repair = int_value(row.get("repairPoints"))
-            if battle_day == 1 and fame + repair == 0 and participant_fame + participant_repair > 0:
-                fame = participant_fame
-                repair = participant_repair
+            # Participant medals accumulate through the week. Period logs hold
+            # pointsEarned for each completed battle day, so subtract those to
+            # isolate the active day's medals. The clan-level fame fields are
+            # river progress and belong in the Boat column, not Medals.
+            completed_points = completed_points_for_clan(race_data, row.get("tag"), battle_day)
+            score_available = completed_points is not None
+            medals = max(0, cumulative_medals - completed_points) if score_available else None
+            fame = medals
+            repair = 0 if score_available else None
             average_decks = decks_used_today
             projection_decks_remaining = decks_remaining_today
             score_scope = "river_race_day"
 
-        medals = fame + repair
-        avg_per_deck = round((medals / average_decks), 2) if average_decks > 0 else None
+        avg_per_deck = round((medals / average_decks), 2) if medals is not None and average_decks > 0 else None
         projected = (
             int(round(medals + (avg_per_deck * projection_decks_remaining)))
             if avg_per_deck is not None
@@ -106,6 +151,8 @@ def build_overview_rows(clans, is_colosseum=False, battle_day=None):
                 "fame": fame,
                 "repair_points": repair,
                 "medals": medals,
+                "cumulative_medals": cumulative_medals,
+                "boat_points": 0 if is_colosseum else boat_points,
                 "decks_used_today": decks_used_today,
                 "decks_used_total": decks_used_total,
                 "decks_total_today": decks_total,
@@ -114,6 +161,7 @@ def build_overview_rows(clans, is_colosseum=False, battle_day=None):
                 "avg_medals_per_deck": avg_per_deck,
                 "projected_medals": projected,
                 "score_scope": score_scope,
+                "score_available": score_available,
             }
         )
 
@@ -173,9 +221,10 @@ def build_finish_outlook(clan_tag, overview_rows, players, is_colosseum=False):
 
     current_medals = int_value(ours.get("medals"))
     remaining_decks = int_value(ours.get("projection_decks_remaining"))
-    projected_finish = int_value(ours.get("projected_medals"))
-    best_finish = int(round(current_medals + (remaining_decks * max_avg)))
-    worst_finish = int(round(current_medals + (remaining_decks * min_avg)))
+    score_available = ours.get("projected_medals") is not None
+    projected_finish = int_value(ours.get("projected_medals")) if score_available else None
+    best_finish = int(round(current_medals + (remaining_decks * max_avg))) if score_available else None
+    worst_finish = int(round(current_medals + (remaining_decks * min_avg))) if score_available else None
 
     def rank_for(score: int):
         better = sum(
@@ -194,12 +243,13 @@ def build_finish_outlook(clan_tag, overview_rows, players, is_colosseum=False):
         "battles_left": battles_left,
         "duels_left": duels_left,
         "total_players_participated": total_players_participated,
-        "projected_rank": rank_for(projected_finish),
+        "projected_rank": rank_for(projected_finish) if score_available else None,
         "projected_finish": projected_finish,
-        "best_rank": rank_for(best_finish),
+        "best_rank": rank_for(best_finish) if score_available else None,
         "best_finish": best_finish,
-        "worst_rank": rank_for(worst_finish),
+        "worst_rank": rank_for(worst_finish) if score_available else None,
         "worst_finish": worst_finish,
+        "score_available": score_available,
         "model": "official_api_derived",
         "projection_scope": "colosseum_remaining_days" if is_colosseum else "river_race_day",
     }
@@ -231,7 +281,7 @@ class handler(BaseHTTPRequestHandler):
 
             is_colosseum = is_colosseum_race(race_data)
             battle_day = battle_day_for_race(race_data)
-            overview_rows = build_overview_rows(race_clans, is_colosseum, battle_day)
+            overview_rows = build_overview_rows(race_clans, race_data)
             players = build_players(members, participant_rows)
             finish_outlook = build_finish_outlook(
                 clan_tag,
