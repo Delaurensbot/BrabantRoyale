@@ -165,3 +165,60 @@ def test_colosseum_uses_cumulative_score_and_only_projects_remaining_days():
     assert outlook["best_finish"] == 81600
     assert outlook["worst_finish"] == 81600
     assert outlook["projection_scope"] == "colosseum_remaining_days"
+
+
+def overview_row(name, tag, medals, average, projected, decks_used):
+    return {
+        "name": name,
+        "tag": tag,
+        "medals": medals,
+        "avg_medals_per_deck": average,
+        "projected_medals": projected,
+        "decks_used_today": decks_used,
+        "decks_total_today": 200,
+        "score_scope": "river_race_day",
+    }
+
+
+def share_rows():
+    return [
+        overview_row("Brabant Royale", "#9YP8UY", 32675, 167.56, 33513, 195),
+        overview_row("FishBoize", "#FISH", 32500, 169.27, 33854, 192),
+        overview_row("Städfirman 2", "#STAD", 30600, 160.21, 32042, 191),
+        overview_row("ArgentinaTeam 2", "#ARG", 28500, 149.21, 29843, 191),
+        overview_row("50 legends", "#LEG", 23250, 159.25, 31850, 146),
+    ]
+
+
+def test_projection_share_lists_every_clan_in_projected_order():
+    text = MODULE.build_projection_share_text("9YP8UY", share_rows())
+
+    lines = text.splitlines()
+    assert lines[0] == "📊 Dagstand → projectie"
+    assert lines[1] == "1e FishBoize | avg 169,27 | aanvallen 192/200 | 32.500 → 33.854"
+    assert lines[2] == "2e Brabant Royale ← wij | avg 167,56 | aanvallen 195/200 | 32.675 → 33.513"
+    assert lines[3].startswith("3e Städfirman 2")
+    assert lines[4].startswith("4e 50 legends")
+    assert lines[5].startswith("5e ArgentinaTeam 2")
+
+
+def test_short_story_explains_rank_attacks_and_target_above():
+    text = MODULE.build_short_story_text("9YP8UY", share_rows())
+
+    assert "1e op dagscore, 2e op avg (167,56)" in text
+    assert "Aanvallen: 195/200, 15,0 meer dan de andere clans gemiddeld" in text
+    assert "Projectie: 2e met 33.513 punten" in text
+    assert "laatste 5 aanvallen 1.180 punten halen (236,0 avg)" in text
+    assert "68,4 boven ons huidige avg" in text
+    assert "FishBoize: 192/200 aanvallen" in text
+
+
+def test_short_story_for_projected_leader_focuses_on_defending_lead():
+    rows = share_rows()
+    rows[0]["projected_medals"] = 34000
+
+    text = MODULE.build_short_story_text("9YP8UY", rows)
+
+    assert "Projectie: 1e met 34.000 punten" in text
+    assert "146 punten voorsprong op FishBoize" in text
+    assert "zij hebben 3 aanvallen minder gebruikt" in text

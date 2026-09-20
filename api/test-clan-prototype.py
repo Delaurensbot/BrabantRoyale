@@ -255,6 +255,146 @@ def build_finish_outlook(clan_tag, overview_rows, players, is_colosseum=False):
     }
 
 
+def format_integer_nl(value):
+    if value is None:
+        return "-"
+    return f"{int(round(float(value))):,}".replace(",", ".")
+
+
+def format_decimal_nl(value, digits=2):
+    if value is None:
+        return "-"
+    return f"{float(value):.{digits}f}".replace(".", ",")
+
+
+def ranked_rows(overview_rows, field):
+    available = [row for row in overview_rows if row.get(field) is not None]
+    return sorted(
+        available,
+        key=lambda row: (float(row.get(field)), str(row.get("name") or "").lower()),
+        reverse=True,
+    )
+
+
+def rank_for_clan(rows, clan_tag):
+    wanted_tag = normalize_clan_tag(clan_tag)
+    for index, row in enumerate(rows, start=1):
+        if normalize_clan_tag(row.get("tag")) == wanted_tag:
+            return index
+    return None
+
+
+def build_projection_share_text(clan_tag, overview_rows):
+    if not overview_rows:
+        return "Geen racedata beschikbaar."
+
+    is_colosseum = any(row.get("score_scope") == "colosseum_cumulative" for row in overview_rows)
+    heading = "📊 Colosseumstand → projectie" if is_colosseum else "📊 Dagstand → projectie"
+    ordered = ranked_rows(overview_rows, "projected_medals")
+    unavailable = [row for row in overview_rows if row.get("projected_medals") is None]
+    wanted_tag = normalize_clan_tag(clan_tag)
+    lines = [heading]
+
+    for rank, row in enumerate([*ordered, *unavailable], start=1):
+        own_marker = " ← wij" if normalize_clan_tag(row.get("tag")) == wanted_tag else ""
+        projected_rank = f"{rank}e" if row.get("projected_medals") is not None else "-"
+        decks = f"{int_value(row.get('decks_used_today'))}/{int_value(row.get('decks_total_today'))}"
+        lines.append(
+            f"{projected_rank} {row.get('name') or '-'}{own_marker} | "
+            f"avg {format_decimal_nl(row.get('avg_medals_per_deck'))} | "
+            f"aanvallen {decks} | "
+            f"{format_integer_nl(row.get('medals'))} → {format_integer_nl(row.get('projected_medals'))}"
+        )
+
+    scope = "cumulatieve Colosseumscore" if is_colosseum else "score en gemiddelde van vandaag"
+    lines.extend(["", f"Projectie op basis van de huidige {scope} en resterende decks."])
+    return "\n".join(lines)
+
+
+def build_short_story_text(clan_tag, overview_rows):
+    wanted_tag = normalize_clan_tag(clan_tag)
+    ours = next(
+        (row for row in overview_rows if normalize_clan_tag(row.get("tag")) == wanted_tag),
+        None,
+    )
+    if not ours:
+        return "Geen eigen clanrij gevonden in de officiële racedata."
+    if ours.get("projected_medals") is None:
+        return "De officiële daglogs zijn nog niet compleet; daardoor kan de stand nog niet betrouwbaar worden samengevat."
+
+    score_ranking = ranked_rows(overview_rows, "medals")
+    average_ranking = ranked_rows(overview_rows, "avg_medals_per_deck")
+    projected_ranking = ranked_rows(overview_rows, "projected_medals")
+    current_rank = rank_for_clan(score_ranking, clan_tag)
+    average_rank = rank_for_clan(average_ranking, clan_tag)
+    projected_rank = rank_for_clan(projected_ranking, clan_tag)
+
+    name = ours.get("name") or "Onze clan"
+    used = int_value(ours.get("decks_used_today"))
+    total = int_value(ours.get("decks_total_today"))
+    remaining = max(0, total - used)
+    our_average = float(ours.get("avg_medals_per_deck") or 0)
+    other_used = [
+        int_value(row.get("decks_used_today"))
+        for row in overview_rows
+        if normalize_clan_tag(row.get("tag")) != wanted_tag
+    ]
+    opponents_average_used = sum(other_used) / len(other_used) if other_used else 0
+    attacks_delta = used - opponents_average_used
+    if abs(attacks_delta) < 0.05:
+        attack_comparison = "gelijk aan het gemiddelde van de andere clans"
+    elif attacks_delta > 0:
+        attack_comparison = f"{format_decimal_nl(abs(attacks_delta), 1)} meer dan de andere clans gemiddeld"
+    else:
+        attack_comparison = f"{format_decimal_nl(abs(attacks_delta), 1)} minder dan de andere clans gemiddeld"
+
+    scope = "cumulatieve score" if ours.get("score_scope") == "colosseum_cumulative" else "dagscore"
+    sentences = [
+        f"{name}: {current_rank}e op {scope}, {average_rank}e op avg ({format_decimal_nl(our_average)}).",
+        f"Aanvallen: {used}/{total}, {attack_comparison}.",
+        f"Projectie: {projected_rank}e met {format_integer_nl(ours.get('projected_medals'))} punten.",
+    ]
+
+    if projected_rank == 1 and len(projected_ranking) > 1:
+        threat = projected_ranking[1]
+        lead = int_value(ours.get("projected_medals")) - int_value(threat.get("projected_medals"))
+        attack_gap = used - int_value(threat.get("decks_used_today"))
+        gap_text = "evenveel aanvallen gebruikt"
+        if attack_gap > 0:
+            gap_text = f"{attack_gap} aanvallen minder gebruikt"
+        elif attack_gap < 0:
+            gap_text = f"{abs(attack_gap)} aanvallen meer gebruikt"
+        sentences.append(
+            f"We verdedigen {format_integer_nl(lead)} punten voorsprong op "
+            f"{threat.get('name')}; zij hebben {gap_text}."
+        )
+    elif projected_rank and projected_rank > 1:
+        target = projected_ranking[projected_rank - 2]
+        target_score = int_value(target.get("projected_medals"))
+        needed_points = max(0, target_score + 1 - int_value(ours.get("medals")))
+        target_used = int_value(target.get("decks_used_today"))
+        if remaining > 0:
+            required_average = needed_points / remaining
+            tempo_delta = required_average - our_average
+            if tempo_delta <= 0:
+                tempo_text = "dat ligt binnen ons huidige tempo"
+            else:
+                tempo_text = f"{format_decimal_nl(tempo_delta, 1)} boven ons huidige avg"
+            sentences.append(
+                f"Voor plek {projected_rank - 1} moeten de laatste {remaining} aanvallen "
+                f"{format_integer_nl(needed_points)} punten halen ({format_decimal_nl(required_average, 1)} avg), "
+                f"{tempo_text}. {target.get('name')}: {target_used}/{int_value(target.get('decks_total_today'))} aanvallen."
+            )
+        else:
+            gap = max(0, target_score - int_value(ours.get("projected_medals")))
+            sentences.append(
+                f"We hebben geen aanvallen meer open en staan projected {format_integer_nl(gap)} punten achter "
+                f"{target.get('name')}."
+            )
+
+    return " ".join(sentences)
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         api_key = os.environ.get("CLASH_ROYALE_API_KEY")
@@ -289,6 +429,8 @@ class handler(BaseHTTPRequestHandler):
                 players,
                 is_colosseum,
             )
+            projection_share_text = build_projection_share_text(clan_tag, overview_rows)
+            short_story_text = build_short_story_text(clan_tag, overview_rows)
 
             is_open = str(clan_data.get("type", "")).lower() == "open"
 
@@ -319,6 +461,8 @@ class handler(BaseHTTPRequestHandler):
                     "overview_rows": overview_rows,
                     "players": players,
                     "finish_outlook": finish_outlook,
+                    "projection_share_text": projection_share_text,
+                    "short_story_text": short_story_text,
                     "is_open_clan": is_open,
                     "gaps": {
                         "high_fame_day_cards": "not_directly_available",

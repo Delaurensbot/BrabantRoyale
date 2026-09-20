@@ -146,7 +146,7 @@
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Clan avg/projection</div>
+        <div class="title">Alle clans avg/projection</div>
         <button data-copy="clanAvg">Copy</button>
       </div>
       <pre id="clanAvg" title="Klik om te kopieren">(loading...)</pre>
@@ -1164,6 +1164,8 @@
   }
 
   function formatOfficialClanAvg(data) {
+    if (data?.projection_share_text) return String(data.projection_share_text);
+
     const rows = Array.isArray(data?.overview_rows) ? data.overview_rows : [];
     const current = rows.find((row) => normalizeClanTag(row?.tag) === currentClanTag) || {};
     const average = current.avg_medals_per_deck != null
@@ -1218,6 +1220,8 @@
   }
 
   function buildOfficialShortStory(data) {
+    if (data?.short_story_text) return String(data.short_story_text);
+
     const rank = data?.finish_outlook?.projected_rank || "-";
     const score = Number(data?.finish_outlook?.projected_finish || 0);
     const battles = Number(data?.finish_outlook?.battles_left || 0);
