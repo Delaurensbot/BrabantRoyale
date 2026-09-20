@@ -538,14 +538,23 @@
   function renderOfficialOverview(rows) {
     if (!Array.isArray(rows) || !rows.length) return false;
 
-    const headCells = ["Rank", "Clan", "Decks", "Avg/deck", "Projected", "Boat", "Medals"];
+    const isColosseum = rows.some((row) => row?.score_scope === "colosseum_cumulative");
+    const headCells = [
+      "Rank",
+      "Clan",
+      "Decks",
+      isColosseum ? "Avg/deck (4 days)" : "Avg/deck (today)",
+      "Projected",
+      "Boat",
+      isColosseum ? "Medals (4 days)" : "Medals (today)",
+    ];
     const tableRows = rows.map((row, index) => [
       String(index + 1),
       row?.name || "-",
       `${Number(row?.decks_used_today || 0)}/${Number(row?.decks_total_today || 0)}`,
       row?.avg_medals_per_deck != null ? formatMetric(row.avg_medals_per_deck, 2) : "-",
       formatMetric(row?.projected_medals),
-      formatMetric(row?.repair_points),
+      formatMetric(row?.boat_points),
       formatMetric(row?.medals),
     ]);
 
@@ -741,6 +750,7 @@
     };
 
     const direct = data.finish_outlook || {};
+    const directScoreUnavailable = direct.score_available === false;
     const directHasAll = [
       direct.battles_left,
       direct.duels_left,
@@ -763,21 +773,23 @@
     let worstPossibleMedals;
     let hintText;
 
-    if (directHasAll) {
+    if (directHasAll || directScoreUnavailable) {
       battlesLeft = Number(direct.battles_left);
       duelsLeft = Number(direct.duels_left);
       totalPlayersParticipated = Number.isFinite(Number(data.total_players_participated))
         ? Number(data.total_players_participated)
         : null;
-      projectedRank = Number(direct.projected_rank);
-      projectedMedals = Number(direct.projected_finish);
-      bestRank = Number(direct.best_rank);
-      bestPossibleMedals = Number(direct.best_finish);
-      worstRank = Number(direct.worst_rank);
-      worstPossibleMedals = Number(direct.worst_finish);
-      hintText = direct.model === "official_api_derived"
-        ? (Number(direct.projection_multiplier) === 4
-          ? "Colosseumprojectie: officiële API-dagprojectie × 4 voor de cumulatieve vierdaagse score."
+      projectedRank = directScoreUnavailable ? null : Number(direct.projected_rank);
+      projectedMedals = directScoreUnavailable ? null : Number(direct.projected_finish);
+      bestRank = directScoreUnavailable ? null : Number(direct.best_rank);
+      bestPossibleMedals = directScoreUnavailable ? null : Number(direct.best_finish);
+      worstRank = directScoreUnavailable ? null : Number(direct.worst_rank);
+      worstPossibleMedals = directScoreUnavailable ? null : Number(direct.worst_finish);
+      hintText = directScoreUnavailable
+        ? "Dagscore niet berekend: een vereiste officiële periodLog ontbreekt."
+        : direct.model === "official_api_derived"
+        ? (direct.projection_scope === "colosseum_remaining_days"
+          ? "Colosseumprojectie: cumulatieve score plus de nog beschikbare decks van vandaag en resterende racedagen."
           : "Dagprojectie op officiële Clash Royale API-data.")
         : `Geimporteerd van cwstats.com/clan/${data.clan_tag || currentClanTag}/race.`;
     } else {
@@ -1158,13 +1170,16 @@
       ? formatMetric(current.avg_medals_per_deck, 2)
       : "-";
     const projected = current.projected_medals != null ? String(Number(current.projected_medals)) : "-";
-    const medals = Number(data?.race_state?.fame || 0) + Number(data?.race_state?.repair_points || 0);
+    const medals = Number(current?.medals || 0);
+    const scoreScope = current?.score_scope === "colosseum_cumulative"
+      ? "cumulatief over het Colosseum-weekend"
+      : "alleen vandaag in de River Race";
 
     return [
       "Clan avg --> Projected",
       `${current.name || data?.clan?.name || clanName(currentClanTag)} ${average} --> ${projected}`,
       `Members: ${Number(data?.clan?.members || 0)} | War trophies: ${Number(data?.clan?.war_trophies || 0)}`,
-      `Current medals model: fame + repair = ${medals}`,
+      `Current medals (${scoreScope}): ${medals}`,
     ].join("\n\n");
   }
 
@@ -1387,12 +1402,12 @@
       return;
     }
 
-    const activeDay = Number(data.cwstats_active_day);
+    const activeDay = Number(data?.race_state?.battle_day ?? data.cwstats_active_day);
     const dayText = Number.isFinite(activeDay) && activeDay >= 1 && activeDay <= 4
       ? `Actieve dag: Day ${activeDay}. `
       : "";
 
-    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}De score telt cumulatief over vier dagen; projected is de officiële API-dagprojectie × 4.`;
+    noticeEl.textContent = `🏟️ Colosseum weekend actief. ${dayText}Medals zijn cumulatief; projected telt alleen de resterende decks van vandaag en volgende Colosseum-dagen erbij op.`;
     noticeEl.style.display = "block";
   }
 
@@ -1431,7 +1446,7 @@
     }
     el("overviewPhase").textContent = "Bron: officiële Clash Royale API via RoyaleAPI proxy";
     el("overviewPhaseBadge").textContent = officialData.race_state?.is_colosseum_weekend
-      ? "Colosseum ×4"
+      ? "Colosseum · cumulatief"
       : "Live API · per dag";
     renderStrategy(data);
     renderFinishOutlook({
