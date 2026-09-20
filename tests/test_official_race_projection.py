@@ -8,7 +8,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def race_clan(name, tag, fame=800, decks_used=4):
+def race_clan(name, tag, fame=800, decks_used=4, decks_used_total=None):
+    if decks_used_total is None:
+        decks_used_total = decks_used
     return {
         "name": name,
         "tag": tag,
@@ -16,7 +18,13 @@ def race_clan(name, tag, fame=800, decks_used=4):
         # are live, so this fixture mirrors the production response.
         "fame": 0,
         "repairPoints": 0,
-        "participants": [{"fame": fame, "decksUsedToday": decks_used}],
+        "participants": [
+            {
+                "fame": fame,
+                "decksUsedToday": decks_used,
+                "decksUsed": decks_used_total,
+            }
+        ],
     }
 
 
@@ -27,8 +35,8 @@ def test_overview_uses_live_participant_scores_when_clan_totals_are_stale():
         "fame": 0,
         "repairPoints": 0,
         "participants": [
-            {"fame": 800, "repairPoints": 50, "decksUsedToday": 4},
-            {"fame": 600, "repairPoints": 25, "decksUsedToday": 3},
+            {"fame": 800, "repairPoints": 50, "decksUsedToday": 4, "decksUsed": 8},
+            {"fame": 600, "repairPoints": 25, "decksUsedToday": 3, "decksUsed": 6},
         ],
     }
 
@@ -38,8 +46,18 @@ def test_overview_uses_live_participant_scores_when_clan_totals_are_stale():
     assert row["repair_points"] == 75
     assert row["medals"] == 1475
     assert row["decks_used_today"] == 7
-    assert row["avg_medals_per_deck"] == 210.71
-    assert row["projected_medals"] == 42142
+    assert row["decks_used_total"] == 14
+    assert row["avg_medals_per_deck"] == 105.36
+    assert row["projected_medals"] == 21809
+
+
+def test_average_uses_cumulative_decks_with_cumulative_score():
+    row = MODULE.build_overview_rows(
+        [race_clan("Brabant Royale", "#9YP8UY", fame=96375, decks_used=192, decks_used_total=768)]
+    )[0]
+
+    assert row["avg_medals_per_deck"] == 125.49
+    assert row["projected_medals"] == 97379
 
 
 def test_section_four_uses_four_day_colosseum_projection():

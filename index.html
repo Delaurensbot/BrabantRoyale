@@ -538,7 +538,7 @@
   function renderOfficialOverview(rows) {
     if (!Array.isArray(rows) || !rows.length) return false;
 
-    const headCells = ["Rank", "Clan", "Decks", "Avg/deck", "Projected", "Boat", "Medals"];
+    const headCells = ["Rank", "Clan", "Decks", "Avg/deck (race)", "Projected", "Boat", "Medals"];
     const tableRows = rows.map((row, index) => [
       String(index + 1),
       row?.name || "-",

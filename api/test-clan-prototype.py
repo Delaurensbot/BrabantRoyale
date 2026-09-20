@@ -53,6 +53,7 @@ def build_overview_rows(clans, projection_multiplier=1):
     for row in clans:
         participants = row.get("participants", []) or []
         decks_used = sum(int_value(p.get("decksUsedToday")) for p in participants)
+        decks_used_total = sum(int_value(p.get("decksUsed")) for p in participants)
         decks_total = MAX_CLAN_DECKS_PER_DAY
         decks_remaining = max(0, decks_total - decks_used)
 
@@ -64,7 +65,10 @@ def build_overview_rows(clans, projection_multiplier=1):
         repair = sum(int_value(participant.get("repairPoints")) for participant in participants)
         medals = fame + repair
 
-        avg_per_deck = round((medals / decks_used), 2) if decks_used > 0 else None
+        # Fame and repair points are cumulative for the current river race.
+        # Dividing them by the daily deck counter inflates the average after
+        # day one, so use the matching cumulative deck counter here.
+        avg_per_deck = round((medals / decks_used_total), 2) if decks_used_total > 0 else None
         daily_projected = int(round(medals + ((avg_per_deck or 0) * decks_remaining)))
         projected = daily_projected * projection_multiplier
 
@@ -76,6 +80,7 @@ def build_overview_rows(clans, projection_multiplier=1):
                 "repair_points": repair,
                 "medals": medals,
                 "decks_used_today": decks_used,
+                "decks_used_total": decks_used_total,
                 "decks_total_today": decks_total,
                 "decks_remaining_today": decks_remaining,
                 "avg_medals_per_deck": avg_per_deck,
