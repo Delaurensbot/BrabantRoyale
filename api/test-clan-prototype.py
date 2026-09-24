@@ -12,6 +12,7 @@ ALLOWED_CLANS = {"9YP8UY", "GPCLVLPP", "RLQQQC99"}
 MAX_DECKS_PER_PLAYER = 4
 MAX_CLAN_DECKS_PER_DAY = 200
 COLOSSEUM_PROJECTION_DAYS = 4
+CLAN_CHAT_LIMIT = 250
 
 
 def normalize_tag(raw_tag: str) -> str:
@@ -289,26 +290,32 @@ def build_projection_share_text(clan_tag, overview_rows):
         return "Geen racedata beschikbaar."
 
     is_colosseum = any(row.get("score_scope") == "colosseum_cumulative" for row in overview_rows)
-    heading = "📊 Colosseumstand → projectie" if is_colosseum else "📊 Dagstand → projectie"
+    heading = "Colosseum: gem./aanval → eindscore" if is_colosseum else "Vandaag: gem./aanval → eindscore"
     ordered = ranked_rows(overview_rows, "projected_medals")
     unavailable = [row for row in overview_rows if row.get("projected_medals") is None]
     wanted_tag = normalize_clan_tag(clan_tag)
-    lines = [heading]
+    rows = [*ordered, *unavailable]
+    names = [str(row.get("name") or "-").strip() for row in rows]
 
-    for rank, row in enumerate([*ordered, *unavailable], start=1):
-        own_marker = " ← wij" if normalize_clan_tag(row.get("tag")) == wanted_tag else ""
-        projected_rank = f"{rank}e" if row.get("projected_medals") is not None else "-"
-        decks = f"{int_value(row.get('decks_used_today'))}/{int_value(row.get('decks_total_today'))}"
-        lines.append(
-            f"{projected_rank} {row.get('name') or '-'}{own_marker} | "
-            f"avg {format_decimal_nl(row.get('avg_medals_per_deck'))} | "
-            f"aanvallen {decks} | "
-            f"{format_integer_nl(row.get('medals'))} → {format_integer_nl(row.get('projected_medals'))}"
-        )
+    def render():
+        lines = [heading]
+        for rank, (row, name) in enumerate(zip(rows, names), start=1):
+            own_marker = " (wij)" if normalize_clan_tag(row.get("tag")) == wanted_tag else ""
+            place = f"{rank}." if row.get("projected_medals") is not None else "-."
+            lines.append(
+                f"{place} {name}{own_marker}: "
+                f"{format_decimal_nl(row.get('avg_medals_per_deck'))} → "
+                f"{format_integer_nl(row.get('projected_medals'))}"
+            )
+        return "\n".join(lines)
 
-    scope = "cumulatieve Colosseumscore" if is_colosseum else "score en gemiddelde van vandaag"
-    lines.extend(["", f"Projectie op basis van de huidige {scope} en resterende decks."])
-    return "\n".join(lines)
+    text = render()
+    while len(text) > CLAN_CHAT_LIMIT and any(len(name) > 1 for name in names):
+        index = max(range(len(names)), key=lambda i: len(names[i]))
+        name = names[index].removesuffix("…")
+        names[index] = name[:-2].rstrip() + "…" if len(name) > 2 else name[:1]
+        text = render()
+    return text
 
 
 def build_short_story_text(clan_tag, overview_rows):
@@ -323,76 +330,55 @@ def build_short_story_text(clan_tag, overview_rows):
         return "De officiële daglogs zijn nog niet compleet; daardoor kan de stand nog niet betrouwbaar worden samengevat."
 
     score_ranking = ranked_rows(overview_rows, "medals")
-    average_ranking = ranked_rows(overview_rows, "avg_medals_per_deck")
     projected_ranking = ranked_rows(overview_rows, "projected_medals")
     current_rank = rank_for_clan(score_ranking, clan_tag)
-    average_rank = rank_for_clan(average_ranking, clan_tag)
     projected_rank = rank_for_clan(projected_ranking, clan_tag)
 
-    name = ours.get("name") or "Onze clan"
+    name = str(ours.get("name") or "Onze clan")
+    if len(name) > 28:
+        name = name[:27].rstrip() + "…"
     used = int_value(ours.get("decks_used_today"))
     total = int_value(ours.get("decks_total_today"))
     remaining = max(0, total - used)
     our_average = float(ours.get("avg_medals_per_deck") or 0)
-    other_used = [
-        int_value(row.get("decks_used_today"))
-        for row in overview_rows
-        if normalize_clan_tag(row.get("tag")) != wanted_tag
-    ]
-    opponents_average_used = sum(other_used) / len(other_used) if other_used else 0
-    attacks_delta = used - opponents_average_used
-    if abs(attacks_delta) < 0.05:
-        attack_comparison = "gelijk aan het gemiddelde van de andere clans"
-    elif attacks_delta > 0:
-        attack_comparison = f"{format_decimal_nl(abs(attacks_delta), 1)} meer dan de andere clans gemiddeld"
-    else:
-        attack_comparison = f"{format_decimal_nl(abs(attacks_delta), 1)} minder dan de andere clans gemiddeld"
-
-    scope = "cumulatieve score" if ours.get("score_scope") == "colosseum_cumulative" else "dagscore"
+    scope = "Colosseum" if ours.get("score_scope") == "colosseum_cumulative" else "Vandaag"
     sentences = [
-        f"{name}: {current_rank}e op {scope}, {average_rank}e op avg ({format_decimal_nl(our_average)}).",
-        f"Aanvallen: {used}/{total}, {attack_comparison}.",
-        f"Projectie: {projected_rank}e met {format_integer_nl(ours.get('projected_medals'))} punten.",
+        f"{name}: {current_rank}e {scope.lower()}. Verwacht: {projected_rank}e met "
+        f"{format_integer_nl(ours.get('projected_medals'))} punten.",
+        f"Nog {remaining} van {total} aanvallen; gemiddeld {format_decimal_nl(our_average)} punten per aanval.",
     ]
 
     if projected_rank == 1 and len(projected_ranking) > 1:
         threat = projected_ranking[1]
         lead = int_value(ours.get("projected_medals")) - int_value(threat.get("projected_medals"))
-        attack_gap = used - int_value(threat.get("decks_used_today"))
-        gap_text = "evenveel aanvallen gebruikt"
-        if attack_gap > 0:
-            gap_text = f"{attack_gap} aanvallen minder gebruikt"
-        elif attack_gap < 0:
-            gap_text = f"{abs(attack_gap)} aanvallen meer gebruikt"
-        sentences.append(
-            f"We verdedigen {format_integer_nl(lead)} punten voorsprong op "
-            f"{threat.get('name')}; zij hebben {gap_text}."
-        )
+        opponent = str(threat.get("name") or "nummer 2")[:28]
+        sentences.append(f"Verwachte voorsprong op {opponent}: {format_integer_nl(lead)} punten.")
     elif projected_rank and projected_rank > 1:
         target = projected_ranking[projected_rank - 2]
         target_score = int_value(target.get("projected_medals"))
         needed_points = max(0, target_score + 1 - int_value(ours.get("medals")))
-        target_used = int_value(target.get("decks_used_today"))
+        opponent = str(target.get("name") or "de clan erboven")[:28]
         if remaining > 0:
             required_average = needed_points / remaining
-            tempo_delta = required_average - our_average
-            if tempo_delta <= 0:
-                tempo_text = "dat ligt binnen ons huidige tempo"
-            else:
-                tempo_text = f"{format_decimal_nl(tempo_delta, 1)} boven ons huidige avg"
             sentences.append(
-                f"Voor plek {projected_rank - 1} moeten de laatste {remaining} aanvallen "
-                f"{format_integer_nl(needed_points)} punten halen ({format_decimal_nl(required_average, 1)} avg), "
-                f"{tempo_text}. {target.get('name')}: {target_used}/{int_value(target.get('decks_total_today'))} aanvallen."
+                f"Voor plek {projected_rank - 1} boven {opponent}: "
+                f"{format_integer_nl(needed_points)} punten nodig uit {remaining} aanvallen "
+                f"({format_decimal_nl(required_average, 1)} per aanval)."
             )
         else:
             gap = max(0, target_score - int_value(ours.get("projected_medals")))
             sentences.append(
-                f"We hebben geen aanvallen meer open en staan projected {format_integer_nl(gap)} punten achter "
-                f"{target.get('name')}."
+                f"Geen aanvallen meer; verwacht {format_integer_nl(gap)} punten achter {opponent}."
             )
 
-    return " ".join(sentences)
+    story = " ".join(sentences)
+    if len(story) <= CLAN_CHAT_LIMIT:
+        return story
+    # Preserve the result and comparison as complete sentences if a long clan name takes space.
+    story = " ".join([sentences[0], *sentences[2:]])
+    if len(story) <= CLAN_CHAT_LIMIT:
+        return story
+    return f"{name}: verwacht {projected_rank}e met {format_integer_nl(ours.get('projected_medals'))} punten."
 
 
 class handler(BaseHTTPRequestHandler):
