@@ -93,6 +93,8 @@
     .clickableCell { cursor: pointer; }
     .excludedCopyRow { opacity: 0.45; }
     .excludedCopyRow td { text-decoration: line-through; }
+    .historyPanel { margin-top: 12px; display: none; }
+    .historyPanel--open { display: block; }
     @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 900px) {
       .grid, .decisionGrid { grid-template-columns: 1fr; }
@@ -215,11 +217,16 @@
       <div class="cardHead">
         <div class="title" id="titleLatestWeekendMissed">Laatst gespeelde weekend - gemiste aanvallen</div>
         <div class="actions">
+          <button class="iconBtn" id="toggleClanHistory">📊 Clanhistory</button>
           <button class="iconBtn" id="copyLatestWeekendMissed">⧉ Kopieer tabel</button>
         </div>
       </div>
       <div class="toast" id="toastLatestWeekendMissed"></div>
       <div class="tableWrap" id="latestWeekendMissedWrap">(laden...)</div>
+      <div class="historyPanel" id="clanHistoryPanel">
+        <div class="muted" style="margin: 8px 0 10px;">Clanhistory per weekend (alleen gespeelde weekenden).</div>
+        <div class="tableWrap" id="clanHistoryWrap"></div>
+      </div>
     </div>
 
     <div class="card fullRow">
@@ -876,6 +883,8 @@
   let overperformersData = [];
   let latestWeekendMissedComponent = null;
   let latestWeekendMissedRows = [];
+  let clanHistoryComponent = null;
+  let clanHistoryOpen = false;
   let contributionComponent = null;
   let decksComponent = null;
   let analyticsCache = { contribution: { headers: [], rows: [] }, decks: { headers: [], rows: [] } };
@@ -1505,6 +1514,47 @@
     return { latestWeekend, rows: mappedRows };
   }
 
+  function buildClanHistoryRows(contributionTable, decksTable) {
+    const contributionHeaders = contributionTable?.headers || [];
+    const contributionRows = contributionTable?.rows || [];
+    const decksHeaders = decksTable?.headers || [];
+    const decksRows = decksTable?.rows || [];
+    const weekendHeaders = contributionHeaders.filter((header) => /^\d+\s*-\s*\d+$/.test((header || '').trim()));
+    return weekendHeaders
+      .map((week) => {
+        const contributionIdx = contributionHeaders.indexOf(week);
+        const decksIdx = decksHeaders.indexOf(week);
+        if (contributionIdx === -1 || decksIdx === -1) return null;
+
+        let playersPlayed = 0;
+        let totalScore = 0;
+        let attacksPlayed = 0;
+
+        contributionRows.forEach((contributionRow) => {
+          const playerContribution = Number(contributionRow[contributionIdx] || 0);
+          if (playerContribution <= 0) return;
+          playersPlayed += 1;
+          totalScore += playerContribution;
+          const playerName = contributionRow[0] || '';
+          const decksRow = decksRows.find((row) => normalizeName(row[0]) === normalizeName(playerName));
+          if (decksRow) attacksPlayed += Number(decksRow[decksIdx] || 0);
+        });
+
+        if (playersPlayed === 0) return null;
+        const expectedAttacks = playersPlayed * 16;
+        const missedAttacks = Math.max(0, expectedAttacks - attacksPlayed);
+        const avgScore = playersPlayed ? Math.round((totalScore / playersPlayed) * 100) / 100 : 0;
+        return [week, playersPlayed, attacksPlayed, missedAttacks, totalScore, avgScore];
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const [sa, ia] = parseWeekKeyJs(a[0]);
+        const [sb, ib] = parseWeekKeyJs(b[0]);
+        if (sa !== sb) return sb - sa;
+        return ib - ia;
+      });
+  }
+
   function renderAnalytics(data) {
     mvpCurrent = data.mvp_current || [];
     mvpPrevious = data.mvp_previous || [];
@@ -1621,6 +1671,13 @@
       latestWeekendMissedRows
     );
 
+    const clanHistoryRows = buildClanHistoryRows(analyticsCache.contribution, analyticsCache.decks);
+    clanHistoryComponent = renderTable(
+      'clanHistoryWrap',
+      ['Weekend', 'Spelers gespeeld', 'Aanvallen gespeeld', 'Gemiste aanvallen', 'Totale score', 'Gem. score/speler'],
+      clanHistoryRows
+    );
+
     contributionComponent = renderTable('contributionWrap', analyticsCache.contribution.headers, analyticsCache.contribution.rows);
 
     decksComponent = renderTable('decksWrap', analyticsCache.decks.headers, analyticsCache.decks.rows);
@@ -1709,6 +1766,13 @@
       copyTable(underperformersComponent.getHeaders(), underperformersComponent.getVisibleRows(), el('toastUnderperformers'));
     }
   });
+  el('toggleClanHistory').addEventListener('click', () => {
+    clanHistoryOpen = !clanHistoryOpen;
+    const panel = el('clanHistoryPanel');
+    panel.classList.toggle('historyPanel--open', clanHistoryOpen);
+    el('toggleClanHistory').textContent = clanHistoryOpen ? '📉 Verberg clanhistory' : '📊 Clanhistory';
+  });
+
   el('copyLatestWeekendMissed').addEventListener('click', () => {
     if (latestWeekendMissedComponent) {
       copyTable(
