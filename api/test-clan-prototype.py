@@ -293,17 +293,15 @@ def build_projection_share_text(clan_tag, overview_rows):
     heading = "Colosseum: gem./aanval → eindscore" if is_colosseum else "Vandaag: gem./aanval → eindscore"
     ordered = ranked_rows(overview_rows, "projected_medals")
     unavailable = [row for row in overview_rows if row.get("projected_medals") is None]
-    wanted_tag = normalize_clan_tag(clan_tag)
     rows = [*ordered, *unavailable]
     names = [str(row.get("name") or "-").strip() for row in rows]
 
     def render():
         lines = [heading]
         for rank, (row, name) in enumerate(zip(rows, names), start=1):
-            own_marker = " (wij)" if normalize_clan_tag(row.get("tag")) == wanted_tag else ""
             place = f"{rank}." if row.get("projected_medals") is not None else "-."
             lines.append(
-                f"{place} {name}{own_marker}: "
+                f"{place} {name}: "
                 f"{format_decimal_nl(row.get('avg_medals_per_deck'))} → "
                 f"{format_integer_nl(row.get('projected_medals'))}"
             )

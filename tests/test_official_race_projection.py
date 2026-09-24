@@ -196,7 +196,7 @@ def test_projection_share_lists_every_clan_in_projected_order():
     lines = text.splitlines()
     assert lines[0] == "Vandaag: gem./aanval → eindscore"
     assert lines[1] == "1. FishBoize: 169,27 → 33.854"
-    assert lines[2] == "2. Brabant Royale (wij): 167,56 → 33.513"
+    assert lines[2] == "2. Brabant Royale: 167,56 → 33.513"
     assert lines[3].startswith("3. Städfirman 2:")
     assert lines[4].startswith("4. 50 legends:")
     assert lines[5].startswith("5. ArgentinaTeam 2:")
@@ -212,7 +212,7 @@ def test_projection_share_fits_long_names_and_marks_missing_data():
     text = MODULE.build_projection_share_text("9YP8UY", rows)
 
     assert len(text) <= 250
-    assert "(wij)" in text
+    assert "(wij)" not in text
     assert "-." in text
     assert "→ -" in text
     assert text.count("\n") == 5
