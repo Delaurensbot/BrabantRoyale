@@ -377,5 +377,100 @@
     );
   }
   RiverV2.update(data);
-  return "PASS: data integration, 5 boats, attacks, average, retained dashboard, projection/live, missing values, clan clearing, error and Colosseum";
+  const warningData = {
+    ...data,
+    overview_rows: rows.map((row, i) => ({
+      ...row,
+      clan_access:
+        i === 4
+          ? { type: null, is_open: null, source: "unknown" }
+          : {
+              type: ["open", "inviteOnly", "open", "closed"][i],
+              is_open: i === 0 || i === 2,
+              source: "official_api",
+            },
+    })),
+  };
+  window.__v2WarningFixture = warningData;
+  const warnings = () =>
+    document.querySelectorAll(".rv-open-warning:not([hidden])").length;
+  for (const [type, period, count] of [
+    ["training", 21, 0],
+    ["training", 22, 0],
+    ["training", 23, 2],
+    ["training", null, 0],
+    ["unknown", 23, 0],
+    ["warDay", 24, 2],
+    ["warDay", 25, 2],
+    ["warDay", 26, 2],
+    ["warDay", 27, 2],
+    ["colosseum", 24, 2],
+    ["colosseum", 27, 2],
+  ]) {
+    RiverV2.update({
+      ...warningData,
+      race_state: { period_type: type, period_index: period },
+    });
+    assert(
+      warnings() === count,
+      `Wrong open warnings during ${type} / ${period}`,
+    );
+    assert(
+      document.querySelectorAll(".rv-open-label").length === count,
+      "Dock warning count must match boats",
+    );
+  }
+  RiverV2.update(warningData);
+  assert(
+    document
+      .querySelector(".rv-boat")
+      .getAttribute("aria-label")
+      .includes("Deze clan staat open"),
+    "Warning must be accessible on boat",
+  );
+  assert(
+    document
+      .querySelector(".rv-profile dl")
+      .textContent.includes("Open · let op"),
+    "Open status missing in selected-clan details",
+  );
+  document.querySelector('[data-mode="projection"]').click();
+  assert(warnings() === 2, "Projection must retain open status");
+  document.querySelector('.rv-dock-row[data-clan="AAA"]').click();
+  assert(
+    document
+      .querySelector(".rv-profile dl")
+      .textContent.includes("Alleen op uitnodiging"),
+    "Invite-only is distinct from open",
+  );
+  document.querySelector('.rv-dock-row[data-clan="DDD"]').click();
+  assert(
+    document.querySelector(".rv-profile dl").textContent.includes("Onbekend"),
+    "Failed lookup is not closed",
+  );
+  for (const invalid of [
+    { type: "open", is_open: true, source: "scraper" },
+    { type: "open", is_open: false, source: "official_api" },
+    undefined,
+    { type: "closed", is_open: false, source: "official_api" },
+  ]) {
+    RiverV2.update({
+      ...warningData,
+      overview_rows: warningData.overview_rows.map((row) => ({
+        ...row,
+        clan_access: invalid,
+      })),
+    });
+    assert(
+      warnings() === 0,
+      "Changed/unknown/untrusted status must remove old warning",
+    );
+  }
+  RiverV2.update(warningData);
+  RiverV2.loading("OTHER");
+  assert(warnings() === 0, "Loading must clear previous clan warnings");
+  RiverV2.error("Fixture warning reset");
+  assert(warnings() === 0, "Error must not retain stale warnings");
+  RiverV2.update(data);
+  return "PASS: data integration, preserved dashboard, projection/live, Colosseum/training, loading/errors and phase-gated official open-clan warnings";
 })();

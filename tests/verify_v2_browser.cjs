@@ -164,6 +164,44 @@ const assert = require("node:assert/strict");
         fullPage: true,
       });
   }
+  for (const width of [320, 390, 768, 1440]) {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 1100 });
+    // Worst case: every clan open and every projected boat at the front.
+    await page.evaluate(() => {
+      const data = window.__v2WarningFixture;
+      RiverV2.update({
+        ...data,
+        overview_rows: data.overview_rows.map((row) => ({
+          ...row,
+          medals: 10000,
+          projected_medals: 20000,
+          clan_access: { type: "open", is_open: true, source: "official_api" },
+        })),
+      });
+      document.querySelector('[data-mode="projection"]').click();
+    });
+    await page.waitForTimeout(1800);
+    const scene = await page.locator(".rv-scene").boundingBox();
+    const leader = await page.locator(".rv-leader").boundingBox();
+    const badges = await page.locator(".rv-open-warning:not([hidden])").all();
+    assert.equal(badges.length, 5, "All five open clans must be marked");
+    for (const badge of badges) {
+      const bounds = await badge.boundingBox();
+      assert.ok(
+        bounds.x >= scene.x && bounds.x + bounds.width <= scene.x + scene.width,
+        `Open warning clipped at ${width}px`,
+      );
+      // Allow the complete 6px floating range, even when sampled at its bottom.
+      assert.ok(
+        bounds.y - 6 >= leader.y + leader.height,
+        `Open warning overlaps leader at ${width}px`,
+      );
+    }
+    await page.screenshot({
+      path: path.join(output, `open-clans-${width}.png`),
+    });
+    await page.locator('[data-mode="live"]').click();
+  }
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1100 });
     for (const phase of [
@@ -211,7 +249,7 @@ const assert = require("node:assert/strict");
         });
     }
   }
-  await page.evaluate(() => RiverV2.update(window.__v2Fixture));
+  await page.evaluate(() => RiverV2.update(window.__v2WarningFixture));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.locator('[data-mode="projection"]').click();
   const animations = await page.evaluate(

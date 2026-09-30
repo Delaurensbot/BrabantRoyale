@@ -183,7 +183,8 @@
   position: absolute;
   left: 18%;
   right: 18%;
-  top: 24%;
+  /* Room for the floating warning plus both boat and badge movement. */
+  top: 26%;
   bottom: 51px;
   display: grid;
   grid-template-columns: repeat(var(--clans), minmax(0, 1fr));
@@ -240,6 +241,45 @@
   z-index: 1;
   filter: drop-shadow(5px 12px 4px #06333c65);
   transition: filter 0.2s;
+}
+.rv-open-warning {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 38px;
+  border: 2px solid #fff2b7;
+  border-radius: 13px 13px 13px 4px;
+  background: linear-gradient(145deg, #ffe481, #ff9f43);
+  color: #53230b;
+  font-size: 27px;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow:
+    0 0 0 4px #ffb64b33,
+    0 5px 16px #001d4699;
+  transform: translateX(-50%);
+  animation: rv-warning-float 2.8s ease-in-out infinite;
+}
+.rv-open-warning[hidden] {
+  display: none;
+}
+.rv-open-label {
+  color: #ffd775;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+@keyframes rv-warning-float {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, -6px);
+  }
 }
 .rv-boat:hover .rv-boat-image,
 .rv-selected .rv-boat-image {
@@ -810,7 +850,8 @@
   .rv-lanes {
     left: 13%;
     right: 13%;
-    top: 25%;
+    /* Leave room above the leading boat for its floating open-clan badge. */
+    top: 32%;
   }
 }
 @media (max-width: 760px) {
@@ -874,7 +915,7 @@
   .rv-lanes {
     left: 16%;
     right: 16%;
-    top: 23%;
+    top: 25%;
     bottom: 50px;
     gap: 0;
   }
@@ -884,6 +925,13 @@
   .rv-boat {
     width: 54px;
     height: 93px;
+  }
+  .rv-open-warning {
+    top: -16px;
+    width: 25px;
+    height: 28px;
+    border-radius: 9px 9px 9px 3px;
+    font-size: 21px;
   }
   .rv-boat:after {
     width: 8px;

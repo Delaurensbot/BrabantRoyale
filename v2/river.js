@@ -136,6 +136,18 @@
     });
     return [...result].map(([key, row]) => ({ key, row }));
   };
+  const accessType = (row) => {
+    const access = row.clan_access;
+    return access?.source === "official_api" &&
+      ["open", "inviteOnly", "closed"].includes(access.type) &&
+      access.is_open === (access.type === "open")
+      ? access.type
+      : null;
+  };
+  const openWarning = (row, view = phase()) =>
+    accessType(row) === "open" &&
+    row.clan_access.is_open === true &&
+    (view.competitive || (view.kind === "practice" && view.day === 3));
   function profile(entries) {
     const active = entries.find((item) => item.key === selected),
       panel = host.querySelector(".rv-profile");
@@ -149,6 +161,14 @@
     if (active) {
       const row = active.row;
       [
+        [
+          "Clanstatus · API",
+          {
+            open: openWarning(row) ? "Open · let op" : "Open",
+            inviteOnly: "Alleen op uitnodiging",
+            closed: "Gesloten",
+          }[accessType(row)] || "Onbekend",
+        ],
         ["Huidige score", fmt(score(row, "medals"))],
         ...(phase().competitive
           ? [["Verwachte score", fmt(score(row, "projected_medals"))]]
@@ -370,7 +390,11 @@
         image.draggable = false;
         const badge = el("span", "rv-boat-badge");
         badge.setAttribute("aria-hidden", "true");
-        button.append(wake, image, badge);
+        const warning = el("span", "rv-open-warning", "!");
+        warning.setAttribute("aria-hidden", "true");
+        warning.title = "Deze clan staat open";
+        warning.hidden = true;
+        button.append(wake, image, badge, warning);
         button.addEventListener("click", () => {
           selected = key;
           profile(rows());
@@ -404,8 +428,9 @@
         .querySelector(".rv-boat")
         .setAttribute(
           "aria-label",
-          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten. Bekijk clandetails`,
+          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten.${openWarning(row, view) ? " Deze clan staat open." : ""} Bekijk clandetails`,
         );
+      lane.querySelector(".rv-open-warning").hidden = !openWarning(row, view);
       lane.querySelector(".rv-boat-badge").textContent = rank;
       lane.querySelector(".rv-clan-name").textContent =
         row.name || "Onbekende clan";
@@ -439,6 +464,12 @@
           `${own ? "JOUW CLAN · " : ""}${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
         ),
       );
+      if (openWarning(row, view)) {
+        name
+          .querySelector("strong")
+          .append(el("span", "rv-open-label", " ! OPEN"));
+        item.title = "Deze clan staat open";
+      }
       const points = el("span", "rv-dock-points");
       points.append(
         el("strong", "", fmt(value)),
