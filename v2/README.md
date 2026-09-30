@@ -2,6 +2,29 @@
 
 Open `/v2/` on this branch's Vercel Preview. `/` remains the original website.
 
+## Official war phases
+
+The hero uses only `race_state` from `/api/test-clan-prototype` to choose its
+phase. Explicit training/practice takes priority, even if a contradictory
+Colosseum flag is present. `period_index` identifies the training day within
+the official seven-period section; no computer-date or section-number guess
+is used to declare a competition.
+
+- River Race: river world, current-day points, current leader, ranked dock,
+  and an explicitly estimated Projection view.
+- Colosseum: dedicated desktop and mobile water-arena worlds. Scores are
+  cumulative; average points per deck uses all played decks. Attacks today
+  stay separate from cumulative attacks in the selected-clan panel.
+- Training: prominent non-competitive banner, boats aligned equally, no
+  ranks or competitive projections. Available API figures remain inspectable.
+- Unknown/loading/error: no invented phase or ranking; stale clan and leader
+  details are cleared. Missing scores remain unavailable, not zero.
+
+The leader banner always identifies the current official leader, including
+ties. Projection reorders the compact scoreboard by estimated score without
+claiming that the forecast is an observed result. Original dashboard cards
+below the hero keep their existing data and behaviour.
+
 The 3D-rendered river world uses official `overview_rows` from the same
 `/api/test-clan-prototype` request as the existing dashboard. Boat labels show
 today's used/available attacks and the API's average points per deck. Live and

@@ -20,6 +20,7 @@
     medals: scores[i],
     boat_points: scores[i] * 2,
     decks_used_today: 100 + i * 8,
+    decks_used_total: 300 + i * 8,
     decks_total_today: 200,
     avg_medals_per_deck: 182 - i * 9,
     projected_medals: projections[i],
@@ -32,7 +33,11 @@
     clan: { name: names[0] },
     overview_rows: rows,
     players: [],
-    race_state: { is_colosseum_weekend: false, battle_day: 3 },
+    race_state: {
+      period_type: "warDay",
+      is_colosseum_weekend: false,
+      battle_day: 3,
+    },
     finish_outlook: {
       projected_rank: 1,
       projected_finish: 33800,
@@ -74,6 +79,14 @@
     "Legacy cards not preserved",
   );
   document.querySelector('[data-mode="projection"]').click();
+  assert(
+    document.querySelector(".rv-leader").textContent.includes(names[1]),
+    "Projection must retain the current actual leader",
+  );
+  assert(
+    document.querySelector(".rv-dock-row").dataset.clan === "9YP8UY",
+    "Projected dock must rank projected scores",
+  );
   assert(
     document.querySelector(".rv-score").textContent.includes("33.800"),
     "Projection did not update",
@@ -148,6 +161,117 @@
     !document.querySelector(".rv-lane"),
     "Empty API response must clear all boats",
   );
+  RiverV2.update(data);
+  assert(
+    document.querySelector(".rv-leader").textContent.includes(names[1]),
+    "Current leader must use live points",
+  );
+  assert(
+    document.querySelector(".rv-dock-row").dataset.clan === "AAA",
+    "Dock must be ranked",
+  );
+  RiverV2.update({
+    ...data,
+    race_state: {
+      period_type: "training",
+      period_index: 23,
+      battle_day: null,
+      is_colosseum_weekend: true,
+    },
+  });
+  assert(
+    document.querySelector("#riverHero").dataset.phase === "practice",
+    "Training must override contradictory Colosseum flag",
+  );
+  assert(
+    document.querySelector(".rv-leader").textContent.includes("Trainingsdag 3"),
+    "Training day derived from official period index",
+  );
+  assert(
+    document.querySelector('[data-mode="projection"]').disabled,
+    "Training projection disabled",
+  );
+  assert(
+    [...document.querySelectorAll(".rv-boat-badge")].every(
+      (node) => node.textContent === "—",
+    ),
+    "Training must not rank",
+  );
+  document.querySelector('[data-mode="projection"]').click();
+  assert(
+    document
+      .querySelector('[data-mode="live"]')
+      .getAttribute("aria-pressed") === "true",
+    "Training cannot enter projection",
+  );
+  RiverV2.update({ ...data, race_state: { period_type: "unknown" } });
+  assert(
+    document.querySelector("#riverHero").dataset.phase === "unknown",
+    "Unknown phase stays neutral",
+  );
+  assert(
+    document.querySelector('[data-mode="projection"]').disabled,
+    "Unknown phase projection disabled",
+  );
+  RiverV2.update({ ...data, race_state: { period_type: "colosseum" } });
+  assert(
+    document.querySelector("#riverHero").dataset.phase === "colosseum",
+    "Official period type determines Colosseum",
+  );
+  assert(
+    document.querySelector(".rv-average").textContent.includes("alle decks"),
+    "Colosseum average scope visible",
+  );
+  assert(
+    document
+      .querySelector(".rv-profile dl")
+      .textContent.includes("Aanvallen cumulatief"),
+    "Colosseum cumulative attacks visible",
+  );
+  RiverV2.loading("AAA");
+  assert(
+    document.querySelector("#riverHero").dataset.phase === "unknown",
+    "Loading clears stale theme",
+  );
+  assert(
+    !document.querySelector(".rv-leader").textContent,
+    "Loading clears stale leader",
+  );
+  RiverV2.update({
+    ...data,
+    overview_rows: rows.map((row, i) => ({
+      ...row,
+      medals: i === 0 ? null : 0,
+    })),
+  });
+  assert(
+    document.querySelector(".rv-boat-badge").textContent === "—",
+    "Null is not rankable",
+  );
+  assert(
+    [...document.querySelectorAll(".rv-boat-badge")]
+      .slice(1)
+      .every((node) => node.textContent === "1"),
+    "Zero scores tie honestly",
+  );
+  RiverV2.update(data);
+  for (const period_type of ["training", "colosseum"]) {
+    RiverV2.update({
+      ...data,
+      overview_rows: [],
+      race_state: { period_type, period_index: 23 },
+    });
+    assert(
+      document.getElementById("riverHero").dataset.phase ===
+        (period_type === "training" ? "practice" : "colosseum"),
+      "Empty data must preserve official phase",
+    );
+    assert(
+      !document.querySelector(".rv-lane") &&
+        !document.querySelector(".rv-leader").textContent,
+      "Empty phase clears boats and leader",
+    );
+  }
   RiverV2.update(data);
   return "PASS: data integration, 5 boats, attacks, average, retained dashboard, projection/live, missing values, clan clearing, error and Colosseum";
 })();

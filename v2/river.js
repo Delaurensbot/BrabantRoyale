@@ -32,6 +32,78 @@
     state = host.querySelector(".rv-state");
   const score = (row, field) =>
     row.score_available === false ? null : numeric(row[field]);
+  const phase = () => {
+    const state = current?.race_state || {};
+    const type = String(state.period_type || state.periodType || "")
+      .toLowerCase()
+      .replace(/[\s_-]/g, "");
+    const index = numeric(state.period_index ?? state.periodIndex);
+    if (["training", "practice", "trainingday", "practiceday"].includes(type))
+      return {
+        kind: "practice",
+        day:
+          index !== null &&
+          Number.isInteger(index) &&
+          index >= 0 &&
+          index % 7 < 3
+            ? (index % 7) + 1
+            : null,
+        competitive: false,
+      };
+    if (type === "colosseum" || state.is_colosseum_weekend === true)
+      return {
+        kind: "colosseum",
+        day: numeric(state.battle_day),
+        competitive: true,
+      };
+    if (type === "warday")
+      return {
+        kind: "race",
+        day: numeric(state.battle_day),
+        competitive: true,
+      };
+    return { kind: "unknown", day: null, competitive: false };
+  };
+  const leader = el("div", "rv-leader");
+  leader.setAttribute("role", "status");
+  host.querySelector(".rv-scene-top").after(leader);
+  function setPhase(view) {
+    host.dataset.phase = view.kind;
+    host.setAttribute(
+      "aria-label",
+      {
+        race: "Interactieve River Race",
+        colosseum: "Interactief Colosseum",
+        practice: "Clan War trainingsdagen",
+        unknown: "Clan War fase-informatie",
+      }[view.kind],
+    );
+    host.querySelector(".rv-heading h1").textContent = {
+      race: "River Race",
+      colosseum: "Colosseum",
+      practice: "Trainingsdagen",
+      unknown: "Clan War",
+    }[view.kind];
+    const projection = host.querySelector('[data-mode="projection"]');
+    projection.disabled = !view.competitive;
+    projection.title = view.competitive
+      ? "Bekijk de berekende eindstand"
+      : "Geen competitieve projectie in deze fase";
+    if (!view.competitive) mode = "live";
+    host
+      .querySelectorAll("[data-mode]")
+      .forEach((button) =>
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.mode === mode),
+        ),
+      );
+    host.querySelector(".rv-outlook .rv-card-eyebrow").textContent =
+      view.competitive ? "JOUW CLAN · VERWACHTING" : "JOUW CLAN · FASE";
+    host.querySelector(".rv-scene-caption").textContent = view.competitive
+      ? "Relatieve score · geen in-game afstand"
+      : "Geen competitieve rangschikking in deze fase";
+  }
   const rows = () => {
     const result = new Map();
     (Array.isArray(current?.overview_rows)
@@ -57,12 +129,22 @@
       const row = active.row;
       [
         ["Huidige score", fmt(score(row, "medals"))],
-        ["Verwachte score", fmt(score(row, "projected_medals"))],
+        ...(phase().competitive
+          ? [["Verwachte score", fmt(score(row, "projected_medals"))]]
+          : []),
         [
-          "Aanvallen gespeeld",
+          "Aanvallen vandaag",
           `${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)}`,
         ],
-        ["Gemiddeld per deck", fmt(row.avg_medals_per_deck)],
+        ...(phase().kind === "colosseum"
+          ? [["Aanvallen cumulatief", fmt(row.decks_used_total)]]
+          : []),
+        [
+          phase().kind === "colosseum"
+            ? "Gem. per deck · alle decks"
+            : "Gemiddeld per deck",
+          fmt(row.avg_medals_per_deck),
+        ],
       ].forEach(([label, value]) => {
         const group = el("div");
         group.append(el("dt", "", label), el("dd", "", value));
@@ -85,6 +167,10 @@
   }
   function clear(message) {
     current = null;
+    mode = "live";
+    setPhase(phase());
+    leader.replaceChildren();
+    leader.removeAttribute("title");
     selected = null;
     lanes.replaceChildren();
     dock.replaceChildren();
@@ -100,15 +186,30 @@
     host.querySelector(".rv-scope").textContent = "OFFICIËLE API";
     host.querySelector(".rv-model-note").textContent =
       "Lokale berekening uit de officiële API.";
+    host.querySelector(".rv-mode-label").textContent = "WACHTEN OP DATA";
+    host.querySelector(".rv-explainer").textContent =
+      "De officiële API bepaalt de fase en beschikbare scores.";
     profile([]);
   }
   function render() {
     const entries = rows();
     if (!entries.length) {
+      const emptyData = current;
       clear("Er is nog geen officiële race-informatie beschikbaar.");
+      current = emptyData;
+      const view = phase();
+      setPhase(view);
+      host.querySelector(".rv-scope").textContent = {
+        practice: "TRAINING · NIET COMPETITIEF",
+        colosseum: "COLOSSEUM · CUMULATIEVE SCORE",
+        race: "RIVER RACE · DAGSCORE",
+        unknown: "FASE ONBEKEND · OFFICIËLE API",
+      }[view.kind];
       return;
     }
     state.hidden = true;
+    const view = phase();
+    setPhase(view);
     if (!entries.some((item) => item.key === selected))
       selected =
         entries.find((item) => tag(item.row.tag) === tag(current.clan_tag))
@@ -121,14 +222,23 @@
         score(row, "projected_medals") ?? 0,
       ]),
     );
-    const cumulative = entries.some(
-      ({ row }) => row.score_scope === "colosseum_cumulative",
-    );
+    const cumulative = view.kind === "colosseum";
     host.querySelector(".rv-scope").textContent = cumulative
       ? "COLOSSEUM · CUMULATIEVE SCORE"
-      : "RIVER RACE · DAGSCORE";
-    host.querySelector(".rv-mode-label").textContent =
-      mode === "live" ? "HUIDIGE STAND" : "PROJECTION · SCHATTING";
+      : view.kind === "race"
+        ? "RIVER RACE · DAGSCORE"
+        : view.kind === "practice"
+          ? "TRAINING · NIET COMPETITIEF"
+          : "FASE ONBEKEND · OFFICIËLE API";
+    host.querySelector(".rv-mode-label").textContent = !view.competitive
+      ? view.day === null
+        ? "GEEN RANGLIJST"
+        : `TRAININGSDAG ${view.day}`
+      : mode === "live"
+        ? [1, 2, 3, 4].includes(view.day)
+          ? `STRIJDDAG ${view.day} · HUIDIGE STAND`
+          : "HUIDIGE STAND"
+        : "PROJECTION · SCHATTING";
     host.querySelector(".rv-model-note").textContent = cumulative
       ? "Schatting inclusief resterende Colosseum-dagen."
       : "Schatting voor deze racedag.";
@@ -138,6 +248,63 @@
         ? "Cumulatieve Colosseum-score, inclusief resterende dagen."
         : "Dagscore van deze river race.") +
       " Geen gegarandeerde eindstand.";
+    if (!view.competitive)
+      host.querySelector(".rv-explainer").textContent =
+        view.kind === "practice"
+          ? "Trainingsfase volgens de officiële API. Getoonde aanvallen en gemiddelden zijn API-statistieken; ze vormen geen trainingsranglijst. Er wordt geen competitieve eindstand voorspeld."
+          : "De officiële API geeft geen herkenbare fase. Scores en aanvallen blijven zichtbaar, zonder rangschikking of projectie.";
+    const available = entries.filter(
+      ({ row }) => score(row, "medals") !== null,
+    );
+    const leadingScore = available.length
+      ? Math.max(...available.map(({ row }) => score(row, "medals")))
+      : null;
+    const leaders = available.filter(
+      ({ row }) => score(row, "medals") === leadingScore,
+    );
+    leader.replaceChildren();
+    leader.append(
+      el(
+        "span",
+        "rv-leader-eyebrow",
+        view.competitive
+          ? "HUIDIGE KOPLOPER"
+          : view.kind === "practice"
+            ? "TRAINING · GEEN WEDSTRIJD"
+            : "WACHTEN OP OFFICIËLE FASE",
+      ),
+    );
+    leader.title = view.competitive
+      ? leaders.map(({ row }) => row.name || "Onbekende clan").join(" · ")
+      : "";
+    leader.append(
+      el(
+        "strong",
+        "",
+        !view.competitive
+          ? view.kind === "practice"
+            ? `Trainingsdag ${view.day ?? "—"}`
+            : "Nog geen rangschikking"
+          : leaders.length
+            ? leaders
+                .slice(0, 2)
+                .map(({ row }) => row.name || "Onbekende clan")
+                .join(" · ") +
+              (leaders.length > 2 ? ` + ${leaders.length - 2}` : "")
+            : "Score nog niet beschikbaar",
+      ),
+    );
+    leader.append(
+      el(
+        "small",
+        "",
+        !view.competitive
+          ? "Aanvallen en gemiddelden blijven hieronder beschikbaar"
+          : leaders.length
+            ? `${fmt(leadingScore)} punten${leaders.length > 1 ? " · gedeelde eerste plaats" : " · officiële huidige score"}`
+            : "Ontbrekende punten worden niet als nul getoond",
+      ),
+    );
     lanes.style.setProperty("--clans", entries.length);
     const existing = new Map(
       [...lanes.children].map((node) => [node.dataset.key, node]),
@@ -147,7 +314,7 @@
       const own = tag(row.tag) === tag(current.clan_tag),
         value = score(row, field);
       const rank =
-        value === null
+        value === null || !view.competitive
           ? "—"
           : String(
               1 +
@@ -191,6 +358,10 @@
       }
       existing.delete(key);
       lane.classList.toggle("rv-own", own);
+      lane.classList.toggle(
+        "rv-leading",
+        view.competitive && leaders.some((item) => item.key === key),
+      );
       lane.style.setProperty("--boat-delay", `${index * -0.7}s`);
       lane.querySelector(".rv-boat-image").src = own
         ? "/v2/assets/royal-boat.webp"
@@ -203,21 +374,26 @@
         .querySelector(".rv-boat")
         .setAttribute(
           "aria-label",
-          `${row.name || "Clan"}, plaats ${rank}, ${fmt(value)} punten. Bekijk clandetails`,
+          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten. Bekijk clandetails`,
         );
       lane.querySelector(".rv-boat-badge").textContent = rank;
       lane.querySelector(".rv-clan-name").textContent =
         row.name || "Onbekende clan";
+      lane.querySelector(".rv-clan-name").title = row.name || "Onbekende clan";
       lane.querySelector(".rv-score").textContent =
         `${fmt(value)} ${mode === "projection" ? "verw. " : ""}punten`;
       lane.querySelector(".rv-attacks").textContent =
         `${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen`;
       lane.querySelector(".rv-average").textContent =
-        `${fmt(row.avg_medals_per_deck)} pnt / deck`;
+        `${fmt(row.avg_medals_per_deck)} pnt / deck${cumulative ? " · alle decks" : ""}`;
       requestAnimationFrame(() =>
         lane.style.setProperty(
           "--progress",
-          value === null ? "0" : String(Math.max(0, value / maximum)),
+          !view.competitive
+            ? "0.42"
+            : value === null
+              ? "0"
+              : String(Math.max(0, value / maximum)),
         ),
       );
       const item = el("button", "rv-dock-row");
@@ -230,7 +406,7 @@
         el(
           "small",
           "",
-          `${own ? "JOUW CLAN · " : ""}${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen · ${fmt(row.avg_medals_per_deck)} pnt/deck`,
+          `${own ? "JOUW CLAN · " : ""}${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
         ),
       );
       const points = el("span", "rv-dock-points");
@@ -246,10 +422,45 @@
       dock.append(item);
     });
     existing.forEach((node) => node.remove());
+    if (view.competitive) {
+      const ordered = [...entries].sort(
+        (a, b) =>
+          (score(b.row, field) ?? -Infinity) -
+          (score(a.row, field) ?? -Infinity),
+      );
+      const items = new Map(
+        [...dock.children].map((node) => [node.dataset.clan, node]),
+      );
+      ordered.forEach(({ key }) => dock.append(items.get(key)));
+    }
+    if (!view.competitive) {
+      host
+        .querySelector(".rv-outlook-main")
+        .replaceChildren(
+          el(
+            "strong",
+            "",
+            view.kind === "practice" ? `${view.day ?? "—"}` : "—",
+          ),
+          el(
+            "span",
+            "",
+            view.kind === "practice"
+              ? "Trainingsdag · geen eindstand"
+              : "Fase niet bekend",
+          ),
+        );
+      host.querySelector(".rv-outlook-grid").replaceChildren();
+      host.querySelector(".rv-model-note").textContent =
+        "Projectie en rangschikking zijn niet beschikbaar in deze fase.";
+      profile(entries);
+      return;
+    }
     const finish = current.finish_outlook || {};
     if (numeric(finish.projected_finish) === null) {
-      host.querySelector(".rv-model-note").textContent =
-        "Voor een verwachting zijn officiële dagpunten nodig.";
+      host.querySelector(".rv-model-note").textContent = cumulative
+        ? "Voor een verwachting zijn officiële cumulatieve punten nodig."
+        : "Voor een verwachting zijn officiële dagpunten nodig.";
     }
     host
       .querySelector(".rv-outlook-main")
@@ -287,6 +498,7 @@
   }
   host.querySelectorAll("[data-mode]").forEach((button) =>
     button.addEventListener("click", () => {
+      if (button.disabled) return;
       mode = button.dataset.mode;
       host
         .querySelectorAll("[data-mode]")

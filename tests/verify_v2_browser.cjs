@@ -54,6 +54,70 @@ const assert = require("node:assert/strict");
   await page.locator('[data-mode="live"]').click();
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 1100 });
+    await page.evaluate(() => {
+      const base = window.__v2Fixture;
+      const check = (condition, message) => {
+        if (!condition) throw new Error(message);
+      };
+      for (const phase of [
+        "colosseum",
+        "training",
+        "practice",
+        "unknown",
+        "warDay",
+      ]) {
+        RiverV2.update({
+          ...base,
+          race_state: {
+            period_type: phase,
+            period_index: 23,
+            battle_day: phase === "warDay" ? 3 : null,
+            is_colosseum_weekend: phase === "training",
+          },
+        });
+        const hero = document.getElementById("riverHero");
+        const expected =
+          phase === "warDay"
+            ? "race"
+            : ["training", "practice"].includes(phase)
+              ? "practice"
+              : phase;
+        check(hero.dataset.phase === expected, `Incorrect phase ${phase}`);
+        check(
+          document.querySelector('[data-mode="projection"]').disabled ===
+            ["practice", "unknown"].includes(expected),
+          `Projection control ${phase}`,
+        );
+        const image = getComputedStyle(
+          document.querySelector(".rv-scene"),
+        ).backgroundImage;
+        check(
+          image.includes(
+            expected === "colosseum" ? "colosseum-world" : "river-world",
+          ),
+          `Wrong scene ${phase}`,
+        );
+        if (expected === "practice") {
+          check(
+            document
+              .querySelector(".rv-leader")
+              .textContent.includes("Trainingsdag 3"),
+            "Training day absent",
+          );
+          check(
+            [...document.querySelectorAll(".rv-boat-badge")].every(
+              (node) => node.textContent === "—",
+            ),
+            "Training ranks leaked",
+          );
+        }
+        check(
+          document.documentElement.scrollWidth <= innerWidth + 1,
+          `Phase ${phase} overflows`,
+        );
+      }
+      RiverV2.update(base);
+    });
     await page.waitForTimeout(200);
     assert.ok(
       await page.evaluate(
@@ -77,6 +141,43 @@ const assert = require("node:assert/strict");
         fullPage: true,
       });
   }
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1100 });
+    for (const phase of ["colosseum", "training"]) {
+      await page.evaluate((phase) => {
+        RiverV2.update({
+          ...window.__v2Fixture,
+          race_state: {
+            period_type: phase,
+            period_index: 23,
+            battle_day: phase === "colosseum" ? 3 : null,
+          },
+        });
+      }, phase);
+      await page.evaluate(async () => {
+        const background = getComputedStyle(
+          document.querySelector(".rv-scene"),
+        ).backgroundImage;
+        const source = background.match(/url\(["']?([^"')]+)["']?\)/)?.[1];
+        if (source) {
+          const image = new Image();
+          image.src = source;
+          await image.decode();
+        }
+      });
+      await page.waitForTimeout(1800);
+      await page.screenshot({
+        path: path.join(output, `${phase}-${width}.png`),
+        fullPage: false,
+      });
+      if (width === 390)
+        await page.screenshot({
+          path: path.join(output, `${phase}-${width}-full.png`),
+          fullPage: true,
+        });
+    }
+  }
+  await page.evaluate(() => RiverV2.update(window.__v2Fixture));
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.locator('[data-mode="projection"]').click();
   const animations = await page.evaluate(
@@ -113,6 +214,43 @@ const assert = require("node:assert/strict");
       { timeout: 60000 },
     );
     assert.ok(liveData?.ok, "Official live API returned an error");
+    const type = String(liveData.race_state?.period_type || "")
+      .toLowerCase()
+      .replace(/[\s_-]/g, "");
+    const training = [
+      "training",
+      "practice",
+      "trainingday",
+      "practiceday",
+    ].includes(type);
+    const expectedPhase = training
+      ? "practice"
+      : type === "colosseum" ||
+          liveData.race_state?.is_colosseum_weekend === true
+        ? "colosseum"
+        : type === "warday"
+          ? "race"
+          : "unknown";
+    assert.equal(
+      await page.locator("#riverHero").getAttribute("data-phase"),
+      expectedPhase,
+    );
+    assert.equal(
+      await page.locator('[data-mode="projection"]').isDisabled(),
+      ["practice", "unknown"].includes(expectedPhase),
+    );
+    if (training) {
+      assert.ok(
+        (await page.locator(".rv-leader").textContent()).includes(
+          "GEEN WEDSTRIJD",
+        ),
+      );
+      assert.ok(
+        (await page.locator(".rv-boat-badge").allTextContents()).every(
+          (rank) => rank === "—",
+        ),
+      );
+    }
     assert.equal(
       await page.locator(".rv-lane").count(),
       liveData.overview_rows.length,

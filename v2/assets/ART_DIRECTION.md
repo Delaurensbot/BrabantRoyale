@@ -10,8 +10,24 @@ The original PNG renders remain in the Codex generated-images directory.
 - `river-world-mobile.webp`: 1024×1536 portrait world, 497 KB.
 - `royal-boat.webp`: 512×614 transparent blue/gold own-clan boat, 61 KB.
 - `rival-boat.webp`: 512×614 transparent red/gold rival boat, 60 KB.
+- `colosseum-world.webp`: 1536×1024 desktop water-arena, 375 KB.
+- `colosseum-world-mobile.webp`: 1024×1536 portrait water-arena, 348 KB.
+
+The two Colosseum worlds were generated with the built-in image tool using
+the existing river world as the style reference and the supplied in-game
+training/Colosseum screenshot as a concept reference. They are original
+rendered environments, not cropped game screenshots. Converted to WebP at
+quality 85; original PNGs are preserved outside the checkout.
 
 ## Final generation prompts
+
+### Colosseum desktop world
+
+Use case: stylized-concept. Asset type: production desktop game-world background for an interactive Clash Royale Colosseum leaderboard, NOT a UI mockup. Input image 1 is the STYLE REFERENCE (existing river world); image 2 is a CONCEPT REFERENCE only (actual game Colosseum). Primary request: bring the viewer INSIDE a majestic royal Colosseum with a water-filled central arena. Match exactly the vivid tactile Supercell Clash Royale 3D game rendering of reference 1: sculpted chunky bevelled grey stone, warm gold trims, saturated royal red and blue banners, soft upper-left sunlight, dimensional ambient occlusion, hand-painted material richness. Landscape 1536x1024, orthographic 65-degree overhead camera. The central turquoise water fills clear central 75% of width from y25% through bottom; all central water MUST be unobstructed for five separately animated HTML boat sprites and labels. Build beautiful encircling Colosseum arches, layered stadium terraces and fortified royal towers along only LEFT, RIGHT, and TOP edges, with a magnificent golden crown over the top central entry arch, statues/trophy details on side terraces, red/blue pennants, sandy carved stone promenades. Interior view, clearly a Colosseum not a river village. Symmetric powerful stadium architecture with rich depth and polished game-asset quality. No island or structure in center. No boats, people, text, interface, numbers, scoreboard, logos or watermark. Large uninterrupted open turquoise water lower-center. This is an actual separate environment bitmap to use beneath real live dashboard UI.
+
+### Colosseum mobile world
+
+Use case: stylized-concept. Asset type: production mobile portrait background for interactive Clash Royale Colosseum leaderboard. Supplied image is STYLE AND WORLD REFERENCE, not an edit target. Create a PORTRAIT 1024x1536 version of this same beautiful royal water-filled Colosseum INTERIOR. Same sculpted 3D stone, gold trim, blue/red banners, crown gateway, subtle firebraziers, polished Supercell Clash Royale materials and upper-left sunny lighting. Mobile layout is crucial: extremely narrow terraces/towers left and right at OUTER 7% of each side, uninterrupted central turquoise water occupies 86% of width from y22% to bottom. Crown gateway and curved tiers in top 20% only. Show a clearly enclosed Colosseum inside, royal stadium architecture NOT village houses or trees. Camera orthographic 65-degree overhead, boats will be overlaid separately in HTML and central water must be free of everything. Keep distinctive warm stone and opulent gold; vivid turquoise caustics and soft game-style rich shadows. Rendered professional game environment, no boats, no text, no people, no UI, no logos or watermark. Match reference exact art quality, architecture and color palette, but reorganize into tall portrait composition for five boats side-by-side.
 
 ### Desktop world
 
