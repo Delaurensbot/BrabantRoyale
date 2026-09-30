@@ -30,6 +30,18 @@
   const lanes = host.querySelector(".rv-lanes"),
     dock = host.querySelector(".rv-dock"),
     state = host.querySelector(".rv-state");
+  const statePanel = el("div", "rv-state-panel"),
+    loader = el("div", "rv-loader"),
+    stateText = el("span", "rv-state-text", state.textContent);
+  loader.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 3; i++) loader.append(el("i"));
+  statePanel.append(loader, stateText);
+  state.replaceChildren(statePanel);
+  const setBusy = (busy) => {
+    host.setAttribute("aria-busy", String(busy));
+    loader.hidden = !busy;
+  };
+  setBusy(true);
   const score = (row, field) =>
     row.score_available === false ? null : numeric(row[field]);
   const phase = () => {
@@ -49,6 +61,7 @@
             ? (index % 7) + 1
             : null,
         competitive: false,
+        preparingColosseum: current?.week_context?.mode === "colosseum",
       };
     if (type === "colosseum" || state.is_colosseum_weekend === true)
       return {
@@ -69,6 +82,10 @@
   host.querySelector(".rv-scene-top").after(leader);
   function setPhase(view) {
     host.dataset.phase = view.kind;
+    host.dataset.world =
+      view.kind === "colosseum" || view.preparingColosseum
+        ? "colosseum"
+        : "river";
     host.setAttribute(
       "aria-label",
       {
@@ -84,6 +101,10 @@
       practice: "Trainingsdagen",
       unknown: "Clan War",
     }[view.kind];
+    if (view.preparingColosseum) {
+      host.setAttribute("aria-label", "Trainingsdagen voor Colosseum weekend");
+      host.querySelector(".rv-heading h1").textContent = "Colosseum · training";
+    }
     const projection = host.querySelector('[data-mode="projection"]');
     projection.disabled = !view.competitive;
     projection.title = view.competitive
@@ -174,7 +195,8 @@
     selected = null;
     lanes.replaceChildren();
     dock.replaceChildren();
-    state.textContent = message;
+    setBusy(false);
+    stateText.textContent = message;
     state.hidden = false;
     host
       .querySelector(".rv-outlook-main")
@@ -192,6 +214,7 @@
     profile([]);
   }
   function render() {
+    setBusy(false);
     const entries = rows();
     if (!entries.length) {
       const emptyData = current;
@@ -253,6 +276,11 @@
         view.kind === "practice"
           ? "Trainingsfase volgens de officiële API. Getoonde aanvallen en gemiddelden zijn API-statistieken; ze vormen geen trainingsranglijst. Er wordt geen competitieve eindstand voorspeld."
           : "De officiële API geeft geen herkenbare fase. Scores en aanvallen blijven zichtbaar, zonder rangschikking of projectie.";
+    if (view.preparingColosseum) {
+      host.querySelector(".rv-scope").textContent = "COLOSSEUM · VOORBEREIDING";
+      host.querySelector(".rv-explainer").textContent =
+        "Trainingsfase volgens de officiële API. De Colosseum-voorbereiding is afgeleid uit de API-week en de seizoenskalender. Trainingsaanvallen tellen niet als wedstrijdpunten; er is nog geen ranglijst of projectie.";
+    }
     const available = entries.filter(
       ({ row }) => score(row, "medals") !== null,
     );
@@ -283,7 +311,7 @@
         "",
         !view.competitive
           ? view.kind === "practice"
-            ? `Trainingsdag ${view.day ?? "—"}`
+            ? `Trainingsdag ${view.day ?? "—"}${view.preparingColosseum ? " voor Colosseum" : ""}`
             : "Nog geen rangschikking"
           : leaders.length
             ? leaders
@@ -299,7 +327,9 @@
         "small",
         "",
         !view.competitive
-          ? "Aanvallen en gemiddelden blijven hieronder beschikbaar"
+          ? view.preparingColosseum
+            ? "Bereid je war decks voor op Colosseum weekend"
+            : "Aanvallen en gemiddelden blijven hieronder beschikbaar"
           : leaders.length
             ? `${fmt(leadingScore)} punten${leaders.length > 1 ? " · gedeelde eerste plaats" : " · officiële huidige score"}`
             : "Ontbrekende punten worden niet als nul getoond",
@@ -446,13 +476,28 @@
             "span",
             "",
             view.kind === "practice"
-              ? "Trainingsdag · geen eindstand"
+              ? view.preparingColosseum
+                ? "Trainingsdag voor Colosseum weekend"
+                : "Trainingsdag · geen eindstand"
               : "Fase niet bekend",
           ),
         );
       host.querySelector(".rv-outlook-grid").replaceChildren();
       host.querySelector(".rv-model-note").textContent =
         "Projectie en rangschikking zijn niet beschikbaar in deze fase.";
+      if (view.preparingColosseum) {
+        const grid = host.querySelector(".rv-outlook-grid");
+        for (const [label, value] of [
+          ["Training", "3 dagen"],
+          ["Colosseum", "4 strijddagen"],
+        ]) {
+          const cell = el("div");
+          cell.append(el("small", "", label), el("strong", "", value));
+          grid.append(cell);
+        }
+        host.querySelector(".rv-model-note").textContent =
+          "Vanaf de strijddagen: cumulatieve Colosseum-score en projectie over de resterende dagen. Alle kaarten en tabellen blijven hieronder beschikbaar.";
+      }
       profile(entries);
       return;
     }
@@ -522,6 +567,7 @@
     },
     loading(clanTag) {
       clear(`Officiële racedata ophalen${clanTag ? " voor " + clanTag : ""}…`);
+      setBusy(true);
     },
     error(message) {
       clear(

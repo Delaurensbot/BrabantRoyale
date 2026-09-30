@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
 import json
 import os
@@ -43,6 +44,51 @@ def is_colosseum_race(race_data):
     period_type = str((race_data or {}).get("periodType") or "")
     normalized = "".join(ch for ch in period_type.lower() if ch.isalnum())
     return normalized == "colosseum"
+
+
+def build_week_context(race_data, today=None):
+    """Preparation theme only: never changes scoring or the official active phase.
+
+    Seasons run between first Mondays; the last of their 4–5 weeks is
+    Colosseum. Validate both official indices against that calendar before
+    deriving a training theme. Missing/stale indices stay unknown, including
+    the Monday rollover while the API still reports the previous season.
+    Sources: Supercell's Seasons and About Clan Wars support pages.
+    """
+    unknown = {"mode": None, "source": "unknown"}
+    if is_colosseum_race(race_data):
+        return {"mode": "colosseum", "source": "official_api"}
+    period_type = str((race_data or {}).get("periodType") or "").lower()
+    if period_type != "training":
+        return unknown
+    section = (race_data or {}).get("sectionIndex")
+    period = (race_data or {}).get("periodIndex")
+    if type(section) is not int or type(period) is not int:
+        return unknown
+    if section < 0 or period < 0 or period // 7 != section or period % 7 > 2:
+        return unknown
+
+    today = today or datetime.now(timezone.utc).date()
+
+    def first_monday(year, month):
+        first = today.replace(year=year, month=month, day=1)
+        return first + timedelta(days=(-first.weekday()) % 7)
+
+    start = first_monday(today.year, today.month)
+    if today < start:
+        previous_month = today.replace(day=1) - timedelta(days=1)
+        start = first_monday(previous_month.year, previous_month.month)
+    next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    end = first_monday(next_month.year, next_month.month)
+    weeks = (end - start).days // 7
+    if weeks not in {4, 5} or (today - start).days // 7 != section:
+        return unknown
+    return {
+        "mode": "colosseum" if section == weeks - 1 else "river_race",
+        "source": "official_api_indices_and_season_calendar",
+        "week": section + 1,
+        "season_weeks": weeks,
+    }
 
 
 def battle_day_for_race(race_data):
@@ -443,6 +489,7 @@ class handler(BaseHTTPRequestHandler):
                         "decks_used_today": sum(int_value(p.get("decksUsedToday")) for p in participant_rows),
                     },
                     "overview_rows": overview_rows,
+                    "week_context": build_week_context(race_data),
                     "players": players,
                     "finish_outlook": finish_outlook,
                     "projection_share_text": projection_share_text,

@@ -374,6 +374,54 @@
 .rv-state[hidden] {
   display: none;
 }
+.rv-state-panel {
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  max-width: 330px;
+  padding: 28px 30px;
+  border: 1px solid #d4fff21f;
+  border-radius: 22px;
+  background: #0a2939c9;
+  box-shadow: 0 16px 48px #001a2533;
+}
+.rv-state-text {
+  display: block;
+}
+.rv-loader {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 22px;
+}
+.rv-loader[hidden] {
+  display: none;
+}
+.rv-loader i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b7eee8;
+  animation: rv-loading 1.4s ease-in-out infinite;
+}
+.rv-loader i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.rv-loader i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes rv-loading {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-5px);
+  }
+}
 .rv-dock {
   background: #102b3c;
   padding: 7px 14px;
@@ -702,10 +750,10 @@
     0 0 18px #ffe08b80;
   border-color: #fff4c6;
 }
-#riverHero[data-phase="colosseum"] .rv-scene {
+#riverHero[data-world="colosseum"] .rv-scene {
   background-image: url("/v2/assets/colosseum-world.webp");
 }
-#riverHero[data-phase="colosseum"] .rv-arena {
+#riverHero[data-world="colosseum"] .rv-arena {
   border-color: #b9a270;
 }
 #riverHero[data-phase="practice"] .rv-leader {
@@ -715,7 +763,7 @@
   color: #b7eee8;
 }
 @media (max-width: 760px) {
-  #riverHero[data-phase="colosseum"] .rv-scene {
+  #riverHero[data-world="colosseum"] .rv-scene {
     background-image: url("/v2/assets/colosseum-world-mobile.webp");
   }
   .rv-leader {

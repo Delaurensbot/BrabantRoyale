@@ -80,6 +80,7 @@ const assert = require("node:assert/strict");
       for (const phase of [
         "colosseum",
         "training",
+        "colosseum-training",
         "practice",
         "unknown",
         "warDay",
@@ -87,17 +88,19 @@ const assert = require("node:assert/strict");
         RiverV2.update({
           ...base,
           race_state: {
-            period_type: phase,
+            period_type: phase === "colosseum-training" ? "training" : phase,
             period_index: 23,
             battle_day: phase === "warDay" ? 3 : null,
             is_colosseum_weekend: phase === "training",
           },
+          week_context:
+            phase === "colosseum-training" ? { mode: "colosseum" } : undefined,
         });
         const hero = document.getElementById("riverHero");
         const expected =
           phase === "warDay"
             ? "race"
-            : ["training", "practice"].includes(phase)
+            : ["training", "practice", "colosseum-training"].includes(phase)
               ? "practice"
               : phase;
         check(hero.dataset.phase === expected, `Incorrect phase ${phase}`);
@@ -111,7 +114,9 @@ const assert = require("node:assert/strict");
         ).backgroundImage;
         check(
           image.includes(
-            expected === "colosseum" ? "colosseum-world" : "river-world",
+            expected === "colosseum" || phase === "colosseum-training"
+              ? "colosseum-world"
+              : "river-world",
           ),
           `Wrong scene ${phase}`,
         );
@@ -161,15 +166,26 @@ const assert = require("node:assert/strict");
   }
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1100 });
-    for (const phase of ["colosseum", "training"]) {
+    for (const phase of [
+      "colosseum",
+      "training",
+      "colosseum-training",
+      "loading",
+    ]) {
       await page.evaluate((phase) => {
+        if (phase === "loading") {
+          RiverV2.loading("9YP8UY");
+          return;
+        }
         RiverV2.update({
           ...window.__v2Fixture,
           race_state: {
-            period_type: phase,
+            period_type: phase === "colosseum-training" ? "training" : phase,
             period_index: 23,
             battle_day: phase === "colosseum" ? 3 : null,
           },
+          week_context:
+            phase === "colosseum-training" ? { mode: "colosseum" } : undefined,
         });
       }, phase);
       await page.evaluate(async () => {
@@ -208,6 +224,16 @@ const assert = require("node:assert/strict");
       }).length,
   );
   assert.equal(animations, 0, "Reduced motion must stop decorative animations");
+  await page.evaluate(() => RiverV2.loading("9YP8UY"));
+  assert.equal(
+    await page
+      .locator(".rv-loader i")
+      .first()
+      .evaluate((node) => getComputedStyle(node).animationName),
+    "none",
+    "Reduced motion must also stop the loading indicator",
+  );
+  await page.evaluate(() => RiverV2.update(window.__v2Fixture));
   assert.deepEqual(errors, [], "Browser runtime errors");
   console.log(
     `PASS: desktop/mobile 320–1440px, assets, reduced motion, no runtime errors. Screenshots: ${output}`,

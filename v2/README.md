@@ -19,8 +19,23 @@ is used to declare a competition.
   stay separate from cumulative attacks in the selected-clan panel.
 - Training: prominent non-competitive banner, boats aligned equally, no
   ranks or competitive projections. Available API figures remain inspectable.
+  During the final season week, the Colosseum arena and preparation information
+  are already shown, with “Trainingsdag … voor Colosseum”. The additive
+  `week_context` metadata is a local inference from official `sectionIndex` /
+  `periodIndex` and the server UTC season calendar, not an official phase flag
+  and never scraper data. It handles both four- and five-week seasons and
+  stays unknown for missing, inconsistent or previous-week indices. Around
+  a Monday API rollover, neutral training is safer than guessing a new season.
+  It never changes medals, averages, rankings or the competitive Colosseum flag.
 - Unknown/loading/error: no invented phase or ranking; stale clan and leader
   details are cleared. Missing scores remain unavailable, not zero.
+  Only loading shows the quiet three-dot animation; it stops for success,
+  errors and empty data, respects reduced motion and pauses offscreen.
+
+Calendar rules are documented by Supercell: [Seasons](https://support.supercell.com/clash-royale/en/articles/seasons.html)
+and [About Clan Wars](https://support.clashroyale.com/hc/en-us/articles/49484904148891-About-Clan-Wars).
+The preparation theme is an inference using these rules; active competition
+continues to follow the official API only.
 
 The leader banner always identifies the current official leader, including
 ties. Projection reorders the compact scoreboard by estimated score without
@@ -41,7 +56,8 @@ remain visible, with a compact scoreboard beneath the river.
 All eleven existing dashboard cards, conditional cards, copy controls, clan
 switches and links are retained below the river. Existing legacy/scraper-backed
 cards continue using the existing `/api/cwstats` data; the river never uses it.
-Backend routes have not been changed. The previous homepage is retained exactly
+The official endpoint adds only `week_context` display metadata; existing score
+calculations and fields are unchanged. The previous homepage is retained exactly
 at `/classic/`; analytics, joins and the test page remain at their existing URLs.
 
 The root homepage and `/v2/` currently share identical HTML copies; changes must
