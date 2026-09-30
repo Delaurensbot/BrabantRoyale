@@ -18,7 +18,25 @@ const assert = require("node:assert/strict");
   await page.route("**/api/**", (route) =>
     route.fulfill({ json: { ok: false, error: "Local fixture required" } }),
   );
-  await page.goto(process.env.V2_TEST_URL || "http://127.0.0.1:8765/v2/");
+  const target = process.env.V2_TEST_URL || "http://127.0.0.1:8765/";
+  const original = await page.goto(new URL("/classic/", target).href);
+  assert.equal(original.status(), 200, "Classic backup route must load");
+  assert.equal(await page.locator("#riverHero").count(), 0);
+  assert.equal(
+    await page.locator(".card").count(),
+    11,
+    "Classic dashboard preserved",
+  );
+  const alias = await page.goto(new URL("/v2/", target).href);
+  assert.equal(alias.status(), 200, "V2 alias must stay reachable");
+  await page.waitForFunction(() => typeof window.RiverV2 === "object");
+  assert.equal(await page.locator(".rv-brand").getAttribute("href"), "/");
+  assert.equal(
+    await page.getByRole("link", { name: "Origineel" }).getAttribute("href"),
+    "/classic/",
+  );
+  const home = await page.goto(target);
+  assert.equal(home.status(), 200, "V2 homepage must load");
   await page.waitForFunction(() => typeof window.RiverV2 === "object");
   const fixture = fs.readFileSync(
     path.join(__dirname, "v2_browser_fixture.js"),
@@ -207,7 +225,7 @@ const assert = require("node:assert/strict");
       await route.fulfill({ response });
     });
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.goto("http://127.0.0.1:8765/v2/");
+    await page.goto(target);
     await page.waitForFunction(
       () => document.querySelectorAll(".rv-lane").length > 0,
       null,
@@ -266,6 +284,26 @@ const assert = require("node:assert/strict");
     assert.deepEqual(errors, [], "Live-data runtime errors");
     console.log(
       `PASS: live production API payload rendered through V2 fetch pipeline (${liveData.overview_rows.length} clans, ${liveData.players.length} players).`,
+    );
+    await page.getByRole("link", { name: "Origineel" }).click();
+    await page.waitForURL("**/classic/");
+    await page.waitForFunction(
+      () =>
+        document.getElementById("updated").textContent.trim() !== "-" &&
+        document.querySelector("#overview tbody tr"),
+      null,
+      { timeout: 60000 },
+    );
+    assert.equal(await page.locator("#riverHero").count(), 0);
+    for (const row of liveData.overview_rows)
+      assert.ok(
+        (await page.locator("#overview").textContent()).includes(row.name),
+        `Classic live clan ${row.name} missing after load`,
+      );
+    assert.equal(await page.locator(".card").count(), 11);
+    assert.deepEqual(errors, [], "Classic live-data runtime errors");
+    console.log(
+      "PASS: Origineel navigation loads the retained classic dashboard with live API data.",
     );
   }
   await browser.close();

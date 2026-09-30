@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Brabant Royale · River Race</title>
+  <title>Clan War Stats</title>
   <style>
     :root {
       --bg: #0c0e16;
@@ -106,13 +106,8 @@
       h1 { font-size: 26px; }
     }
   </style>
-  <link rel="stylesheet" href="/v2/dashboard.css" />
-  <link rel="stylesheet" href="/v2/river.css" />
 </head>
 <body>
-  <section id="riverHero" aria-label="Interactieve River Race"></section>
-  <main id="dashboard">
-  <p class="v2-eyebrow">RACE DASHBOARD</p>
   <h1>Clan War Stats</h1>
   <div class="clanSwitch" id="clanSwitch"></div>
   <div class="muted" id="clanLabel"></div>
@@ -236,8 +231,6 @@
     </div>
   </div>
 
-</main>
-<script src="/v2/river.js"></script>
 <script>
   const el = (id) => document.getElementById(id);
   const CLANS = {
@@ -1408,11 +1401,7 @@
     noticeEl.style.display = "block";
   }
 
-  let v2RequestId = 0;
   async function fetchData() {
-    const requestId = ++v2RequestId;
-    window.RiverV2?.loading(currentClanTag);
-    try {
     el("errorBox").style.display = "none";
     el("status").textContent = `Loading ${clanName(currentClanTag)}...`;
 
@@ -1422,7 +1411,6 @@
       fetch(`/api/cwstats?clan=${encodeURIComponent(currentClanTag)}&t=${timestamp}`, { cache: "no-store" }).catch(() => null),
     ]);
     const officialData = await officialRes.json();
-    if (requestId !== v2RequestId) return;
     if (!officialRes.ok || !officialData?.ok) {
       const message = officialData?.error || `Officiële Clash Royale API error (${officialRes.status})`;
       el("status").textContent = "";
@@ -1437,8 +1425,6 @@
       if (legacyData?.ok) data = legacyData;
     }
 
-    if (requestId !== v2RequestId) return;
-    window.RiverV2?.update(officialData);
     renderClanAccessWarning(data);
     renderColosseumNotice({ ...data, race_state: officialData.race_state });
 
@@ -1512,13 +1498,6 @@
 
     el("updated").textContent = new Date().toLocaleString();
     el("status").textContent = "";
-    } catch (error) {
-      if (requestId !== v2RequestId) return;
-      window.RiverV2?.error("De officiële racedata kon niet worden geladen. Probeer opnieuw via Refresh.");
-      el("status").textContent = "";
-      el("errorBox").style.display = "block";
-      el("errorBox").textContent = `API error: ${error.message}`;
-    }
   }
 
   // Buttons

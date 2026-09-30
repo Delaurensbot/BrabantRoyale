@@ -1,6 +1,8 @@
 # River Race V2
 
-Open `/v2/` on this branch's Vercel Preview. `/` remains the original website.
+V2 is the homepage at `/`. `/v2/` remains an identical alias. The pre-rollout
+homepage is preserved at `/classic/`, linked by **Origineel** in the navigation.
+Both new entrypoints use the same `/v2/` scripts, styles and local art assets.
 
 ## Official war phases
 
@@ -39,12 +41,13 @@ remain visible, with a compact scoreboard beneath the river.
 All eleven existing dashboard cards, conditional cards, copy controls, clan
 switches and links are retained below the river. Existing legacy/scraper-backed
 cards continue using the existing `/api/cwstats` data; the river never uses it.
-Backend routes and the original pages have not been changed.
+Backend routes have not been changed. The previous homepage is retained exactly
+at `/classic/`; analytics, joins and the test page remain at their existing URLs.
 
-This is a standalone HTML experiment copied from the current dashboard. Until
-it is consolidated into shared components, functional changes to the original
-dashboard should also be reflected here. Preservation tests guard existing IDs,
-card counts, copy actions and helper functions.
+The root homepage and `/v2/` currently share identical HTML copies; changes must
+keep both in sync until they are consolidated. Preservation tests guard that
+identity, existing IDs, card counts, copy actions and helper functions against
+the retained classic page, plus its exact normalized content at main c9c78a9.
 
 ## Checks
 
@@ -55,7 +58,7 @@ Static hosting has no API functions; the browser fixture in
 It is never loaded by the website. Evaluate it in a local browser to exercise
 the real rendering pipeline, projection toggle, empty values and error states.
 
-`tests/verify_v2_browser.cjs` verifies the real browser flow, asset loading,
+`tests/verify_v2_browser.cjs` verifies `/`, `/v2/`, `/classic/`, the real browser flow, asset loading,
 projection movement, selection, tied ranks, unavailable data, 320–1440px
 layouts and reduced motion. Set `NODE_PATH` to the installed Playwright package
 directory when using the bundled runtime. `V2_BROWSER_EXECUTABLE` can select an
@@ -64,8 +67,9 @@ production API payload through the local V2 fetch pipeline; it does not modify
 production data. Screenshots are written outside the checkout by default.
 
 The branch incorporates current main so the existing dashboard and short clan
-chat summaries remain synchronized. The draft PR targets main. No production
-deployment or merge is part of this experiment.
+chat summaries remain synchronized. The user approved the homepage rollout on
+30 September 2026. PR #164 carries that rollout through the existing GitHub to
+Vercel deployment workflow.
 
 The environment and boats are baked 3D renders animated in the browser, not
 downloadable 3D meshes. All website art is served locally as optimized WebP;
