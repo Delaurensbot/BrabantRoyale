@@ -146,7 +146,7 @@
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Alle clans avg/projection</div>
+        <div class="title">Alle clans: gemiddeld → eindscore</div>
         <button data-copy="clanAvg">Copy</button>
       </div>
       <pre id="clanAvg" title="Klik om te kopieren">(loading...)</pre>
@@ -166,7 +166,7 @@
 
     <div class="card">
       <div class="cardHead">
-        <div class="title">Short story</div>
+        <div class="title">Kort clanbericht</div>
         <button data-copy="story">Copy</button>
       </div>
       <pre id="story" title="Klik om te kopieren">(loading...)</pre>
@@ -1167,22 +1167,8 @@
     if (data?.projection_share_text) return String(data.projection_share_text);
 
     const rows = Array.isArray(data?.overview_rows) ? data.overview_rows : [];
-    const current = rows.find((row) => normalizeClanTag(row?.tag) === currentClanTag) || {};
-    const average = current.avg_medals_per_deck != null
-      ? formatMetric(current.avg_medals_per_deck, 2)
-      : "-";
-    const projected = current.projected_medals != null ? String(Number(current.projected_medals)) : "-";
-    const medals = Number(current?.medals || 0);
-    const scoreScope = current?.score_scope === "colosseum_cumulative"
-      ? "cumulatief over het Colosseum-weekend"
-      : "alleen vandaag in de River Race";
-
-    return [
-      "Clan avg --> Projected",
-      `${current.name || data?.clan?.name || clanName(currentClanTag)} ${average} --> ${projected}`,
-      `Members: ${Number(data?.clan?.members || 0)} | War trophies: ${Number(data?.clan?.war_trophies || 0)}`,
-      `Current medals (${scoreScope}): ${medals}`,
-    ].join("\n\n");
+    if (!rows.length) return "Geen racedata beschikbaar.";
+    return "De clanvergelijking is tijdelijk niet beschikbaar.";
   }
 
   function makeOfficialRiskText(players) {
@@ -1225,7 +1211,7 @@
     const rank = data?.finish_outlook?.projected_rank || "-";
     const score = Number(data?.finish_outlook?.projected_finish || 0);
     const battles = Number(data?.finish_outlook?.battles_left || 0);
-    return `${data?.clan?.name || clanName(currentClanTag)} draait nu op een berekende ${rank}e plek met model-score ${score}. Open decks vandaag: ${battles}.`;
+    return `${data?.clan?.name || clanName(currentClanTag)}: verwachte eindstand ${rank}e met ${score} punten. Nog ${battles} aanvallen vandaag.`;
   }
 
   function renderDay1HighFameTable(players, text) {
@@ -1502,13 +1488,13 @@
 
     const storyText = buildOfficialShortStory(officialData);
     el("story").textContent = storyText || "(geen data)";
-    updateLength("clanAvg", formattedClanAvg);
+    updateLength("clanAvg", formattedClanAvg, 250);
     updateLength("battles", battlesText);
     updateLength("risk", riskText);
     updateLength("highFame", highFameText);
     updateLength("day1HighFame", day1Text);
     updateLength("day4", day4Text);
-    updateLength("story", storyText, 200);
+    updateLength("story", storyText, 250);
 
     el("updated").textContent = new Date().toLocaleString();
     el("status").textContent = "";
