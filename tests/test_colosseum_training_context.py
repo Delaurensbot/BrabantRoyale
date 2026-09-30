@@ -94,5 +94,6 @@ def test_endpoint_adds_preparation_context_without_changing_existing_fields(monk
     assert payload["race_state"]["period_type"] == "training"
     assert payload["race_state"]["is_colosseum_weekend"] is False
     assert payload["race_state"]["battle_day"] is None
-    assert payload["overview_rows"] == MODULE.build_overview_rows(race["clans"], race)
+    assert [{key: value for key, value in row.items() if key != "clan_access"}
+            for row in payload["overview_rows"]] == MODULE.build_overview_rows(race["clans"], race)
     assert payload["finish_outlook"]["projection_scope"] == "river_race_day"

@@ -65,6 +65,26 @@ keep both in sync until they are consolidated. Preservation tests guard that
 identity, existing IDs, card counts, copy actions and helper functions against
 the retained classic page, plus its exact normalized content at main c9c78a9.
 
+## Open-clan warnings
+
+An amber floating `!` marks a confirmed open clan from training day 3 onwards
+and during River Race / Colosseum battle days. It follows the boat in Live and
+Projection, and is repeated in the dock and selected-clan details. It does not
+appear on training days 1–2, an unknown phase, invite-only / closed clans, or
+missing/untrusted/inconsistent status. Animation respects reduced motion and
+the existing page/offscreen pause controls.
+
+The official endpoint adds `overview_rows[].clan_access` with `type`, tri-state
+`is_open` (`true`, `false`, `null`) and `source` (`official_api`, `unknown`).
+The already-fetched own-clan profile is reused. Only during the warning window,
+up to four opponents from the official race are queried in parallel through
+the same official API proxy, with a short 3-second request timeout each. These
+optional lookups have no cache: page load / Refresh checks their current status.
+Timeouts, invalid JSON, missing types and mismatched profile tags leave that
+clan unknown, not closed, and do not fail the rest of the race response.
+Training days 1–2 do not make additional opponent calls. Score fields, existing
+cards, scraper-backed legacy cards and the classic snapshot are not modified.
+
 ## Checks
 
 Run `python -m pytest -q` and `node --check v2/river.js`.

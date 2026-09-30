@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
 import json
@@ -14,6 +15,7 @@ MAX_DECKS_PER_PLAYER = 4
 MAX_CLAN_DECKS_PER_DAY = 200
 COLOSSEUM_PROJECTION_DAYS = 4
 CLAN_CHAT_LIMIT = 250
+CLAN_ACCESS_TIMEOUT = 3
 
 
 def normalize_tag(raw_tag: str) -> str:
@@ -23,11 +25,11 @@ def normalize_tag(raw_tag: str) -> str:
     return normalized if normalized in ALLOWED_CLANS else DEFAULT_CLAN_TAG
 
 
-def request_json(endpoint: str, api_key: str):
+def request_json(endpoint: str, api_key: str, timeout=20):
     response = requests.get(
         endpoint,
         headers={"Authorization": f"Bearer {api_key}"},
-        timeout=20,
+        timeout=timeout,
     )
     response.raise_for_status()
     return response.json() if response.content else {}
@@ -104,6 +106,82 @@ def battle_day_for_race(race_data):
 
 def normalize_clan_tag(value):
     return str(value or "").replace("#", "").upper()
+
+
+def open_clan_warning_period(race_data):
+    """Official phase only: third training day or an active battle period."""
+    period_type = str((race_data or {}).get("periodType") or "").lower()
+    if period_type in {"warday", "colosseum"}:
+        return True
+    period = (race_data or {}).get("periodIndex")
+    return (
+        period_type == "training"
+        and type(period) is int
+        and period >= 0
+        and period % 7 == 2
+    )
+
+
+def clan_access_status(profile, expected_tag):
+    """Unknown is distinct from closed; never interpret scraper/race fields."""
+    unknown = {"type": None, "is_open": None, "source": "unknown"}
+    if not isinstance(profile, dict):
+        return unknown
+    if normalize_clan_tag(profile.get("tag")) != expected_tag:
+        return unknown
+    clan_type = str(profile.get("type") or "").lower()
+    normalized = {
+        "open": "open", "inviteonly": "inviteOnly", "closed": "closed",
+    }.get(clan_type)
+    if normalized is None:
+        return unknown
+    return {"type": normalized, "is_open": normalized == "open", "source": "official_api"}
+
+
+def with_clan_access_status(rows, clan_tag, clan_data, race_data, api_key):
+    """Optional, per-request enrichment. No cache or changes to score calculations.
+
+    Reuse our existing clan profile. Only query opponents during the warning
+    period, at most four in parallel with short timeouts. An upstream failure
+    leaves that clan unknown without failing the race response.
+    """
+    profiles = {clan_tag: clan_access_status(clan_data, clan_tag)}
+    opponents = []
+    if open_clan_warning_period(race_data):
+        for row in rows[:5]:
+            candidate = normalize_clan_tag(row.get("tag"))
+            if (
+                candidate != clan_tag and candidate not in opponents
+                and 0 < len(candidate) <= 16
+                and candidate.isascii() and candidate.isalnum()
+            ):
+                opponents.append(candidate)
+                if len(opponents) == 4:
+                    break
+
+    def fetch_status(candidate):
+        try:
+            profile = request_json(
+                f"{ROYAL_API_BASE_URL}/clans/%23{candidate}", api_key,
+                timeout=CLAN_ACCESS_TIMEOUT,
+            )
+            return clan_access_status(profile, candidate)
+        except Exception:
+            # This optional lookup must not hide otherwise valid racedata.
+            return clan_access_status(None, candidate)
+
+    if opponents:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            profiles.update(zip(opponents, pool.map(fetch_status, opponents)))
+    return [
+        {
+            **row,
+            "clan_access": profiles.get(
+                normalize_clan_tag(row.get("tag")), clan_access_status(None, ""),
+            ),
+        }
+        for row in rows
+    ]
 
 
 def completed_points_for_clan(race_data, clan_tag, battle_day):
@@ -452,6 +530,9 @@ class handler(BaseHTTPRequestHandler):
             is_colosseum = is_colosseum_race(race_data)
             battle_day = battle_day_for_race(race_data)
             overview_rows = build_overview_rows(race_clans, race_data)
+            overview_rows = with_clan_access_status(
+                overview_rows, clan_tag, clan_data, race_data, api_key,
+            )
             players = build_players(members, participant_rows)
             finish_outlook = build_finish_outlook(
                 clan_tag,
