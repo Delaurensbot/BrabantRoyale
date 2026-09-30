@@ -58,6 +58,41 @@
       String(url).includes("test-clan-prototype") ? data : { ok: true },
   });
   await fetchData();
+  const hero = document.getElementById("riverHero");
+  assert(
+    hero.getAttribute("aria-busy") === "false",
+    "Loading must finish after data",
+  );
+  const normalFetch = window.fetch;
+  let releaseFetch;
+  const delayed = new Promise((resolve) => {
+    releaseFetch = resolve;
+  });
+  window.fetch = async (url) => {
+    await delayed;
+    return normalFetch(url);
+  };
+  const refresh = fetchData();
+  assert(
+    hero.getAttribute("aria-busy") === "true",
+    "Real refresh must mark loading",
+  );
+  assert(
+    !document.querySelector(".rv-loader").hidden,
+    "Loading indicator visible",
+  );
+  assert(
+    document.querySelectorAll(".rv-loader i").length === 3,
+    "Clean three-dot loader",
+  );
+  releaseFetch();
+  await refresh;
+  window.fetch = normalFetch;
+  assert(hero.getAttribute("aria-busy") === "false", "Refresh stops loading");
+  assert(
+    document.querySelector(".rv-loader").hidden,
+    "Completed request hides loader",
+  );
   assert(
     document.querySelectorAll(".rv-lane").length === 5,
     "Five boats must render",
@@ -115,6 +150,11 @@
   RiverV2.loading("GPCLVLPP");
   assert(!document.querySelector(".rv-lane"), "Stale boats after clan switch");
   RiverV2.error("Fixture error");
+  assert(hero.getAttribute("aria-busy") === "false", "Error stops busy state");
+  assert(
+    document.querySelector(".rv-loader").hidden,
+    "Error is not an endless spinner",
+  );
   assert(
     document.querySelector(".rv-state").textContent === "Fixture error",
     "Error not shown",
@@ -204,6 +244,65 @@
       .getAttribute("aria-pressed") === "true",
     "Training cannot enter projection",
   );
+  RiverV2.update({
+    ...data,
+    race_state: { period_type: "training", period_index: 23 },
+    week_context: {
+      mode: "colosseum",
+      source: "official_api_indices_and_season_calendar",
+      week: 4,
+      season_weeks: 4,
+    },
+  });
+  assert(
+    hero.dataset.phase === "practice",
+    "Colosseum preparation stays training",
+  );
+  assert(
+    hero.dataset.world === "colosseum",
+    "Colosseum art is already shown during training",
+  );
+  assert(
+    document
+      .querySelector(".rv-leader")
+      .textContent.includes("Trainingsdag 3 voor Colosseum"),
+    "Preparation banner missing",
+  );
+  assert(
+    document
+      .querySelector(".rv-outlook-grid")
+      .textContent.includes("4 strijddagen"),
+    "Upcoming weekend information missing",
+  );
+  assert(
+    document.querySelector('[data-mode="projection"]').disabled,
+    "Preparation cannot activate projection",
+  );
+  assert(
+    [...document.querySelectorAll(".rv-boat-badge")].every(
+      (node) => node.textContent === "—",
+    ),
+    "Preparation cannot activate ranking",
+  );
+  assert(
+    !document
+      .querySelector(".rv-profile dl")
+      .textContent.includes("Aanvallen cumulatief"),
+    "Preparation must not reuse competitive cumulative stats",
+  );
+  RiverV2.update({
+    ...data,
+    race_state: { period_type: "training", period_index: 23 },
+    week_context: { mode: "river_race" },
+  });
+  assert(
+    hero.dataset.world === "river",
+    "Regular training must restore river art",
+  );
+  assert(
+    !document.querySelector(".rv-outlook-grid").textContent,
+    "Regular training clears Colosseum details",
+  );
   RiverV2.update({ ...data, race_state: { period_type: "unknown" } });
   assert(
     document.querySelector("#riverHero").dataset.phase === "unknown",
@@ -270,6 +369,11 @@
       !document.querySelector(".rv-lane") &&
         !document.querySelector(".rv-leader").textContent,
       "Empty phase clears boats and leader",
+    );
+    assert(
+      hero.getAttribute("aria-busy") === "false" &&
+        document.querySelector(".rv-loader").hidden,
+      "Empty data is not loading",
     );
   }
   RiverV2.update(data);
