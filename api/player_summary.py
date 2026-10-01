@@ -22,6 +22,15 @@ def normalize_player_tag(raw_tag: str) -> str:
     return clean.upper()
 
 
+def summarize_card_levels(cards: list[dict]) -> dict:
+    summary = {"14": 0, "15": 0, "16": 0}
+    for card in cards or []:
+        level = str(card.get("level") or "")
+        if level in summary:
+            summary[level] += 1
+    return summary
+
+
 def fetch_player_summary(pid: str) -> dict:
     api_key = os.environ.get("CLASH_ROYALE_API_KEY")
     if not api_key:
@@ -45,6 +54,7 @@ def fetch_player_summary(pid: str) -> dict:
         "pid": clean_pid,
         "acc_lvl": str(data.get("expLevel") or "-"),
         "cw2_wins": str(data.get("warDayWins") or 0),
+        "card_level_counts": summarize_card_levels(data.get("cards") or []),
         "url": f"https://royaleapi.com/player/{clean_pid}",
     }
 

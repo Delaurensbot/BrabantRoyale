@@ -1165,14 +1165,29 @@
     return Math.round((total / perfectWeeks.length) * 100) / 100;
   }
 
-  async function fetchPlayerAccountLevel(playerTag) {
-    if (!playerTag) return '-';
+  async function fetchPlayerSummary(playerTag) {
+    if (!playerTag) {
+      return {
+        accountLevel: '-',
+        cardLevelCounts: { 14: 0, 15: 0, 16: 0 },
+      };
+    }
+
     const res = await fetch(`/api/player_summary?pid=${encodeURIComponent(playerTag)}`);
     const json = await res.json();
     if (!res.ok || !json.ok) {
-      throw new Error(json.error || 'Kon account level niet laden');
+      throw new Error(json.error || 'Kon spelerinfo niet laden');
     }
-    return json?.player?.acc_lvl || '-';
+
+    const counts = json?.player?.card_level_counts || {};
+    return {
+      accountLevel: json?.player?.acc_lvl || '-',
+      cardLevelCounts: {
+        14: Number(counts['14'] ?? 0),
+        15: Number(counts['15'] ?? 0),
+        16: Number(counts['16'] ?? 0),
+      },
+    };
   }
 
   function normalizeRoyalApiPlayerTag(playerTag) {
@@ -1247,8 +1262,11 @@
       const displayTag = normalizedTag ? `#${normalizedTag}` : '-';
 
       let accountLevel = '-';
+      let cardLevelCounts = { 14: 0, 15: 0, 16: 0 };
       try {
-        accountLevel = await fetchPlayerAccountLevel(playerTag);
+        const playerSummary = await fetchPlayerSummary(playerTag);
+        accountLevel = playerSummary.accountLevel;
+        cardLevelCounts = playerSummary.cardLevelCounts;
       } catch (err) {
         console.error(err);
       }
@@ -1260,6 +1278,9 @@
         `Longest streak of 16 attacks: ${longestStreak}`,
         `Highest score in history: ${Number.isFinite(highestScore) ? highestScore : '-'}`,
         `Player account level: ${accountLevel}`,
+        `Cards Level 16: ${cardLevelCounts[16]}`,
+        `Cards Level 15: ${cardLevelCounts[15]}`,
+        `Cards Level 14: ${cardLevelCounts[14]}`,
         `Player ID: ${displayTag}`,
       ];
       list.innerHTML = items.map((text) => `<li>${text}</li>`).join('');
