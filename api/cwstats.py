@@ -3,8 +3,10 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 import re
+import os
 
 from bs4 import BeautifulSoup
+import requests
 
 try:
     from api import strategy_engine
@@ -583,6 +585,47 @@ def pick_clan_config(path: str):
     return get_clan_config(params.get("clan", [""])[0])
 
 
+def fetch_official_race_summary(clan_tag: str):
+    api_key = os.environ.get("CLASH_ROYALE_API_KEY")
+    if not api_key:
+        return {}
+
+    clean_tag = re.sub(r"[^A-Za-z0-9]", "", clan_tag or "").upper()
+    if not clean_tag:
+        return {}
+
+    endpoint = f"https://proxy.royaleapi.dev/v1/clans/%23{clean_tag}/currentriverrace"
+    response = requests.get(
+        endpoint,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json() if response.content else {}
+    clans = payload.get("clans", []) if isinstance(payload, dict) else []
+
+    rows = {}
+    for row in clans:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("name") or "").strip()
+        participants = row.get("participants") or []
+        if not name or not isinstance(participants, list):
+            continue
+        decks_used = sum(
+            _compact_number(str(p.get("decksUsedToday", ""))) or 0
+            for p in participants
+            if isinstance(p, dict)
+        )
+        decks_total = len(participants) * 4
+        rows[_normalize_clan_name(name)] = {
+            "decks_used_today": decks_used,
+            "decks_total_today": decks_total,
+        }
+
+    return rows
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -630,6 +673,11 @@ class handler(BaseHTTPRequestHandler):
 
             clans = parse_clan_overview_from_race_soup(race_soup)
             cwstats_rows = cwstats_race_context.get("rows_by_name") or {}
+            official_race_rows = {}
+            try:
+                official_race_rows = fetch_official_race_summary(clan_config.get("tag") or "")
+            except Exception:
+                official_race_rows = {}
 
             if not clans and cwstats_rows:
                 clans = [
@@ -651,7 +699,7 @@ class handler(BaseHTTPRequestHandler):
             for clan in clans:
                 cw_row = cwstats_rows.get(_normalize_clan_name(clan.name))
                 if not cw_row:
-                    continue
+                    cw_row = {}
 
                 clan.avg_medals_per_deck = cw_row.get("fame_avg")
                 if clan.boat_points in (None, 0):
@@ -670,6 +718,13 @@ class handler(BaseHTTPRequestHandler):
                     # Boat column on the official race page. Move that score to
                     # Medals so the overview ranking stays correct.
                     clan.current_medals = clan.boat_points
+
+                if clan.decks_used_today is None or clan.decks_total_today is None:
+                    official_row = official_race_rows.get(_normalize_clan_name(clan.name)) or {}
+                    if clan.decks_used_today is None:
+                        clan.decks_used_today = official_row.get("decks_used_today")
+                    if clan.decks_total_today is None:
+                        clan.decks_total_today = official_row.get("decks_total_today")
 
             players = parse_player_rows_from_race_soup(race_soup)
 
