@@ -1,10 +1,12 @@
 from http.server import BaseHTTPRequestHandler
 import json
 from datetime import datetime, timezone
+import os
 from urllib.parse import parse_qs, urlparse
 import re
 
 from bs4 import BeautifulSoup
+import requests
 
 try:
     from api import strategy_engine
@@ -583,6 +585,43 @@ def pick_clan_config(path: str):
     return get_clan_config(params.get("clan", [""])[0])
 
 
+def fetch_official_race_rows(clan_tag: str):
+    api_key = os.environ.get("CLASH_ROYALE_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing CLASH_ROYALE_API_KEY environment variable.")
+
+    clean_tag = str(clan_tag or "").replace("#", "").upper()
+    if not clean_tag:
+        raise RuntimeError("Missing clan tag.")
+
+    encoded_tag = f"%23{clean_tag}"
+    endpoint = f"https://proxy.royaleapi.dev/v1/clans/{encoded_tag}/currentriverrace"
+    response = requests.get(
+        endpoint,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json() if response.content else {}
+
+    rows = {}
+    for row in payload.get("clans", []) or []:
+        participants = row.get("participants", []) or []
+        decks_used_today = sum(int(p.get("decksUsedToday") or 0) for p in participants)
+        decks_total_today = len(participants) * 4
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+
+        rows[_normalize_clan_name(name)] = {
+            "name": name,
+            "decks_used_today": decks_used_today,
+            "decks_total_today": decks_total_today,
+        }
+
+    return rows
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -628,8 +667,30 @@ class handler(BaseHTTPRequestHandler):
                 cwstats_race_context = {}
                 cwstats_players = []
 
+            official_race_rows = {}
+            try:
+                official_race_rows = fetch_official_race_rows(clan_config.get("tag"))
+            except Exception as official_error:
+                warnings.append(f"Kon official API race data niet ophalen: {official_error}")
+
             clans = parse_clan_overview_from_race_soup(race_soup)
             cwstats_rows = cwstats_race_context.get("rows_by_name") or {}
+
+            if not clans and official_race_rows:
+                clans = [
+                    ClanOverview(
+                        name=str(row.get("name") or ""),
+                        decks_used_today=row.get("decks_used_today"),
+                        decks_total_today=row.get("decks_total_today"),
+                        avg_medals_per_deck=None,
+                        projected_medals=None,
+                        boat_points=None,
+                        current_medals=None,
+                        trophies=None,
+                    )
+                    for row in official_race_rows.values()
+                    if row.get("name")
+                ]
 
             if not clans and cwstats_rows:
                 clans = [
@@ -649,6 +710,11 @@ class handler(BaseHTTPRequestHandler):
 
             is_colosseum_weekend = bool(cwstats_race_context.get("is_colosseum_weekend"))
             for clan in clans:
+                official_row = official_race_rows.get(_normalize_clan_name(clan.name))
+                if official_row:
+                    clan.decks_used_today = official_row.get("decks_used_today")
+                    clan.decks_total_today = official_row.get("decks_total_today")
+
                 cw_row = cwstats_rows.get(_normalize_clan_name(clan.name))
                 if not cw_row:
                     continue
