@@ -135,7 +135,11 @@ def clan_access_status(profile, expected_tag):
     }.get(clan_type)
     if normalized is None:
         return unknown
-    return {"type": normalized, "is_open": normalized == "open", "source": "official_api"}
+    members = profile.get("members")
+    if isinstance(members, bool) or not isinstance(members, int) or not 0 <= members <= 50:
+        members = None
+    return {"type": normalized, "is_open": normalized == "open", "source": "official_api",
+            "members": members}
 
 
 def with_clan_access_status(rows, clan_tag, clan_data, race_data, api_key):

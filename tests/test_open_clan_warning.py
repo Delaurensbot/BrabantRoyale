@@ -135,3 +135,10 @@ def test_endpoint_still_returns_racedata_when_an_opponent_lookup_fails(monkeypat
     assert [{key: value for key, value in row.items() if key != "clan_access"}
             for row in payload["overview_rows"]] == MODULE.build_overview_rows(race["clans"], race)
     assert payload["finish_outlook"]["score_available"] is True
+
+
+@pytest.mark.parametrize("members,expected", [(0, 0), (49, 49), (50, 50), (None, None), ("49", None), (-1, None), (51, None), (True, None)])
+def test_member_count_only_uses_valid_official_profile_value(members, expected):
+    status = MODULE.clan_access_status({"tag": "#AAA", "type": "inviteOnly", "members": members}, "AAA")
+    assert status["members"] == expected
+    assert status["source"] == "official_api"

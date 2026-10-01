@@ -385,8 +385,9 @@
         i === 4
           ? { type: null, is_open: null, source: "unknown" }
           : {
-              type: ["open", "inviteOnly", "open", "closed"][i],
-              is_open: i === 0 || i === 2,
+              type: ["inviteOnly", "open", "inviteOnly", "closed"][i],
+              is_open: i === 1,
+              members: 49,
               source: "official_api",
             },
     })),
@@ -425,13 +426,13 @@
     document
       .querySelector(".rv-boat")
       .getAttribute("aria-label")
-      .includes("Deze clan staat open"),
+      .includes("Deze clan staat op uitnodiging en heeft minder dan 50 leden"),
     "Warning must be accessible on boat",
   );
   assert(
     document
       .querySelector(".rv-profile dl")
-      .textContent.includes("Open · let op"),
+      .textContent.includes("Alleen op uitnodiging · minder dan 50 leden"),
     "Open status missing in selected-clan details",
   );
   document.querySelector('[data-mode="projection"]').click();
@@ -440,8 +441,8 @@
   assert(
     document
       .querySelector(".rv-profile dl")
-      .textContent.includes("Alleen op uitnodiging"),
-    "Invite-only is distinct from open",
+      .textContent.includes("Open"),
+    "Open is distinct from invite-only",
   );
   document.querySelector('.rv-dock-row[data-clan="DDD"]').click();
   assert(
@@ -449,6 +450,8 @@
     "Failed lookup is not closed",
   );
   for (const invalid of [
+    ...[50, null, undefined, "49", -1, 49.5].map((members) => ({ type: "inviteOnly", is_open: false, source: "official_api", members })),
+    { type: "inviteOnly", is_open: false, source: "scraper", members: 49 },
     { type: "open", is_open: true, source: "scraper" },
     { type: "open", is_open: false, source: "official_api" },
     undefined,
@@ -472,5 +475,5 @@
   RiverV2.error("Fixture warning reset");
   assert(warnings() === 0, "Error must not retain stale warnings");
   RiverV2.update(data);
-  return "PASS: data integration, preserved dashboard, projection/live, Colosseum/training, loading/errors and phase-gated official open-clan warnings";
+  return "PASS: data integration, preserved dashboard, projection/live, Colosseum/training, loading/errors and phase-gated official invite-only clan capacity warnings";
 })();
