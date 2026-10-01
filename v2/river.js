@@ -144,10 +144,17 @@
       ? access.type
       : null;
   };
+  const memberCount = (row) => {
+    const access = row.clan_access;
+    return access?.source === "official_api" &&
+      Number.isInteger(access.members) && access.members >= 0 && access.members <= 50
+      ? access.members : null;
+  };
+  const memberLabel = (row) => memberCount(row) === null
+    ? "Onbekend" : `${memberCount(row)} / 50`;
   const openWarning = (row, view = phase()) =>
-    accessType(row) === "inviteOnly" &&
-    Number.isInteger(row.clan_access.members) &&
-    row.clan_access.members >= 0 && row.clan_access.members < 50 &&
+    accessType(row) === "open" &&
+    memberCount(row) !== null && memberCount(row) <= 49 &&
     (view.competitive || (view.kind === "practice" && view.day === 3));
   function profile(entries) {
     const active = entries.find((item) => item.key === selected),
@@ -165,11 +172,12 @@
         [
           "Clanstatus · API",
           {
-            open: "Open",
-            inviteOnly: openWarning(row) ? "Alleen op uitnodiging · minder dan 50 leden" : "Alleen op uitnodiging",
+            open: openWarning(row) ? "Open - minder dan 50 leden" : "Open",
+            inviteOnly: "Alleen op uitnodiging",
             closed: "Gesloten",
           }[accessType(row)] || "Onbekend",
         ],
+        ["Leden", memberLabel(row)],
         ["Huidige score", fmt(score(row, "medals"))],
         ...(phase().competitive
           ? [["Verwachte score", fmt(score(row, "projected_medals"))]]
@@ -393,7 +401,7 @@
         badge.setAttribute("aria-hidden", "true");
         const warning = el("span", "rv-open-warning", "!");
         warning.setAttribute("aria-hidden", "true");
-        warning.title = "Deze clan staat op uitnodiging en heeft minder dan 50 leden";
+        warning.title = "Deze clan staat open en heeft minder dan 50 leden";
         warning.hidden = true;
         button.append(wake, image, badge, warning);
         button.addEventListener("click", () => {
@@ -429,7 +437,7 @@
         .querySelector(".rv-boat")
         .setAttribute(
           "aria-label",
-          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten.${openWarning(row, view) ? " Deze clan staat op uitnodiging en heeft minder dan 50 leden." : ""} Bekijk clandetails`,
+          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten.${openWarning(row, view) ? " Deze clan staat open en heeft minder dan 50 leden." : ""} Bekijk clandetails`,
         );
       lane.querySelector(".rv-open-warning").hidden = !openWarning(row, view);
       lane.querySelector(".rv-boat-badge").textContent = rank;
@@ -462,14 +470,14 @@
         el(
           "small",
           "",
-          `${own ? "JOUW CLAN · " : ""}${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
+          `${own ? "JOUW CLAN · " : ""}${memberCount(row) === null ? "Leden onbekend" : memberLabel(row) + " leden"} · ${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
         ),
       );
       if (openWarning(row, view)) {
         name
           .querySelector("strong")
           .append(el("span", "rv-open-label", " ! PLEK VRIJ"));
-        item.title = "Deze clan staat op uitnodiging en heeft minder dan 50 leden";
+        item.title = "Deze clan staat open en heeft minder dan 50 leden";
       }
       const points = el("span", "rv-dock-points");
       points.append(

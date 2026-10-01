@@ -65,12 +65,12 @@ keep both in sync until they are consolidated. Preservation tests guard that
 identity, existing IDs, card counts, copy actions and helper functions against
 the retained classic page, plus its exact normalized content at main c9c78a9.
 
-## Invite-only clan warnings
+## Open-clan warnings
 
-An amber floating `!` marks a confirmed invite-only clan with fewer than 50 members from training day 3 onwards
+An amber floating `!` marks a confirmed open clan with fewer than 50 members from training day 3 onwards
 and during River Race / Colosseum battle days. It follows the boat in Live and
 Projection, and is repeated in the dock and selected-clan details. It does not
-appear on training days 1–2, an unknown phase, open / closed or full clans, or
+appear on training days 1–2, an unknown phase, invite-only / closed or full clans, or
 missing/untrusted/inconsistent status. Animation respects reduced motion and
 the existing page/offscreen pause controls.
 
@@ -111,3 +111,5 @@ The environment and boats are baked 3D renders animated in the browser, not
 downloadable 3D meshes. All website art is served locally as optimized WebP;
 no third-party runtime, remote image service or render library is required.
 Art prompts and saved assets are documented in `assets/ART_DIRECTION.md`.
+
+Official member counts are shown as `48 / 50` in selected-clan details and the dock; unavailable counts display as unknown. The warning applies to open clans with 49 or fewer members.

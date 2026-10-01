@@ -385,9 +385,9 @@
         i === 4
           ? { type: null, is_open: null, source: "unknown" }
           : {
-              type: ["inviteOnly", "open", "inviteOnly", "closed"][i],
-              is_open: i === 1,
-              members: 49,
+              type: ["open", "inviteOnly", "open", "closed"][i],
+              is_open: i === 0 || i === 2,
+              members: i === 2 ? 48 : 49,
               source: "official_api",
             },
     })),
@@ -426,32 +426,36 @@
     document
       .querySelector(".rv-boat")
       .getAttribute("aria-label")
-      .includes("Deze clan staat op uitnodiging en heeft minder dan 50 leden"),
+      .includes("Deze clan staat open en heeft minder dan 50 leden"),
     "Warning must be accessible on boat",
   );
   assert(
     document
       .querySelector(".rv-profile dl")
-      .textContent.includes("Alleen op uitnodiging · minder dan 50 leden"),
+      .textContent.includes("Open - minder dan 50 leden"),
     "Open status missing in selected-clan details",
   );
+  assert(document.querySelector(".rv-profile dl").textContent.includes("49 / 50"), "Selected clan shows official members");
+  assert(document.querySelectorAll(".rv-dock-row")[2].textContent.includes("48 / 50 leden"), "Dock shows members below 49");
   document.querySelector('[data-mode="projection"]').click();
   assert(warnings() === 2, "Projection must retain open status");
   document.querySelector('.rv-dock-row[data-clan="AAA"]').click();
   assert(
     document
       .querySelector(".rv-profile dl")
-      .textContent.includes("Open"),
-    "Open is distinct from invite-only",
+      .textContent.includes("Alleen op uitnodiging"),
+    "Invite-only is distinct from open",
   );
   document.querySelector('.rv-dock-row[data-clan="DDD"]').click();
   assert(
     document.querySelector(".rv-profile dl").textContent.includes("Onbekend"),
     "Failed lookup is not closed",
   );
+  assert(!document.querySelector(".rv-profile dl").textContent.includes("null / 50"), "Missing members are not fabricated");
   for (const invalid of [
-    ...[50, null, undefined, "49", -1, 49.5].map((members) => ({ type: "inviteOnly", is_open: false, source: "official_api", members })),
-    { type: "inviteOnly", is_open: false, source: "scraper", members: 49 },
+    { type: "inviteOnly", is_open: false, source: "official_api", members: 49 },
+    ...[50, null, undefined, "49", -1, 49.5].map((members) => ({ type: "open", is_open: true, source: "official_api", members })),
+    { type: "open", is_open: true, source: "scraper", members: 49 },
     { type: "open", is_open: true, source: "scraper" },
     { type: "open", is_open: false, source: "official_api" },
     undefined,
@@ -475,5 +479,5 @@
   RiverV2.error("Fixture warning reset");
   assert(warnings() === 0, "Error must not retain stale warnings");
   RiverV2.update(data);
-  return "PASS: data integration, preserved dashboard, projection/live, Colosseum/training, loading/errors and phase-gated official invite-only clan capacity warnings";
+  return "PASS: data integration, preserved dashboard, projection/live, Colosseum/training, loading/errors and phase-gated official open clan capacity warnings";
 })();

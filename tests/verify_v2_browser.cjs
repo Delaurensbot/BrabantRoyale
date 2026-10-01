@@ -175,7 +175,7 @@ const assert = require("node:assert/strict");
           ...row,
           medals: 10000,
           projected_medals: 20000,
-          clan_access: { type: "inviteOnly", is_open: false, source: "official_api", members: 49 },
+          clan_access: { type: "open", is_open: true, source: "official_api", members: 49 },
         })),
       });
       document.querySelector('[data-mode="projection"]').click();
