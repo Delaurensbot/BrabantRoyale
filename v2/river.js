@@ -145,7 +145,7 @@
       : null;
   };
   const openWarning = (row, view = phase()) =>
-    accessType(row) === "inviteOnly" &&
+    accessType(row) === "open" &&
     Number.isInteger(row.clan_access.members) &&
     row.clan_access.members >= 0 && row.clan_access.members < 50 &&
     (view.competitive || (view.kind === "practice" && view.day === 3));
@@ -165,8 +165,8 @@
         [
           "Clanstatus · API",
           {
-            open: "Open",
-            inviteOnly: openWarning(row) ? "Alleen op uitnodiging · minder dan 50 leden" : "Alleen op uitnodiging",
+            open: openWarning(row) ? "Open - minder dan 50 leden" : "Open",
+            inviteOnly: "Alleen op uitnodiging",
             closed: "Gesloten",
           }[accessType(row)] || "Onbekend",
         ],
@@ -393,7 +393,7 @@
         badge.setAttribute("aria-hidden", "true");
         const warning = el("span", "rv-open-warning", "!");
         warning.setAttribute("aria-hidden", "true");
-        warning.title = "Deze clan staat op uitnodiging en heeft minder dan 50 leden";
+        warning.title = "Deze clan staat open en heeft minder dan 50 leden";
         warning.hidden = true;
         button.append(wake, image, badge, warning);
         button.addEventListener("click", () => {
@@ -429,7 +429,7 @@
         .querySelector(".rv-boat")
         .setAttribute(
           "aria-label",
-          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten.${openWarning(row, view) ? " Deze clan staat op uitnodiging en heeft minder dan 50 leden." : ""} Bekijk clandetails`,
+          `${row.name || "Clan"}, ${view.competitive ? "plaats " + rank : "geen competitieve rang"}, ${fmt(value)} punten.${openWarning(row, view) ? " Deze clan staat open en heeft minder dan 50 leden." : ""} Bekijk clandetails`,
         );
       lane.querySelector(".rv-open-warning").hidden = !openWarning(row, view);
       lane.querySelector(".rv-boat-badge").textContent = rank;
@@ -469,7 +469,7 @@
         name
           .querySelector("strong")
           .append(el("span", "rv-open-label", " ! PLEK VRIJ"));
-        item.title = "Deze clan staat op uitnodiging en heeft minder dan 50 leden";
+        item.title = "Deze clan staat open en heeft minder dan 50 leden";
       }
       const points = el("span", "rv-dock-points");
       points.append(
