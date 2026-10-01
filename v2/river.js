@@ -144,10 +144,17 @@
       ? access.type
       : null;
   };
+  const memberCount = (row) => {
+    const access = row.clan_access;
+    return access?.source === "official_api" &&
+      Number.isInteger(access.members) && access.members >= 0 && access.members <= 50
+      ? access.members : null;
+  };
+  const memberLabel = (row) => memberCount(row) === null
+    ? "Onbekend" : `${memberCount(row)} / 50`;
   const openWarning = (row, view = phase()) =>
     accessType(row) === "open" &&
-    Number.isInteger(row.clan_access.members) &&
-    row.clan_access.members >= 0 && row.clan_access.members < 50 &&
+    memberCount(row) !== null && memberCount(row) <= 49 &&
     (view.competitive || (view.kind === "practice" && view.day === 3));
   function profile(entries) {
     const active = entries.find((item) => item.key === selected),
@@ -170,6 +177,7 @@
             closed: "Gesloten",
           }[accessType(row)] || "Onbekend",
         ],
+        ["Leden", memberLabel(row)],
         ["Huidige score", fmt(score(row, "medals"))],
         ...(phase().competitive
           ? [["Verwachte score", fmt(score(row, "projected_medals"))]]
@@ -462,7 +470,7 @@
         el(
           "small",
           "",
-          `${own ? "JOUW CLAN · " : ""}${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
+          `${own ? "JOUW CLAN · " : ""}${memberCount(row) === null ? "Leden onbekend" : memberLabel(row) + " leden"} · ${fmt(row.decks_used_today)} / ${fmt(row.decks_total_today)} aanvallen vandaag · ${fmt(row.avg_medals_per_deck)} pnt/deck${cumulative ? " (alle decks)" : ""}`,
         ),
       );
       if (openWarning(row, view)) {

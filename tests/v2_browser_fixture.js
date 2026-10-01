@@ -387,7 +387,7 @@
           : {
               type: ["open", "inviteOnly", "open", "closed"][i],
               is_open: i === 0 || i === 2,
-              members: 49,
+              members: i === 2 ? 48 : 49,
               source: "official_api",
             },
     })),
@@ -435,6 +435,8 @@
       .textContent.includes("Open - minder dan 50 leden"),
     "Open status missing in selected-clan details",
   );
+  assert(document.querySelector(".rv-profile dl").textContent.includes("49 / 50"), "Selected clan shows official members");
+  assert(document.querySelectorAll(".rv-dock-row")[2].textContent.includes("48 / 50 leden"), "Dock shows members below 49");
   document.querySelector('[data-mode="projection"]').click();
   assert(warnings() === 2, "Projection must retain open status");
   document.querySelector('.rv-dock-row[data-clan="AAA"]').click();
@@ -449,6 +451,7 @@
     document.querySelector(".rv-profile dl").textContent.includes("Onbekend"),
     "Failed lookup is not closed",
   );
+  assert(!document.querySelector(".rv-profile dl").textContent.includes("null / 50"), "Missing members are not fabricated");
   for (const invalid of [
     { type: "inviteOnly", is_open: false, source: "official_api", members: 49 },
     ...[50, null, undefined, "49", -1, 49.5].map((members) => ({ type: "open", is_open: true, source: "official_api", members })),

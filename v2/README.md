@@ -111,3 +111,5 @@ The environment and boats are baked 3D renders animated in the browser, not
 downloadable 3D meshes. All website art is served locally as optimized WebP;
 no third-party runtime, remote image service or render library is required.
 Art prompts and saved assets are documented in `assets/ART_DIRECTION.md`.
+
+Official member counts are shown as `48 / 50` in selected-clan details and the dock; unavailable counts display as unknown. The warning applies to open clans with 49 or fewer members.
